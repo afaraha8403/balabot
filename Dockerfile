@@ -64,6 +64,13 @@ RUN set -eux; \
 # the image's existing dashboard/main-hermes services and joining the user bundle.
 COPY docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 
+# s6 requires the service scripts to be executable. Do NOT trust the checkout's
+# file mode: Windows filesystems have no exec bit, so a repo cloned there builds
+# with 0644 while a Linux clone builds with 0755 — the tunnel would then start
+# for one developer and silently fail for another. Set it explicitly.
+RUN chmod +x /etc/s6-overlay/s6-rc.d/cloudflared/run \
+             /etc/s6-overlay/s6-rc.d/cloudflared/finish
+
 # Inherits the official ENTRYPOINT's job: validate the hard dependency, then
 # exec /opt/hermes/docker/entrypoint-dispatch.sh so s6-overlay still owns PID 1.
 ENTRYPOINT ["/usr/local/bin/balabot-entrypoint.sh"]
