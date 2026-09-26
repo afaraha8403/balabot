@@ -39,6 +39,31 @@ RUN chmod +x /usr/local/bin/balabot-entrypoint.sh \
     && python3 -m compileall -q /opt/balabot/balabot \
     && python3 -c "import balabot, balabot.bootstrap, balabot.jev, balabot.memory_relevance"
 
+# --- Cloudflare tunnel: baked in, DORMANT by default -------------------------
+# Every install ships the tunnel pre-wired so the operator only has to add a
+# token; nothing runs until they do. The s6 slot is declared but reports DOWN
+# when no token is configured — see docker/s6-rc.d/cloudflared/.
+#
+# Pinned by VERSION **and** SHA256, not just a URL. This binary is an egress
+# path into the container, so an implicit upgrade must never happen underneath
+# a user — the same reasoning as pinning the base Hermes tag above.
+#
+# amd64 deliberately: that checksum was verified against
+# cloudflared-linux-amd64. Another architecture must supply its own checksum
+# rather than silently trusting a different artifact.
+ARG CLOUDFLARED_VERSION=2026.9.3
+ARG CLOUDFLARED_SHA256=77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2
+RUN set -eux; \
+    curl -fsSL -o /usr/local/bin/cloudflared \
+        "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64"; \
+    echo "${CLOUDFLARED_SHA256}  /usr/local/bin/cloudflared" | sha256sum -c -; \
+    chmod +x /usr/local/bin/cloudflared; \
+    /usr/local/bin/cloudflared --version
+
+# Merges into /etc/s6-overlay/s6-rc.d/, adding the cloudflared service alongside
+# the image's existing dashboard/main-hermes services and joining the user bundle.
+COPY docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
+
 # Inherits the official ENTRYPOINT's job: validate the hard dependency, then
 # exec /opt/hermes/docker/entrypoint-dispatch.sh so s6-overlay still owns PID 1.
 ENTRYPOINT ["/usr/local/bin/balabot-entrypoint.sh"]

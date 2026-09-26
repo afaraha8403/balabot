@@ -101,6 +101,22 @@ provision with config, `SOUL.md`, workspace rules and installed skills; the prin
 config carries `memory.provider=holographic` and an **empty** telegram token; and — when
 a key is present — a live model round-trip returns `BALABOT_OK`.
 
+### The baked-in Cloudflare tunnel
+
+```bash
+bash tests/e2e/verify_tunnel.sh balabot:test
+```
+
+The tunnel ships pre-wired and **dormant**, and this proves it rather than asserting it:
+
+- with no token, the s6 slot reports **DOWN**, no `cloudflared` process exists, and
+  nothing is exposed;
+- with a token, the service starts — and the token value appears in **neither the
+  container log nor any process command line**;
+- a token supplied as a **mounted secret file** works, and an unreadable token file is
+  reported loudly instead of being mistaken for dormancy;
+- the binary in the image is the **pinned version**.
+
 > **Pitfall worth knowing:** overriding the entrypoint with `--entrypoint sh` skips the
 > image's `cont-init` hooks, which fix directory ownership before Hermes (a privilege-drop
 > shim) runs. That produces a misleading `Permission denied: .../profiles/<x>/cron` which

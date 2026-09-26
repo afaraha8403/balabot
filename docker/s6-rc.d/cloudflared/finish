@@ -1,0 +1,33 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+#
+# Companion to ./run — same pattern as the dashboard service.
+#
+# Why this exists: without it, s6-supervise would treat the run script's
+# intentional exit-0 (no token → stay dormant) as a crash and restart it in a
+# tight loop. Exiting 125 tells s6-supervise "permanently failed, do not
+# restart", which is equivalent to `s6-svc -O`. The slot then reports DOWN,
+# which is the honest state when dormancy is intentional.
+#
+# When a token IS configured and the tunnel later dies, we exit 0 so
+# s6-supervise restarts it — that is the whole point of supervising it.
+#
+# Finish-script arguments: $1=run exit code, $2=signal, $3=service name, $4=pgid.
+
+set -eu
+
+token="${CLOUDFLARE_TUNNEL_TOKEN:-}"
+
+if [ -z "$token" ] && [ -n "${CLOUDFLARE_TUNNEL_TOKEN_FILE:-}" ]; then
+    [ -r "${CLOUDFLARE_TUNNEL_TOKEN_FILE}" ] && token="configured"
+fi
+
+[ -n "$token" ] || token="${TUNNEL_TOKEN:-}"
+
+if [ -z "$token" ]; then
+    # Intentional dormancy → permanent-failure marker, no restart loop.
+    exit 125
+fi
+
+# Enabled → allow s6-supervise to bring it back up.
+exit 0

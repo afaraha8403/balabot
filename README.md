@@ -88,6 +88,7 @@ restarts agents, so supervision is load-bearing here, not decoration.
 - [docs/architecture.md](docs/architecture.md) — agents, hierarchy, memory, signals, the Jev role
 - [docs/session-continuity.md](docs/session-continuity.md) — one continuous thread without transcript rot
 - [docs/model-selection.md](docs/model-selection.md) — provider/model selection and per-mode overrides
+- [docs/cloudflare-tunnel.md](docs/cloudflare-tunnel.md) — the baked-in, dormant-by-default Cloudflare tunnel
 - [TESTING.md](TESTING.md) — unit tests, the architecture simulations, **21 user-usage scenarios**, the mutation check that proves they can fail, and the Docker E2E harness
 
 ## Defaults

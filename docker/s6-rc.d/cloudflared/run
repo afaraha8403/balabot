@@ -1,0 +1,65 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+#
+# BalaBot — Cloudflare tunnel service.
+#
+# DORMANT BY DEFAULT. Every install ships this slot ready to go and pre-wired;
+# nothing runs until the operator supplies a token. The slot is always declared
+# so s6 supervises it and `s6-svstat` reports the truth: with no token the run
+# script exits 0 and the companion finish script returns 125 ("permanent
+# failure, do not restart"), so the slot shows as DOWN rather than flapping in a
+# restart loop. This mirrors the dashboard service's conditional pattern.
+#
+# The token is a SECRET. It is never passed in argv, so it can never appear in
+# `ps` output, and it is never printed to the log — not even a prefix or a
+# length. Sources, first one wins:
+#   1. CLOUDFLARE_TUNNEL_TOKEN        env var (e.g. from /opt/data/.env)
+#   2. CLOUDFLARE_TUNNEL_TOKEN_FILE   Docker/K8s secret mounted as a file
+#   3. TUNNEL_TOKEN                   cloudflared's own variable, for compatibility
+#
+# Enable it: supply a token, then restart the container.
+# Full walkthrough: docs/cloudflare-tunnel.md
+
+set -eu
+
+token="${CLOUDFLARE_TUNNEL_TOKEN:-}"
+
+if [ -z "$token" ] && [ -n "${CLOUDFLARE_TUNNEL_TOKEN_FILE:-}" ]; then
+    if [ -r "${CLOUDFLARE_TUNNEL_TOKEN_FILE}" ]; then
+        token="$(cat "${CLOUDFLARE_TUNNEL_TOKEN_FILE}")"
+    else
+        # Misconfiguration, not dormancy — say so plainly rather than pretending
+        # the tunnel is merely switched off.
+        echo "[cloudflared] CLOUDFLARE_TUNNEL_TOKEN_FILE is set but not readable:" >&2
+        echo "[cloudflared]   ${CLOUDFLARE_TUNNEL_TOKEN_FILE}" >&2
+        echo "[cloudflared] The tunnel will NOT start. Fix the mount, then restart." >&2
+        exit 0
+    fi
+fi
+
+if [ -z "$token" ]; then
+    token="${TUNNEL_TOKEN:-}"
+fi
+
+if [ -z "$token" ]; then
+    echo "[cloudflared] DORMANT — no tunnel token configured, so nothing is exposed."
+    echo "[cloudflared] To enable: set CLOUDFLARE_TUNNEL_TOKEN (or point"
+    echo "[cloudflared] CLOUDFLARE_TUNNEL_TOKEN_FILE at a secret file), then restart."
+    echo "[cloudflared] See docs/cloudflare-tunnel.md."
+    exit 0
+fi
+
+# NO token material below this line. Cloudflare's own troubleshooting advice is
+# to treat the token as a credential; it must never reach a log or a transcript.
+echo "[cloudflared] token present — starting tunnel (ingress is managed remotely)"
+
+# with-contenv repopulates HOME from /init as /root. Reset it before dropping
+# privileges so any state cloudflared writes lands under the persistent volume.
+export HOME=/opt/data
+
+# cloudflared picks the token up from the environment, so it stays out of argv.
+# A token-managed tunnel needs no root; drop to hermes like every other service.
+export TUNNEL_TOKEN="$token"
+
+[ "$(id -u)" = 0 ] || exec /usr/local/bin/cloudflared tunnel --no-autoupdate run
+exec s6-setuidgid hermes /usr/local/bin/cloudflared tunnel --no-autoupdate run
