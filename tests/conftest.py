@@ -14,11 +14,22 @@ from __future__ import annotations
 
 import copy
 import json
+import pathlib
+import sys
+
 import pytest
 
-from balabot import bootstrap as bootstrap_mod
-from balabot.jev import Jev
-from balabot.memory_relevance import Candidate
+# Make the repo root importable regardless of how pytest is invoked. Locally a
+# PYTHONPATH export can mask this; CI has none, and pytest only inserts the
+# test file's own directory (tests/) into sys.path because tests/ is not a
+# package. Without this, `import balabot` fails with ModuleNotFoundError.
+_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from balabot import bootstrap as bootstrap_mod  # noqa: E402
+from balabot.jev import Jev  # noqa: E402
+from balabot.memory_relevance import Candidate  # noqa: E402
 
 
 TEMPLATE = """\
