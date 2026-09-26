@@ -4,10 +4,21 @@ services:
     build: .
     image: balabot:latest
 
-    # The official Hermes entrypoint delegates to s6-overlay's /init as PID 1.
-    # `init: true` keeps that contract intact and reaps orphaned children —
-    # without it, Hermes warns that children accumulate as zombies.
-    init: true
+    # DO NOT set `init: true` here.
+    #
+    # The Hermes entrypoint delegates to s6-overlay's /init and REQUIRES PID 1
+    # (`$$ -eq 1`) to do it. `init: true` injects docker-init as PID 1, so the
+    # entrypoint sees it is not PID 1, skips s6 entirely and falls back to a
+    # direct bootstrap — logging "Supervised services are unavailable in this
+    # runtime". That silently costs the whole supervision tree: the dashboard,
+    # the cloudflared tunnel, and the principal's ability to restart agents.
+    #
+    # s6-overlay IS the init system, so it already reaps orphaned children;
+    # an extra init is both unnecessary and actively harmful.
+    #
+    #   verified 2026-09-26: with `init: true`, /proc/1/comm = docker-init and
+    #   the log warns that s6 was skipped. Without it, /init owns PID 1 and all
+    #   services register.
 
     # Secrets come from .env (never baked into the image). Required:
     #   TYPESAFE_API_KEY  (hard dependency — the container exits without it)
@@ -30,9 +41,11 @@ services:
       - balabot-state:/opt/data
 
     ports:
-      # Exposed for the dashboard/API surface. No UI is required for first-run
-      # provisioning — the config is the deliverable.
-      - "9121:9121"
+      # Only relevant when the dashboard is enabled (HERMES_DASHBOARD=1), which
+      # is OFF by default — nothing listens on this port out of the box.
+      # 9119 is the image's own default (verified in the dashboard service's
+      # run script: ${HERMES_DASHBOARD_PORT:-9119}), not 9121.
+      - "9119:9119"
 
     restart: unless-stopped
 
