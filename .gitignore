@@ -1,0 +1,22 @@
+# Secrets NEVER get committed.
+.env
+.env.*
+# ...but the TEMPLATE must ship, or `cp .env.example .env` fails for every
+# new clone.
+!.env.example
+*.pem
+*.key
+
+# Local state / build artifacts
+__pycache__/
+*.pyc
+*.db
+*.sqlite3
+.venv/
+venv/
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

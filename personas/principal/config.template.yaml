@@ -1,0 +1,113 @@
+model:
+  default: deepseek/deepseek-v4.1-flash
+  provider: openrouter
+browser:
+  backend: browser-use
+  cdp_url: ws://localhost:9222/devtools/browser/8329066a-fac1-444e-944e-db05e3414979
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  provider: holographic
+plugins:
+  enabled:
+  - texting-style
+computer_use:
+  backend: cua
+_config_version: 40
+platform_toolsets:
+  cli:
+  - browser
+  - clarify
+  - code_execution
+  - cronjob
+  - delegation
+  - file
+  - image_gen
+  - memory
+  - session_search
+  - skills
+  - terminal
+  - todo
+  - tts
+  - vision
+  - web
+  api_server:
+  - browser
+  - clarify
+  - code_execution
+  - cronjob
+  - delegation
+  - file
+  - image_gen
+  - memory
+  - session_search
+  - skills
+  - terminal
+  - todo
+  - tts
+  - vision
+  - web
+known_plugin_toolsets:
+  cli:
+  - a2a
+  - spotify
+known_builtin_toolsets:
+  cli:
+  - browser
+  - clarify
+  - code_execution
+  - computer_use
+  - context_engine
+  - cronjob
+  - delegation
+  - discord
+  - discord_admin
+  - file
+  - homeassistant
+  - image_gen
+  - memory
+  - session_search
+  - skills
+  - spotify
+  - stt
+  - terminal
+  - todo
+  - tts
+  - video
+  - video_gen
+  - vision
+  - web
+  - x_search
+  - yuanbao
+gateway:
+  api_server:
+    enabled: true
+    host: 127.0.0.1
+    port: 9121
+secrets:
+  sources:
+  - command
+  profile_alias: true
+  command:
+    enabled: true
+    command: C:/Users/ali/AppData/Local/hermes/hermes-agent/venv/Scripts/python.exe C:/Users/ali/workspace/grokbot-web/orgs/secret_source.py
+    helper_timeout_seconds: 6.0
+    override_existing: false
+mcp_servers:
+  agent_computer:
+    command: docker
+    args:
+    - exec
+    - -i
+    - grokbot-computer
+    - cua-driver
+    - mcp
+    - --socket
+    - /run/cua-driver/steve.sock
+    timeout: 180
+    connect_timeout: 60
+telegram:
+  bot_token: ''
+  allowed_chats: []
+terminal:
+  cwd: C:/Users/ali/workspace/principal

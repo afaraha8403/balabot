@@ -1,0 +1,40 @@
+# BalaBot — ONE service, ONE container. No sidecars, no second service.
+services:
+  balabot:
+    build: .
+    image: balabot:latest
+
+    # The official Hermes entrypoint delegates to s6-overlay's /init as PID 1.
+    # `init: true` keeps that contract intact and reaps orphaned children —
+    # without it, Hermes warns that children accumulate as zombies.
+    init: true
+
+    # Secrets come from .env (never baked into the image). Required:
+    #   TYPESAFE_API_KEY  (hard dependency — the container exits without it)
+    #   OPENROUTER_API_KEY
+    env_file:
+      - .env
+
+    # The inherited default command is Hermes' interactive CLI, which exits
+    # cleanly when stdin is not a terminal. Keep a TTY attached so
+    # `docker compose up` lands you in a live principal agent.
+    # For unattended/daemon operation, configure a messaging platform
+    # (e.g. telegram.bot_token) and run the gateway instead — see README.
+    stdin_open: true
+    tty: true
+
+    volumes:
+      # Persist the whole Hermes home. The official image sets HERMES_HOME=/opt/data
+      # (verified) — NOT ~/.hermes — so this volume holds profiles, per-agent memory
+      # stores, the governor's ledger, and the persona workspaces together.
+      - balabot-state:/opt/data
+
+    ports:
+      # Exposed for the dashboard/API surface. No UI is required for first-run
+      # provisioning — the config is the deliverable.
+      - "9121:9121"
+
+    restart: unless-stopped
+
+volumes:
+  balabot-state:

@@ -1,0 +1,18 @@
+# Never bake secrets or local state into the image.
+.env
+.env.*
+*.db
+*.sqlite3
+__pycache__/
+*.pyc
+.venv/
+venv/
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+docs/
+README.md
+personas/*/SOUL.md.state
+*.log
