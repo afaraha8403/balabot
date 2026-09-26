@@ -83,14 +83,14 @@ class Router:
         """
         questions = {}
         for f in candidates:
-            questions[f"match:{f.session_id}"] = {"primitive": "noul",
+            questions[f"match:{f.session_id}"] = {"type": "noul",
                 "question": f"Does candidate session {f.session_id} cover the user's intent? {request}"}
-        questions["needs_new_session"] = {"primitive": "noul",
+        questions["needs_new_session"] = {"type": "noul",
                                           "question": "Does the user's request start a new topic? " + request}
         response = self.client.system_one(request, questions)
         # Record the primitives ACTUALLY used so the simulation can police them.
         for name, q in questions.items():
-            self._decisions.setdefault(name.rsplit(":", 1)[-1], []).append(q["primitive"])
+            self._decisions.setdefault(name.rsplit(":", 1)[-1], []).append(q["type"])
 
         matches: list[tuple[str, float]] = []
         for f in candidates:
@@ -143,7 +143,7 @@ class FakeJev:
     def system_one(self, state, questions, **kw):
         answers = {}
         for ref, q in questions.items():
-            prim = q["primitive"]
+            prim = q["type"]
             self.used_primitives.append(prim)
             if ref.startswith("match:"):
                 answers[ref] = {"type": "noul", "noul": self.match_scores[ref.split(":", 1)[1]]}

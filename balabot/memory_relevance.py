@@ -76,7 +76,10 @@ def score_candidates(
     # One Noul per candidate: absolute yes/no, so "all low" is a state we
     # can detect (a Choice would force a winner where none deserves one).
     questions = {
-        c.ref: {"primitive": "noul", "question": f"Is this fact relevant to the current context? Fact: {c.text}"}
+        c.ref: {
+            "type": "noul",
+            "instructions": f"Is this fact relevant to the current context? Fact: {c.text}",
+        }
         for c in candidates
     }
     response = client.system_one(state, questions)

@@ -95,7 +95,7 @@ def check_connection_refused_raises_incident(s: _Scenario) -> None:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     client = Jev(api_key=API_KEY)
-    exc = assert_raises(JevAPIError, client.system_one, "state", {"q": {"primitive": "noul"}})
+    exc = assert_raises(JevAPIError, client.system_one, "state", {"q": {"type": "noul"}})
     expect("unreachable" in str(exc).lower() or "error" in str(exc).lower(),
            f"failure message should name the outage, got: {exc}")
 
@@ -106,7 +106,7 @@ def check_timeout_raises_after_bounded_retries(s: _Scenario) -> None:
     # A timeout is a transient NETWORK failure in jev.py: it is caught as a
     # requests-side RequestException subclass, retried MAX_TRANSIENT_RETRIES
     # times, and then re-raised wrapped in a JevAPIError — a loud failure.
-    exc = assert_raises(JevAPIError, client.system_one, "state", {"q": {"primitive": "noul"}})
+    exc = assert_raises(JevAPIError, client.system_one, "state", {"q": {"type": "noul"}})
     expect(session.calls == 1 + MAX_TRANSIENT_RETRIES,
            f"transient timeout must be retried exactly {MAX_TRANSIENT_RETRIES} time(s), "
            f"got {session.calls - 1} retries")
@@ -121,7 +121,7 @@ def check_timeout_raises_after_bounded_retries(s: _Scenario) -> None:
 def check_500_retries_then_fails_loud(s: _Scenario) -> None:
     session = _FlakySession([(500, "internal error")])
     client = Jev(api_key=API_KEY, session=session)
-    exc = assert_raises(JevAPIError, client.system_one, "state", {"q": {"primitive": "noul"}})
+    exc = assert_raises(JevAPIError, client.system_one, "state", {"q": {"type": "noul"}})
     expect("500" in str(exc), f"failure must name the HTTP status, got: {exc}")
     expect(session.calls == 1 + MAX_TRANSIENT_RETRIES,
            "a 5xx is transient: retry, then fail loud")
@@ -134,7 +134,7 @@ def check_4xx_fails_immediately_without_retry(s: _Scenario) -> None:
     for status in (400, 401, 403, 422):
         session = _FlakySession([(status, "nope")])
         client = Jev(api_key=API_KEY, session=session)
-        assert_raises(JevAPIError, client.system_one, "state", {"q": {"primitive": "noul"}})
+        assert_raises(JevAPIError, client.system_one, "state", {"q": {"type": "noul"}})
         expect(session.calls == 1,
                f"HTTP {status} must fail on the FIRST attempt — retried "
                f"{session.calls - 1} time(s); a bad request repeated is still bad")
@@ -143,7 +143,7 @@ def check_4xx_fails_immediately_without_retry(s: _Scenario) -> None:
 def check_429_is_transient_then_fails_loud(s: _Scenario) -> None:
     session = _FlakySession([(429, "slow down")])
     client = Jev(api_key=API_KEY, session=session)
-    assert_raises(JevAPIError, client.system_one, "state", {"q": {"primitive": "noul"}})
+    assert_raises(JevAPIError, client.system_one, "state", {"q": {"type": "noul"}})
     expect(session.calls == 1 + MAX_TRANSIENT_RETRIES,
            "429 is transient: bounded retry, then fail loud")
 
@@ -203,7 +203,7 @@ def check_no_default_answer_on_error(s: _Scenario) -> None:
     """A 503-exhausted client must not yield a result — the caller cannot proceed."""
     session = _FlakySession([(503, "overloaded")])
     client = Jev(api_key=API_KEY, session=session)
-    exc = assert_raises(JevAPIError, client.system_one, "state", {"q": {"primitive": "noul"}})
+    exc = assert_raises(JevAPIError, client.system_one, "state", {"q": {"type": "noul"}})
     # No hidden re-entry: exactly the bounded retries, then stop. A default
     # answer would need an extra call that never raises — there isn't one.
     expect(session.calls == 1 + MAX_TRANSIENT_RETRIES,

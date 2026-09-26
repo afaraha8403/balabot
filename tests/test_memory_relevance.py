@@ -32,7 +32,16 @@ def test_uses_one_noul_per_candidate_not_a_choice(fake_jev):
     # One question per candidate — and each is a noul (never a Choice).
     assert set(questions) == {"a", "b", "c"}
     for q in questions.values():
-        assert q["primitive"] == "noul"
+        # The live API selects the primitive with a `type` discriminator, and
+        # rejects a Noul carrying neither `criteria` nor `instructions`.
+        # Verified 2026-09-26 against api.typesafe.ai/v1/systemone.
+        assert q["type"] == "noul"
+        assert "primitive" not in q, (
+            "the live API rejects 'primitive' with union_tag_not_found"
+        )
+        assert ("criteria" in q) or ("instructions" in q), (
+            "a Noul must carry criteria or instructions"
+        )
 
 
 def test_re_look_invoked_when_nothing_clears_threshold(fake_jev):

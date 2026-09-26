@@ -54,7 +54,7 @@ class Ledger:
         number admitted. NEVER raises for low scores — a miss here is the
         one failure this architecture refuses to make."""
         questions = {
-            item["ref"]: {"primitive": "noul",
+            item["ref"]: {"type": "noul",
                           "question": "Is this decision-worthy? " + item["text"]}
             for item in items
         }

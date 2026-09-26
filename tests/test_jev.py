@@ -39,7 +39,7 @@ SCORE_RESPONSE = {
     }
 }
 
-QUESTIONS = {"x": {"primitive": "noul"}}
+QUESTIONS = {"x": {"type": "noul", "instructions": "Is this state acceptable?"}}
 
 
 @pytest.fixture(autouse=True)

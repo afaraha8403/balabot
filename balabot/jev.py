@@ -95,8 +95,8 @@ class Jev:
         `questions` is a dict of named typed questions, e.g.::
 
             {
-                "decision_worthy": {"primitive": "noul", ...},
-                "best_label": {"primitive": "choice", "criteria": {...}},
+                "decision_worthy": {"type": "noul", "instructions": "..."},
+                "best_label": {"type": "choice", "criteria": {...}},
             }
 
         Returns the parsed response dict (typed answers with
@@ -171,7 +171,7 @@ if __name__ == "__main__":  # pragma: no cover
     args = parser.parse_args()
     client = Jev(api_key=os.environ.get("TYPESAFE_API_KEY"))
     try:
-        answer = client.system_one(args.state, {"example": {"primitive": "noul"}}, shadow=args.shadow)
+        answer = client.system_one(args.state, {"example": {"type": "noul", "instructions": "Is this state acceptable?"}}, shadow=args.shadow)
         print(json.dumps(answer, indent=2))
     except JevError as exc:
         raise SystemExit(f"FAIL LOUD: {exc}")

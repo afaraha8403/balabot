@@ -44,7 +44,7 @@ class ScriptedJev:
         self._call_index += 1
         answers = {}
         for ref, q in questions.items():
-            self.calls.append((self._call_index, ref, q["primitive"]))
+            self.calls.append((self._call_index, ref, q["type"]))
             answers[ref] = {"type": "noul",
                             "noul": self.script[(self._call_index, ref)]}
         return {"answers": answers}
@@ -167,7 +167,7 @@ def check_threshold_calibrated_per_shape() -> None:
     # The shipped ladder scores ONLY with noul questions, so only the Noul
     # calibration is ever applied to it.
     expect("primitive\": \"noul" in score_candidates.__doc__ or
-           '"primitive": "noul"' in __import__("inspect").getsource(score_candidates),
+           '"type": "noul"' in __import__("inspect").getsource(score_candidates),
            "score_candidates must pin the noul primitive in its questions")
     # And the shipped default is a Noul threshold, documented as such.
     import inspect
