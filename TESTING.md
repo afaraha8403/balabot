@@ -1,12 +1,12 @@
 # Testing
 
-BalaBot ships with three layers of verification. The simulations are part of the
+BalaBot ships with four layers of verification. The simulations are part of the
 test suite by design — they encode the architecture's hard promises as executable
 scenarios, not prose.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                       # unit tests + all simulations
+pytest -q                       # unit tests + all simulations + all user scenarios
 ```
 
 ## 1. Unit + integration tests (`tests/`)
@@ -35,7 +35,60 @@ names which promise broke, and exits non-zero on any failure.
 | `sim_memory_ladder.py` | Recall is never gated; ONE Jev call with one Noul per candidate; thresholds are per question shape; nothing clears → the re-look ladder runs; still nothing → an explicit "no relevant memory" rather than weak facts injected as if they mattered. |
 | `sim_frustration_pipeline.py` | dictionary → Jev → governor → principal. The net over-captures freely, Jev does the precision, the signal is **evidence not a verdict** (never auto-punishes), and the metric is the **frustration rate** measured before/after. |
 
-## 3. Docker end-to-end (`tests/e2e/`)
+## 3. User-usage scenarios (`tests/simulations/sim_user_scenarios.py`)
+
+Where the simulations above protect a single *invariant*, these are **end-to-end
+user journeys** — a person talks to the agents and gets an outcome, exercising the
+abilities in `docs/architecture.md`. 21 top-level scenarios, each its own pytest
+test, each also runnable standalone:
+
+```bash
+python tests/simulations/sim_user_scenarios.py
+```
+
+| Scenario | The user-visible ability it exercises |
+|---|---|
+| `day_one_install` | principal + governor present before you say anything |
+| `missing_key_refuses_to_start` | no Jev key → refuses, naming the dependency |
+| `principal_onboards_first_agent` | the first agent you talk to creates your first worker |
+| `roster_routes_to_the_right_agent` | "that's B's area — I've told them" |
+| `delegate_keeps_agent_available_and_reviews` | parent stays responsive, then reviews the child |
+| `subagent_never_sees_parent_history` | sub-agent isolation and invisibility |
+| `peer_creation_on_user_request` | any persistent agent may create a peer, because you asked |
+| `peer_creation_without_user_request_refused` | …and may not when you didn't |
+| `principal_restarts_a_frozen_agent` | live process query beats a lying status |
+| `principal_cannot_touch_secrets` | secrets and grants are the user's alone |
+| `user_overrules_the_principal` | only the user may replace the principal |
+| `frustration_pipeline_end_to_end` | all four layers, measured as a **rate** before/after |
+| `false_positive_does_not_punish` | a sensor is not a verdict — nothing auto-punishes |
+| `jev_outage_stops_the_growth_loop_loudly` | fail loud, never silently degrade |
+| `decision_gate_fails_open` | bloat is recoverable; a lost decision is not |
+| `ledger_is_okf_and_shared_with_subagents` | OKF-shaped, readable by sub-agents too |
+| `memory_recall_is_wide_and_jev_prunes` | recall never gated; Jev prunes the injection risk |
+| `memory_poisoning_is_screened` | injection screened FIRST, before relevance |
+| `irreversible_action_never_left_to_system_one` | send/spend/delete/publish keep a reasoner |
+| `per_mode_model_selection` | per-mode overrides leave the default intact |
+| `session_new_vs_resume_after_topic_shift` | spans, one verdict per candidate, index-and-retrieve |
+
+### Proving the scenarios can fail
+
+A green suite is worthless if it cannot go red. `mutation_check.py` breaks one
+documented ability at a time and asserts the guarding scenario **fails**:
+
+```bash
+python tests/simulations/mutation_check.py
+# RESULT: 8/8 mutations detected — every scenario genuinely fails when its ability breaks
+```
+
+Mutations covered: gate fails closed · permissions stop enforcing · principal
+allowed to read secrets · roster stops routing · skill edited without classifying
+the cause · injection screening disabled · Jev silently degrades · sub-agents
+locked out of the ledger. A MISSED mutation means that scenario is decorative.
+
+The file is deliberately not named `test_*.py`/`sim_*.py` so pytest never
+collects it — it breaks the system on purpose.
+
+## 4. Docker end-to-end (`tests/e2e/`)
 
 Drives the **real image** through the **real entrypoint**:
 
