@@ -1,0 +1,29 @@
+# Offline checks only: unit tests + simulations. No secrets, no real model
+# calls, no full Docker build (the E2E harness in tests/e2e/ covers that).
+name: tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Run simulations
+        run: |
+          python -m compileall -q balabot
+          python -c "import balabot, balabot.bootstrap, balabot.jev, balabot.memory_relevance"

@@ -129,7 +129,13 @@ class Jev:
                     },
                     timeout=self.timeout_s,
                 )
-            except requests.RequestException as exc:  # transient network
+            except (requests.RequestException, TimeoutError, OSError) as exc:
+                # Transient transport failure. TimeoutError/OSError are caught
+                # alongside requests' own exceptions because a timeout can
+                # surface from the socket layer un-wrapped — and an un-wrapped
+                # timeout escaping as a bare TimeoutError would break the
+                # contract that every Jev failure is a JevError naming Jev.
+                # Still fail loud: no fallback, no default answer.
                 if attempt >= MAX_TRANSIENT_RETRIES:
                     raise JevAPIError(f"Jev unreachable after retries: {exc}") from exc
                 attempt += 1

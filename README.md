@@ -88,6 +88,7 @@ restarts agents, so supervision is load-bearing here, not decoration.
 - [docs/architecture.md](docs/architecture.md) — agents, hierarchy, memory, signals, the Jev role
 - [docs/session-continuity.md](docs/session-continuity.md) — one continuous thread without transcript rot
 - [docs/model-selection.md](docs/model-selection.md) — provider/model selection and per-mode overrides
+- [TESTING.md](TESTING.md) — unit tests, the architecture simulations, and the Docker E2E harness
 
 ## Defaults
 
