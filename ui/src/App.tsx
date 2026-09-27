@@ -13,6 +13,8 @@ import {ClickableCard} from '@astryxdesign/core/ClickableCard';
 import {Card} from '@astryxdesign/core/Card';
 import {Grid} from '@astryxdesign/core/Grid';
 import {useStreamingText} from '@astryxdesign/core/hooks';
+import {Collapsible} from '@astryxdesign/core/Collapsible';
+import {Switch} from '@astryxdesign/core/Switch';
 import {ThinkingOrb} from 'thinking-orbs';
 import {
   activeTool,
@@ -73,7 +75,7 @@ import {
   IconSkills,
   IconWarning,
 } from './icons';
-import {loadSessions, saveSessions, loadLastBot, saveLastBot, newSession} from './sessions';
+import {loadSessions, saveSessions, loadLastBot, saveLastBot, newSession, loadShowThinking, saveShowThinking} from './sessions';
 
 /** Opening suggestions shown on the empty state. */
 const PROMPTS = [
@@ -81,6 +83,42 @@ const PROMPTS = [
   'Summarize where things stand',
   'What needs my decision?',
 ];
+
+/**
+ * The agent's reasoning ("thinking") stream. Never renders as an ordinary
+ * chat bubble: it is a collapsible disclosure, visually demoted to muted
+ * supporting text, collapsed by default. Only mounted when the user has
+ * turned "Show thinking" on.
+ */
+function ThinkingBlock({
+  text,
+  isLive,
+}: {
+  text: string;
+  isLive?: boolean;
+}) {
+  if (!text.trim()) return null;
+  const label = isLive ? 'Thinking…' : 'Thinking';
+  return (
+    <Collapsible
+      defaultIsOpen={false}
+      trigger={
+        <HStack gap={2} vAlign="center">
+          <Token label={label} size="sm" color="purple" />
+          {isLive ? (
+            <ThinkingOrb state="working" size={32} theme="dark" />
+          ) : null}
+        </HStack>
+      }
+    >
+      <Card variant="muted" padding={3}>
+        <Text type="supporting" color="secondary">
+          <Markdown isStreaming={false}>{text}</Markdown>
+        </Text>
+      </Card>
+    </Collapsible>
+  );
+}
 
 // Onboarding is a conversation, not a wizard (Grok Bot spec).
 const ONBOARDING: ChatMessage = {
@@ -124,6 +162,11 @@ export default function App() {
   // Tool activity for the turn in flight. Mirrored into a ref because send()
   // must read the final list after the stream resolves, not a stale closure.
   const [toolCalls, setToolCalls] = useState<ToolProgress[]>([]);
+  // Agent reasoning ("thinking"): OFF by default — the user opts in when they
+  // want to see how the AI reasoned. The choice persists across reloads.
+  const [showThinking, setShowThinking] = useState<boolean>(() => loadShowThinking());
+  const [streamThinking, setStreamThinking] = useState('');
+  const thinkingRef = useRef('');
   const toolCallsRef = useRef<ToolProgress[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -258,6 +301,8 @@ export default function App() {
 
     patchSession(session.id, s => ({...s, messages: history, title: s.messages.length === 0 ? text.slice(0, 40) : s.title}));
     setStreamText('');
+    setStreamThinking('');
+    thinkingRef.current = '';
     setToolCalls([]);
     toolCallsRef.current = [];
     setIsStreaming(true);
@@ -294,12 +339,20 @@ export default function App() {
           toolCallsRef.current = mergeToolProgress(toolCallsRef.current, t);
           setToolCalls(toolCallsRef.current);
         },
+        r => {
+          // The agent's private reasoning stream arrives on its own channel
+          // (`delta.reasoning_content`) and is buffered separately from the
+          // answer — it is never merged into the visible reply text.
+          thinkingRef.current = r;
+          setStreamThinking(r);
+        },
       );
       const finalMsg: ChatMessage = {
         role: 'assistant',
         content: finalText,
         at: Date.now(),
         toolCalls: toolCallsRef.current.length ? toolCallsRef.current : undefined,
+        thinking: thinkingRef.current || undefined,
       };
       patchSession(session.id, s => ({...s, messages: [...s.messages, finalMsg]}));
     } catch (err) {
@@ -411,6 +464,16 @@ export default function App() {
       }
       endContent={
         <HStack gap={2} vAlign="center">
+          {/* Diagnosis toggle: reveals the agent's reasoning stream. Off by
+              default; the choice is persisted so it survives a reload. */}
+          <Switch
+            label="Show thinking"
+            value={showThinking}
+            onChange={checked => {
+              setShowThinking(checked);
+              saveShowThinking(checked);
+            }}
+          />
           <StatusDot
             variant={healthOk === null ? 'neutral' : healthOk ? 'success' : 'error'}
             label={healthOk ? 'API connected' : 'API unreachable'}
@@ -617,6 +680,9 @@ export default function App() {
                         m.content
                       ) : (
                         <VStack gap={2}>
+                          {showThinking && m.thinking ? (
+                            <ThinkingBlock text={m.thinking} />
+                          ) : null}
                           {m.toolCalls?.length ? (
                             <ChatToolCalls
                               calls={m.toolCalls.map(t => ({
@@ -646,6 +712,9 @@ export default function App() {
                       </Text>
                     }>
                     <VStack gap={2}>
+                      {showThinking && streamThinking ? (
+                        <ThinkingBlock text={streamThinking} isLive />
+                      ) : null}
                       {toolCalls.length ? (
                         <ChatToolCalls
                           calls={toolCalls.map(t => ({

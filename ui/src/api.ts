@@ -30,6 +30,8 @@ export type ChatMessage = {
   at: number;
   /** Tool calls the assistant made while producing this message. */
   toolCalls?: ToolProgress[];
+  /** The agent's private reasoning ("thinking") stream, kept separate from the answer. */
+  thinking?: string;
 };
 
 export type Session = {
@@ -194,6 +196,8 @@ export async function streamChat(
     requestId: string;
   }) => void,
   onToolEvent?: (t: ToolProgress) => void,
+  /** Accumulated `delta.reasoning_content` ("thinking") text, if the model emits any. */
+  onReasoning?: (accumulated: string) => void,
 ): Promise<string> {
   const res = await fetch('/api/chat', {
     method: 'POST',
@@ -208,10 +212,15 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = '';
   let acc = '';
+  let reasoningAcc = '';
 
   const emit = (piece: string) => {
     acc += piece;
     onToken(acc);
+  };
+  const emitReasoning = (piece: string) => {
+    reasoningAcc += piece;
+    if (onReasoning) onReasoning(reasoningAcc);
   };
   const replace = (full: string) => {
     acc = full;
@@ -238,7 +247,7 @@ export async function streamChat(
     const p = payload as {
       content?: string;
       message?: string;
-      choices?: {delta?: {content?: string}}[];
+      choices?: {delta?: {content?: string; reasoning_content?: string}}[];
     };
     if (eventName === 'final' && typeof p.content === 'string') {
       replace(p.content);
@@ -304,6 +313,11 @@ export async function streamChat(
       emit(p.content);
     } else if (Array.isArray(p.choices)) {
       for (const c of p.choices) {
+        // The gateway streams the model's reasoning as a SEPARATE delta field
+        // (`delta.reasoning_content`). It is never part of the answer, so it
+        // must never be merged into the visible reply — the UI buffers it on
+        // its own channel and only shows it behind the "thinking" toggle.
+        if (c.delta?.reasoning_content) emitReasoning(c.delta.reasoning_content);
         if (c.delta?.content) emit(c.delta.content);
       }
     }

@@ -2,6 +2,24 @@ import type {Session} from './api';
 
 const KEY = 'balabot.sessions.v1';
 const LAST_KEY = 'balabot.lastBot.v1';
+/** User preference: reveal the agent's reasoning ("thinking") stream. Hidden by default. */
+const SHOW_THINKING_KEY = 'balabot.showThinking.v1';
+
+export function loadShowThinking(): boolean {
+  try {
+    return localStorage.getItem(SHOW_THINKING_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function saveShowThinking(value: boolean) {
+  try {
+    localStorage.setItem(SHOW_THINKING_KEY, value ? 'true' : 'false');
+  } catch {
+    /* ignore */
+  }
+}
 
 export function loadSessions(): Session[] {
   try {

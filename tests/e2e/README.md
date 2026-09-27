@@ -45,6 +45,20 @@ Overriding the entrypoint skips the s6-overlay `cont-init` hooks (including
 `Permission denied: .../profiles/<x>/cron`. Always go through the real
 entrypoint: `docker run -d -t ...` then `docker exec`.
 
+## UI-level harnesses (stealth browser, real DOM)
+
+Two Node harnesses drive the **real product UI** through CloakBrowser and assert on
+rendered state (never prose, never screenshots):
+
+```bash
+node tests/e2e/ui_e2e.mjs            # core product scenarios (auth, shell, chat, org…)
+node tests/e2e/ui_thinking_e2e.mjs   # agent reasoning: hidden by default, toggle, collapsible
+```
+
+`ui_thinking_e2e.mjs` seeds a session with a canary reasoning string and asserts it
+never reaches the DOM while the "Show thinking" switch is off — so removing the
+render gate fails the suite (verified: 19/19 with the gate, 17/19 without).
+
 ## Notes
 
 - The interactive-CLI default command printing a banner and exiting 0 with no

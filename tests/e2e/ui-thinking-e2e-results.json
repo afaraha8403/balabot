@@ -1,0 +1,97 @@
+[
+  {
+    "name": "t00 seeded session actually rendered (guards the hidden-checks)",
+    "ok": true,
+    "detail": "seeded answer never appeared — a \"hidden\" pass here would be vacuous"
+  },
+  {
+    "name": "t01 seeded reasoning text not visible when toggle is off",
+    "ok": true,
+    "detail": "canaryVisible=false"
+  },
+  {
+    "name": "t02 no thinking disclosure element in the DOM when off",
+    "ok": true,
+    "detail": "disclosures=0 triggers=0"
+  },
+  {
+    "name": "t03 toggle exists and is off by default",
+    "ok": true,
+    "detail": "{\"found\":true,\"checked\":false}"
+  },
+  {
+    "name": "t04 toggle is clickable in the real UI",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "t05 toggle choice persisted to storage",
+    "ok": true,
+    "detail": "stored=true"
+  },
+  {
+    "name": "t06 toggle survives a reload (persistent)",
+    "ok": true,
+    "detail": "{\"found\":true,\"checked\":true}"
+  },
+  {
+    "name": "t07 message content is not corrupted by the reasoning stream",
+    "ok": true,
+    "detail": "seeded thinking leaked into the thread body"
+  },
+  {
+    "name": "t08 thinking rendered as its own disclosure trigger",
+    "ok": true,
+    "detail": "triggers=[\"Thinking\"] disclosures=1"
+  },
+  {
+    "name": "t09 disclosure starts COLLAPSED",
+    "ok": true,
+    "detail": "aria-expanded=false"
+  },
+  {
+    "name": "t10 reasoning text still hidden while collapsed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "t11 expanding the disclosure is possible",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "t12 reasoning revealed after expanding",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "t13 answer and thinking are separate blocks",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "t14 live stream carried reasoning_content",
+    "ok": true,
+    "detail": "reasoningChars=68"
+  },
+  {
+    "name": "t15 live reasoning not shown while collapsed",
+    "ok": true,
+    "detail": "leaked=0"
+  },
+  {
+    "name": "t16 expanding live thinking reveals the reasoning",
+    "ok": true,
+    "detail": "segs=1"
+  },
+  {
+    "name": "t17 toggle turns back off",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "t18 reasoning hidden again when toggled off",
+    "ok": true,
+    "detail": "disclosures=0"
+  }
+]

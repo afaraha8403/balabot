@@ -98,6 +98,23 @@ so routing works:
 That turns a team of agents into a team rather than a set of silos, and it is what makes the
 "employees on a team" model real instead of decorative.
 
+## Agent reasoning visibility (the "thinking" stream)
+
+Reasoning models emit their private chain-of-thought on a **separate stream channel** —
+`choices[].delta.reasoning_content` — distinct from the answer (`delta.content`). The two must never be
+concatenated: reasoning is working state, not a reply.
+
+- The API adapter buffers `reasoning_content` on its own channel and stores it on the assistant message
+  as `thinking` — never merged into `content`.
+- The UI renders it as a **collapsible disclosure** (muted, demoted, collapsed by default), never as an
+  ordinary chat bubble, and only when the **"Show thinking"** switch in the top nav is on.
+- That switch is **off by default** and its state is persisted (`balabot.showThinking.v1` in
+  `localStorage`), so the choice survives reloads.
+- No thinking text reaches the DOM while the switch is off — the gate is a render condition, not CSS.
+
+Verified end-to-end through the real UI (`tests/e2e/ui_thinking_e2e.mjs`): hidden by default, persistent
+toggle, collapsed-then-expandable, and a seeded-message canary that fails if the gate is removed.
+
 ## Day one, not day thirty
 
 The container ships configured so BalaBot **behaves this way from install**: the setup process
