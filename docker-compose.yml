@@ -26,6 +26,18 @@ services:
     env_file:
       - .env
 
+    environment:
+      # The agent API servers default to binding 127.0.0.1 INSIDE the container
+      # (DEFAULT_HOST in gateway/platforms/api_server.py), which Docker's port
+      # forwarder cannot reach: it publishes on the container's eth0, finds
+      # nothing listening there, and the host gets connection-refused (curl 000)
+      # even though `docker port` cheerfully reports the mapping.
+      #
+      # Binding 0.0.0.0 inside the container is what makes the published port
+      # work. It is not an open surface: the listener still refuses every request
+      # without a valid `Authorization: Bearer $API_SERVER_KEY` (401).
+      API_SERVER_HOST: "0.0.0.0"
+
     # The inherited default command is Hermes' interactive CLI, which exits
     # cleanly when stdin is not a terminal. Keep a TTY attached so
     # `docker compose up` lands you in a live principal agent.
@@ -41,11 +53,25 @@ services:
       - balabot-state:/opt/data
 
     ports:
-      # Only relevant when the dashboard is enabled (HERMES_DASHBOARD=1), which
-      # is OFF by default — nothing listens on this port out of the box.
-      # 9119 is the image's own default (verified in the dashboard service's
-      # run script: ${HERMES_DASHBOARD_PORT:-9119}), not 9121.
-      - "9119:9119"
+      # ONE multiplexed listener serves every profile's OpenAI-compatible agent
+      # API (verified: the gateway reports
+      #   principal/api_server -> http://127.0.0.1:8642/p/principal/v1
+      #   governor/api_server  -> http://127.0.0.1:8642/p/governor/v1
+      # ). The per-profile `gateway.api_server.port` values are IGNORED while
+      # multiplexing is on — there is a single shared port, 8642. Publishing two
+      # separate ports (9121/9122) would publish nothing.
+      #
+      # Docker Desktop note: publishing as "127.0.0.1:8642:8642" binds the WSL
+      # VM's loopback, which the Windows host CANNOT reach (curl -> 000, and
+      # nothing in the host's netstat). Publish without the host-IP prefix so the
+      # forwarder actually binds. The port stays key-gated (401 without a valid
+      # Authorization: Bearer), so this is not an open surface — but it IS
+      # reachable from the LAN, so keep the key strong.
+      - "8642:8642"
+
+      # NOTE: the Hermes dashboard (HERMES_DASHBOARD=1) is deliberately NOT
+      # published. It is a generic admin surface, not the product UI, and it must
+      # not sit behind the public hostname. Reach it over `docker exec` if needed.
 
     restart: unless-stopped
 

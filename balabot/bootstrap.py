@@ -33,6 +33,14 @@ PROFILE_ENV_KEYS = (
     "OPENROUTER_API_KEY",
     "TELEGRAM_BOT_TOKEN",
     "TYPESAFE_API_KEY",
+    # Under gateway multiplexing ONE host gateway serves every profile, and each
+    # profile's api_server listener is authenticated with a PROFILE-SCOPED
+    # API_SERVER_KEY. Without this the listener answers 401 to every request —
+    # "no profile-scoped API_SERVER_KEY is configured" — even when the launch
+    # scope has a key, which is how the product UI's chat backend silently dies.
+    # Propagating the operator's single key into each profile .env keeps one
+    # credential for the whole container.
+    "API_SERVER_KEY",
 )
 
 PERSONAS = ("principal", "governor")

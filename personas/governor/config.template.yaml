@@ -3,7 +3,8 @@ model:
   provider: openrouter
 browser:
   backend: browser-use
-  cdp_url: ws://localhost:9222/devtools/browser/8329066a-fac1-444e-944e-db05e3414979
+  # No cdp_url baked in — a hardcoded host CDP endpoint (with its rotating UUID)
+  # is meaningless inside the container. Set BROWSER_CDP_URL at runtime instead.
 memory:
   memory_enabled: true
   user_profile_enabled: true
@@ -83,31 +84,18 @@ gateway:
   api_server:
     enabled: true
     host: 127.0.0.1
-    port: 9121
-secrets:
-  sources:
-  - command
-  profile_alias: true
-  command:
-    enabled: true
-    command: C:/Users/ali/AppData/Local/hermes/hermes-agent/venv/Scripts/python.exe C:/Users/ali/workspace/grokbot-web/orgs/secret_source.py
-    helper_timeout_seconds: 6.0
-    override_existing: false
-mcp_servers:
-  agent_computer:
-    command: docker
-    args:
-    - exec
-    - -i
-    - grokbot-computer
-    - cua-driver
-    - mcp
-    - --socket
-    - /run/cua-driver/steve.sock
-    timeout: 180
-    connect_timeout: 60
+    # NOT 9121 — the principal already owns that. Each profile must have its own
+    # port or the second one to start fails to bind.
+    port: 9122
+# secrets.sources is intentionally NOT baked in.
+#
+# A shipped image must not reference the machine it was built on: the previous
+# value pointed at a host Python interpreter and a host helper script
+# (C:/Users/<author>/...), so in-container resolution failed with code=127 and
+# NO secrets were ever delivered. Configure your own sources at runtime.
 telegram:
   bot_token: ''
   allowed_chats: []
 terminal:
-  cwd: C:/Users/ali/workspace/governor
+  # Must be a path that exists INSIDE the image (the persona's own workspace).
+  cwd: /opt/data/workspace/governor
