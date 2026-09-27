@@ -1,0 +1,43 @@
+{
+  "base": "http://127.0.0.1:9119",
+  "when": "2026-09-27T04:43:43.779Z",
+  "passed": 7,
+  "total": 7,
+  "results": [
+    {
+      "name": "s01 unauthenticated access is refused",
+      "ok": true,
+      "detail": "status=401 bodyLen=0 leaked=false"
+    },
+    {
+      "name": "s02 app shell boots with no JS errors",
+      "ok": true,
+      "detail": "bodyLen=468 errs=[]"
+    },
+    {
+      "name": "s03 roster lists principal and governor",
+      "ok": true,
+      "detail": "principal=true governor=true bodyLen=468"
+    },
+    {
+      "name": "s04 a message gets a streamed reply",
+      "ok": true,
+      "detail": "UI_OK appeared in the DOM"
+    },
+    {
+      "name": "s05 every extra screen renders without error",
+      "ok": true,
+      "detail": "all six rendered"
+    },
+    {
+      "name": "s06 phone viewport renders without horizontal overflow",
+      "ok": true,
+      "detail": "bodyLen=347 overflow=false"
+    },
+    {
+      "name": "s07 every UI endpoint returns honest JSON (data or available:false)",
+      "ok": true,
+      "detail": "all endpoints ok"
+    }
+  ]
+}

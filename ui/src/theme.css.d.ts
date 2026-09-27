@@ -1,0 +1,1 @@
+declare module '@astryxdesign/theme-neutral/theme.css';
