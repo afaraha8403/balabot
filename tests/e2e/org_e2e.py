@@ -241,20 +241,25 @@ def post_delete(path: str, *, timeout: int = 45) -> tuple[int, str]:
 
 # ── Wave 6 P4: bot creation with consent against the live product ────────────
 def s7_bot_consent() -> None:
-    # A previous run may have left the proposal row (the bot it created stays).
-    # Clear only OUR proposal id so the run is idempotent.
-    _, body = get("/api/bot-proposals")
-    try:
-        for row in json.loads(body).get("proposals", []):
-            if row.get("bot_id") == "e2e-wave6-bot" and row.get("status") in (
-                    "proposed", "rejected"):
-                post_delete(f"/api/bot-proposals/{row['id']}")
-    except Exception:
-        pass
+    """Consent gate: propose -> refuse-create -> approve -> create -> usable bot.
+
+    MUST be re-runnable. The first version hardcoded one bot id and only cleared
+    its PROPOSAL row, so a second run failed at create with "a bot with id
+    'e2e-wave6-bot' already exists in the fleet" — the harness only passed on a
+    fresh container. A gate that cannot be run twice is not a gate. This version
+    uses a unique name per run AND removes the bot it created from the fleet
+    store, so the live fleet does not silently accumulate test bots either.
+    """
+    import secrets as _secrets
+    import subprocess as _subprocess
+
+    tag = _secrets.token_hex(3)
+    bot_name = f"E2E Wave6 Bot {tag}"
+    bot_id = f"e2e-wave6-bot-{tag}"
 
     # the consent gate BEFORE approval: nothing may be created
     status, body = post("/api/bot-proposals", {
-        "name": "E2E Wave6 Bot", "role": "proven by the live acceptance run",
+        "name": bot_name, "role": "proven by the live acceptance run",
         "proposed_by": "principal"})
     if status != 200:
         unproven("S7 propose", f"HTTP {status}: {body[:90]}")
@@ -277,16 +282,16 @@ def s7_bot_consent() -> None:
     d = json.loads(body) if status == 200 else {}
     check("S7 bot created", status == 200 and d.get("created") is True
           and d.get("bot", {}).get("id"), body[:110])
-    check("S7 registered in the org", "e2e-wave6-bot" in d.get("org_members", []),
+    check("S7 registered in the org", bot_id in d.get("org_members", []),
           str(d.get("org_members")))
 
     # the new bot is a first-class fleet member and answers chat
     status, body = get("/api/bots")
     ids = [b["id"] for b in json.loads(body).get("bots", [])] if status == 200 else []
-    check("S7 created bot in the roster", "e2e-wave6-bot" in ids, str(ids))
+    check("S7 created bot in the roster", bot_id in ids, str(ids))
 
     status, body = post("/api/chat", {
-        "bot_id": "e2e-wave6-bot",
+        "bot_id": bot_id,
         "messages": [{"role": "user", "content": "Reply with one word: ready"}]},
         timeout=180)
     streamed = status == 200 and ("chat.completion" in body or "data:" in body)
@@ -295,6 +300,29 @@ def s7_bot_consent() -> None:
     st, body_del = post_delete(f"/api/bot-proposals/{pid}")
     check("S7 proposal row deleted (bot kept)",
           st == 200 and json.loads(body_del).get("deleted") is True, pid)
+
+    # CLEAN UP the test bot itself, so re-runs stay honest and the live fleet
+    # stays free of test residue. The product has no bot-delete route (by
+    # design), so the fleet store is edited directly inside the container.
+    # NOTE the real path (/opt/data/fleet/bots.json, NOT /opt/data/bots.json),
+    # the real SHAPE (a dict keyed by bot id — there is also a vestigial
+    # "bots": [] key which is NOT the roster), and the ownership (root-owned
+    # mode 0600, so the exec must run as root or the write silently fails).
+    cleanup = (
+        "import json,pathlib\n"
+        "p=pathlib.Path('/opt/data/fleet/bots.json')\n"
+        "d=json.loads(p.read_text())\n"
+        f"before=('{bot_id}' in d)\n"
+        f"d.pop('{bot_id}', None)\n"
+        "p.write_text(json.dumps(d,indent=2))\n"
+        "print('removed',1 if before else 0)\n"
+    )
+    r = _subprocess.run(
+        ["docker", "exec", "-u", "root", "balabot-balabot-1", "python3", "-c", cleanup],
+        capture_output=True, text=True, timeout=60)
+    cleaned = r.returncode == 0 and "removed 1" in (r.stdout or "")
+    check("S7 test bot cleaned up (no fleet residue)", cleaned,
+          (r.stdout or r.stderr or "")[:90])
 
 
 def main() -> int:
