@@ -124,7 +124,7 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
   return (
     <Dialog isOpen onOpenChange={open => !open && onClose()} purpose="info">
       <DialogHeader title="Skill library" onOpenChange={onClose} />
-      <VStack gap={3} padding={4} height="fill">
+      <VStack gap={3} padding={4} height="fill" minHeight={0}>
         <TabList value={group} onChange={v => setGroup(v as Group)}>
           <Tab value="learned" label="Learned" />
           <Tab value="brought" label="Brought" />

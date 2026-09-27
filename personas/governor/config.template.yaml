@@ -99,8 +99,3 @@ telegram:
 terminal:
   # Must be a path that exists INSIDE the image (the persona's own workspace).
   cwd: /opt/data/workspace/governor
-
-# Model reasoning is NOT shown to the user by default (chat UI renders it
-# separately when the user opts in). Upstream default is true; we ship false.
-display:
-  show_reasoning: false
