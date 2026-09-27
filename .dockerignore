@@ -16,3 +16,5 @@ docs/
 README.md
 personas/*/SOUL.md.state
 *.log
+ui/node_modules
+ui/dist

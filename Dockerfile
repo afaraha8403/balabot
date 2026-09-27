@@ -32,6 +32,10 @@ COPY personas/ /opt/balabot/personas/
 # the manifest must ship inside the image. Caught by E2E against the rebuilt
 # artifact (S5 principal+governor frames), not by unit tests.
 COPY fleet/ /opt/balabot/fleet/
+# The product UI: SPA source + FastAPI adapter. The SPA is BUILT in-image (see
+# the RUN below); ui/node_modules and ui/dist are dockerignored so host build
+# artefacts can never leak into the context.
+COPY ui/ /opt/balabot/ui/
 COPY entrypoint.sh /usr/local/bin/balabot-entrypoint.sh
 
 # /data holds per-persona workspaces (rules files must live in the workspace,
@@ -118,7 +122,20 @@ COPY docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 RUN chmod +x /etc/s6-overlay/s6-rc.d/cloudflared/run \
              /etc/s6-overlay/s6-rc.d/cloudflared/finish \
              /etc/s6-overlay/s6-rc.d/agent-computer/run \
-             /etc/s6-overlay/s6-rc.d/agent-computer/finish
+             /etc/s6-overlay/s6-rc.d/agent-computer/finish \
+             /etc/s6-overlay/s6-rc.d/balabot-ui/run \
+             /etc/s6-overlay/s6-rc.d/balabot-ui/finish
+
+# --- Product UI SPA: built IN-IMAGE ------------------------------------------
+# ui/dist/ is gitignored (and dockerignored), so the image must build it. The
+# base image ships Node 26 (verified: v26.5.1, npm 11.17.0) — no extra toolchain.
+# The final `test -f` ASSERTS the build artefact exists at BUILD time: a broken
+# SPA build fails the docker build, never first boot.
+RUN set -eux; \
+    cd /opt/balabot/ui; \
+    npm ci --no-audit --no-fund; \
+    npm run build; \
+    test -f /opt/balabot/ui/dist/index.html
 
 # Inherits the official ENTRYPOINT's job: validate the hard dependency, then
 # exec /opt/hermes/docker/entrypoint-dispatch.sh so s6-overlay still owns PID 1.

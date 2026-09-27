@@ -1,0 +1,11 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+#
+# Companion to ./run. The SPA build is asserted at docker build time (the
+# Dockerfile fails the BUILD if ui/dist/index.html is missing), so reaching
+# this script means the artefact exists — any run failure is a crash, and
+# s6-supervise must restart it. Always exit 0.
+#
+# Finish-script arguments: $1=run exit code, $2=signal, $3=service name, $4=pgid.
+
+exit 0

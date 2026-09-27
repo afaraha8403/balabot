@@ -1,0 +1,36 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+#
+# BalaBot — product UI service (the SPA + its FastAPI adapter).
+#
+# Unlike cloudflared/agent-computer, this slot is NOT dormant-able: the
+# Dockerfile builds the SPA in-image and asserts ui/dist/index.html exists at
+# BUILD time, so if this script runs, the product is expected to serve. Any
+# failure here is a crash, and s6-supervise restarts it (finish exits 0 —
+# see ./finish). Passwords/keys arrive purely via environment
+# (BALABOT_DASHBOARD_PASSWORD, API_SERVER_KEY — set in docker-compose.yml),
+# never from files baked into the image.
+
+set -eu
+
+export BALABOT_UI_HOST="${BALABOT_UI_HOST:-0.0.0.0}"
+export BALABOT_UI_PORT="${BALABOT_UI_PORT:-9120}"
+
+LOG_DIR=/opt/data/logs
+mkdir -p "$LOG_DIR"
+
+PY=/opt/hermes/.venv/bin/python3
+
+# stdout/stderr ARE the s6 log; s6-rc hands them to the container logger. The
+# copy to the persistent log dir keeps an operator-readable trail across
+# restarts (line-buffered so nothing is lost on a crash).
+exec 2>&1
+{
+    echo "[balabot-ui] starting on ${BALABOT_UI_HOST}:${BALABOT_UI_PORT}"
+    # with-contenv repopulates HOME as /root; reset before dropping privileges
+    # so any incidental state lands under the persistent volume (same pattern
+    # as the cloudflared run script).
+    export HOME=/opt/data
+    cd /opt/balabot/ui
+    exec s6-setuidgid hermes "$PY" server.py
+} 2>&1 | tee -a "$LOG_DIR/balabot-ui.log"

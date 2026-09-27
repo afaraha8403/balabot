@@ -38,6 +38,23 @@ services:
       # without a valid `Authorization: Bearer $API_SERVER_KEY` (401).
       API_SERVER_HOST: "0.0.0.0"
 
+      # ── Product UI (the BalaBot SPA + its API adapter) ────────────────────
+      # server.py runs INSIDE the container under s6 (balabot-ui service) on
+      # 0.0.0.0:9120 — port 9119 is taken by the Hermes dashboard. Secrets are
+      # passed via the PROCESS ENVIRONMENT, never baked into the image or read
+      # from container files. The SPA itself is built in-image (see Dockerfile).
+      #
+      # Balances come from .env via `env_file` above; listed here explicitly so
+      # the contract with ui/server.py is visible and grep-able. NEVER log these.
+      BALABOT_UI_HOST: "0.0.0.0"
+      BALABOT_UI_PORT: "9119"
+      # server.py reads the key from the process env first (the container's
+      # source of truth); the host invocation still uses the .env file path.
+      API_SERVER_KEY: "${API_SERVER_KEY}"
+      # Dashboard password comes purely from the environment inside the
+      # container — no key file exists at the Windows host path in Linux.
+      BALABOT_DASHBOARD_PASSWORD: "${BALABOT_DASHBOARD_PASSWORD}"
+
       # ── Timeout ceilings ──────────────────────────────────────────────────
       # These are the limits that bound what an agent in the product can get
       # done. They are set explicitly here rather than left to the base image's

@@ -37,10 +37,15 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
-ROOT = pathlib.Path(__file__).resolve().parent
-DIST = ROOT / "dist"
-ENV_FILE = pathlib.Path(r"C:/Users/ali/workspace/balabot/.env")
-KEY_FILE = pathlib.Path(r"C:/Users/ali/secrets/balabot-dashboard.key")
+ROOT = pathlib.Path(os.environ.get("BALABOT_HOME",
+                                   r"C:/Users/ali/workspace/balabot"))
+# Host layout: ui/ is a sibling of the repo's other dirs → ROOT/ui/dist.
+# In-container: server.py is copied to /opt/balabot/ui/ and BALABOT_HOME is
+# /opt/balabot → ROOT/ui/dist resolves there too. Same expression, both ways.
+DIST = ROOT / "ui" / "dist"
+ENV_FILE = (pathlib.Path(os.environ["BALABOT_ENV_FILE"])
+            if os.environ.get("BALABOT_ENV_FILE")
+            else ROOT / ".env")
 UPSTREAM = "http://127.0.0.1:8642"
 CONTAINER = "balabot-balabot-1"
 PROFILES = ["principal", "governor"]
@@ -54,19 +59,31 @@ BOT_META = {
                  "description": "Keeps the shared OKF decision ledger every agent reads."},
 }
 
-API_KEY = ""
-for _line in ENV_FILE.read_text(encoding="utf-8").splitlines():
-    if _line.startswith("API_SERVER_KEY="):
-        API_KEY = _line.split("=", 1)[1].strip()
+API_KEY = os.environ.get("API_SERVER_KEY", "")
+if not API_KEY and ENV_FILE.exists():
+    for _line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        if _line.startswith("API_SERVER_KEY="):
+            API_KEY = _line.split("=", 1)[1].strip()
 if not API_KEY:
-    raise SystemExit("API_SERVER_KEY not found in balabot/.env — refusing to start")
+    raise SystemExit(
+        "API_SERVER_KEY not found — refusing to start "
+        f"(tried process environment API_SERVER_KEY, then env file "
+        f"{ENV_FILE})"
+    )
 
 DASHBOARD_USER = "ali"
-DASHBOARD_PASSWORD = (KEY_FILE.read_text(encoding="utf-8").strip()
-                      if KEY_FILE.exists() else "") or \
-                     os.environ.get("BALABOT_DASHBOARD_PASSWORD", "")
+KEY_FILE = (pathlib.Path(os.environ["BALABOT_DASHBOARD_KEY_FILE"])
+            if os.environ.get("BALABOT_DASHBOARD_KEY_FILE")
+            else pathlib.Path(r"C:/Users/ali/secrets/balabot-dashboard.key"))
+DASHBOARD_PASSWORD = (os.environ.get("BALABOT_DASHBOARD_PASSWORD", "")
+                      or (KEY_FILE.read_text(encoding="utf-8").strip()
+                          if KEY_FILE.exists() else ""))
 if not DASHBOARD_PASSWORD:
-    raise SystemExit("No dashboard password (secrets/balabot-dashboard.key or env)")
+    raise SystemExit(
+        "No dashboard password — refusing to start (tried env "
+        "BALABOT_DASHBOARD_PASSWORD, then key file "
+        f"{KEY_FILE})"
+    )
 
 security = HTTPBasic(auto_error=False)
 
@@ -1530,4 +1547,7 @@ def spa(full_path: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=9119, log_level="warning")
+    uvicorn.run(app,
+                host=os.environ.get("BALABOT_UI_HOST", "127.0.0.1"),
+                port=int(os.environ.get("BALABOT_UI_PORT", "9119")),
+                log_level="warning")
