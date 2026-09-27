@@ -22,6 +22,8 @@ import {
   ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   CheckIcon,
+  ChevronDoubleLeftIcon,
+  ChevronDoubleRightIcon,
   CircleStackIcon,
   ClipboardDocumentCheckIcon,
   ClockIcon,
@@ -97,6 +99,10 @@ export const IconSuccess = wrap(CheckCircleIcon);
 export const IconError = wrap(XCircleIcon);
 /** A secret that must not be shown. */
 export const IconConceal = wrap(EyeSlashIcon);
+/** Collapse a side panel. */
+export const IconCollapsePanel = wrap(ChevronDoubleLeftIcon);
+/** Re-open a collapsed side panel. */
+export const IconExpandPanel = wrap(ChevronDoubleRightIcon);
 
 /**
  * A secret request: concealment when it is an ACCESS request, the warning

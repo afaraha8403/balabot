@@ -35,6 +35,7 @@ import {AgentComputerDialog} from './AgentComputerDialog';
 import {SecretRequestCard} from './SecretRequestCard';
 import {SkillLibraryDialog} from './SkillLibraryDialog';
 import {useMediaQuery} from '@astryxdesign/core/hooks';
+import {useResizable, ResizeHandle} from '@astryxdesign/core/Resizable';
 import {BotRoster} from './screens/BotRoster';
 import {AgentsScreen} from './screens/AgentsScreen';
 import {MemoryScreen} from './screens/MemoryScreen';
@@ -48,7 +49,9 @@ import {
   IconAgents,
   IconBotKnowledge,
   IconClose,
+  IconCollapsePanel,
   IconConversations,
+  IconExpandPanel,
   IconCost,
   IconDecisions,
   IconGovernance,
@@ -107,6 +110,19 @@ export default function App() {
   // detail panels) has room; below it, it is dropped rather than squeezed, and
   // the nav collapses to MobileNav at the shell's own breakpoint.
   const isNarrow = useMediaQuery('(max-width: 1024px)');
+
+  // The bot list is drag-resizable and fully collapsible, using the framework's
+  // own useResizable (snap points + collapse past the min + persistence) rather
+  // than a hand-rolled drawer. On a phone the roster otherwise eats the width the
+  // thread needs, and the thread is the thing you actually came to use.
+  const roster = useResizable({
+    defaultSize: 300,
+    minSize: 200,
+    maxSize: 460,
+    collapsible: true,
+    snaps: [240, 300, 380],
+    autoSaveId: 'balabot.roster',
+  });
 
   // Load bots + fleet + health
   useEffect(() => {
@@ -383,27 +399,64 @@ export default function App() {
     <Layout
       height="fill"
       start={
-        <LayoutPanel width={300} hasDivider label="Bot roster" padding={2}>
-          <VStack gap={2} height="100%">
-            <TextInput
-              label="Search bots"
-              isLabelHidden
-              placeholder="Search bots…"
-              value={rosterQuery}
-              onChange={setRosterQuery}
-              size="sm"
-            />
-            <BotRoster
-              bots={filteredBots}
-              activeBotId={activeBotId}
-              onSelect={id => {
-                setActiveBotId(id);
-                setActiveSessionId(null);
-                setScreen('chat');
-              }}
-            />
-          </VStack>
-        </LayoutPanel>
+        <>
+          <LayoutPanel
+            width={roster.isCollapsed ? 44 : roster.size}
+            hasDivider
+            label="Bot roster"
+            padding={2}
+          >
+            {roster.isCollapsed ? (
+              <VStack gap={2} align="center">
+                <IconButton
+                  label="Show bot list"
+                  size="sm"
+                  variant="ghost"
+                  icon={<IconExpandPanel />}
+                  onClick={() => roster.expand()}
+                />
+              </VStack>
+            ) : (
+              <VStack gap={2} height="100%">
+                <HStack gap={1} vAlign="center">
+                  <TextInput
+                    label="Search bots"
+                    isLabelHidden
+                    placeholder="Search bots…"
+                    value={rosterQuery}
+                    onChange={setRosterQuery}
+                    size="sm"
+                    width={`${Math.max(120, roster.size - 60)}px`}
+                  />
+                  <IconButton
+                    label="Collapse bot list"
+                    size="sm"
+                    variant="ghost"
+                    icon={<IconCollapsePanel />}
+                    onClick={() => roster.collapse()}
+                  />
+                </HStack>
+                <BotRoster
+                  bots={filteredBots}
+                  activeBotId={activeBotId}
+                  sessions={sessions}
+                  isStreaming={isStreaming}
+                  onSelect={id => {
+                    setActiveBotId(id);
+                    setActiveSessionId(null);
+                    setScreen('chat');
+                  }}
+                />
+              </VStack>
+            )}
+          </LayoutPanel>
+          <ResizeHandle
+            direction="horizontal"
+            hasDivider
+            resizable={roster.props}
+            label="Resize bot list"
+          />
+        </>
       }
       content={
         activeBot ? (
