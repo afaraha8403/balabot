@@ -32,8 +32,14 @@ class FakeJev:
 
 
 def noul(prob: float) -> dict:
+    """A scripted decision-gate answer in the REAL wire shape.
+
+    Live noul answers are ``{"type": "noul", "noul": 0.73}``. This helper used to
+    emit ``{"probability": prob}``, which production read with a 0.0 default —
+    every decision was silently judged "not worthy" and the tests agreed.
+    """
     return {
-        "answers": {"decision_worthy": {"probability": prob}},
+        "answers": {"decision_worthy": {"type": "noul", "noul": prob}},
         "confidence": prob,
     }
 
@@ -160,3 +166,20 @@ def test_prompt_line_empty_when_nothing_selected():
 def test_decision_dataclass_shape():
     d = Decision(worthy=True, reason="r", confidence=0.5)
     assert (d.worthy, d.reason, d.confidence) == (True, "r", 0.5)
+
+
+def test_decision_gate_reads_the_live_noul_shape():
+    """REGRESSION — the gate must read the live wire shape, not a legacy key.
+
+    The gate is the ledger's front door: reading the wrong key meant EVERY
+    decision was rejected as "not decision-worthy", silently. ``noul()`` emits
+    the verbatim live shape.
+    """
+    jev = FakeJev([noul(0.73)])
+    decision = is_decision_worthy("we decided to ship on Tuesday", jev=jev)
+    assert decision.worthy is True
+    assert decision.failed_open is not True
+
+
+def test_decision_gate_rejects_when_the_live_probability_is_low():
+    assert is_decision_worthy("just chatting", jev=FakeJev([noul(0.2)])).worthy is False

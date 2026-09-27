@@ -62,6 +62,50 @@ class JevAPIError(JevError):
     """The API errored (HTTP or transport). Never silently degrade."""
 
 
+class JevResponseError(JevError):
+    """A 200 response whose body does not match the documented answer shape.
+
+    A JevError subclass on purpose: every caller already fails open or closed
+    around JevError, so a malformed body is handled coherently instead of
+    being read as a confident zero.
+    """
+
+
+def noul_probability(answer: Any, *, context: str = "") -> float:
+    """Probability from a Noul answer — the ONE accessor for this.
+
+    The live shape is ``{"type": "noul", "noul": 0.99}``: the probability lives
+    under ``"noul"``, NOT ``"probability"`` (confirmed against the live API and
+    documented in ``docs.typesafe.ai`` primitives/noul). Reading the wrong key
+    silently yields a default of 0.0, which is indistinguishable from a
+    confident "no" — which is exactly how the decision gate came to reject every
+    decision, skill selection to select nothing, the frustration escalation to
+    never confirm, and the pre-compaction saliency pass to drop everything. All
+    of it green in tests, because the injected fakes were written in the same
+    wrong shape as the code.
+
+    ``"probability"`` is still accepted as a tolerant fallback; anything else
+    raises :class:`JevResponseError`, which callers already handle as a Jev
+    failure rather than as evidence.
+    """
+    if not isinstance(answer, dict):
+        raise JevResponseError(
+            f"noul answer is not a dict{_ctx(context)}: {answer!r}"
+        )
+    value = answer.get("noul")
+    if value is None:
+        value = answer.get("probability")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise JevResponseError(
+            f"noul answer carries no numeric probability under 'noul'{_ctx(context)}: {answer!r}"
+        )
+    return float(value)
+
+
+def _ctx(context: str) -> str:
+    return f" ({context})" if context else ""
+
+
 class Jev:
     """Thin, faithful HTTP client for the System One endpoint."""
 

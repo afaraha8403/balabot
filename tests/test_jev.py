@@ -202,3 +202,48 @@ def test_empty_questions_rejected(http_responses):
     with pytest.raises(ValueError):
         _client().system_one("s", {})
     assert recorded["bodies"] == []  # nothing sent
+
+
+# ---------------------------------------------------------------------------
+# noul_probability — the ONE accessor for a Noul answer's probability.
+#
+# Regression cover for a systemic bug: the live wire shape puts the probability
+# under "noul" ({"type": "noul", "noul": 0.73}), but the whole depth layer read
+# ".get('probability', 0.0)" — which yields 0.0 against the real API, i.e.
+# indistinguishable from a confident "no". The decision gate then rejected every
+# decision, skill selection selected nothing, frustration never confirmed, and
+# the pre-compaction saliency pass dropped everything.
+# ---------------------------------------------------------------------------
+
+
+def test_noul_probability_reads_the_live_wire_shape():
+    from balabot.jev import noul_probability
+
+    # Verbatim shape returned by api.typesafe.ai for a noul question.
+    live = {"type": "noul", "noul": 0.73}
+    assert noul_probability(live) == 0.73
+
+
+def test_noul_probability_tolerates_the_legacy_probability_key():
+    from balabot.jev import noul_probability
+
+    assert noul_probability({"probability": 0.4}) == 0.4
+    # "noul" wins when both are present — it is the documented key.
+    assert noul_probability({"noul": 0.9, "probability": 0.1}) == 0.9
+
+
+def test_noul_probability_raises_rather_than_reading_a_confident_zero():
+    """A malformed body must not be mistaken for evidence of "no"."""
+    from balabot.jev import JevResponseError, noul_probability
+
+    for bad in ({}, {"type": "noul"}, {"noul": None}, {"noul": "0.9"}, None, 0.5):
+        with pytest.raises(JevResponseError):
+            noul_probability(bad)
+
+
+def test_noul_probability_rejects_booleans():
+    """bool is an int in Python — True must not silently read as 1.0."""
+    from balabot.jev import JevResponseError, noul_probability
+
+    with pytest.raises(JevResponseError):
+        noul_probability({"noul": True})

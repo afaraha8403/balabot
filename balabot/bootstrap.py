@@ -96,7 +96,14 @@ DEFAULT_WORKER_SKILLS: tuple[str, ...] = UNIVERSAL_SKILLS + (
 # Forced deltas, applied to every persona's rendered config.
 FORCED_MODEL_DEFAULT = "deepseek/deepseek-v4.1-flash"
 FORCED_MODEL_PROVIDER = "openrouter"
-FORCED_MEMORY_PROVIDER = "holographic"
+# The Jev continuity provider WRAPS the bundled holographic provider (forwarding
+# its whole surface, tools included) and adds the pre-compaction checkpoint.
+# Hermes allows only ONE external memory provider, so this is the single active
+# one — pointing at "holographic" instead would leave the checkpoint unowned.
+FORCED_MEMORY_PROVIDER = "balabot-jev"
+
+#: The provider directory seeded into $HERMES_HOME/plugins/ at every boot.
+MEMORY_PLUGIN_DIRNAME = "balabot-jev"
 
 
 class BootstrapError(RuntimeError):
@@ -138,6 +145,14 @@ def _force_deltas(cfg: dict[str, Any], workspace: Path, name: str) -> None:
 
     cfg.setdefault("memory", {})
     cfg["memory"]["provider"] = FORCED_MEMORY_PROVIDER
+
+    # Fail closed before a lossy compaction. With a checkpoint-capable provider
+    # active, compaction is refused (BLOCKED_MISSING_PREREQUISITE, transcript
+    # preserved) unless the provider confirmed a durable checkpoint. This is the
+    # Principal's "verify the extraction happened" duty, enforced by the host
+    # rather than promised in a prompt.
+    cfg.setdefault("compression", {})
+    cfg["compression"]["checkpoint_required"] = True
 
     cfg.setdefault("terminal", {})
     cfg["terminal"]["cwd"] = str(workspace)
@@ -463,9 +478,40 @@ def install_skills(name: str, *, repo_root: Path | None = None,
     return actions
 
 
+def install_memory_plugin(hermes_home: Path | None = None) -> list[str]:
+    """Seed the Jev checkpoint provider into ``$HERMES_HOME/plugins/``.
+
+    Why here and not only in the Dockerfile: ``/opt/data`` is a named Docker
+    VOLUME, so anything COPYed into it at build time is shadowed by the mount at
+    runtime — the same class of bug that once shipped an image whose ``fleet/``
+    manifest was invisible, leaving the agents DORMANT. The image's copy lives
+    under the repo; this writes it into the data root on every boot.
+
+    Re-seeds (refresh) each boot rather than skipping when present, so an image
+    upgrade actually takes effect. Idempotent by construction.
+    """
+    home = hermes_home or _hermes_home()
+    source = _repo_root() / "hermes" / "plugins" / MEMORY_PLUGIN_DIRNAME
+    target = home / "plugins" / MEMORY_PLUGIN_DIRNAME
+    if not source.is_dir():
+        raise BootstrapError(
+            f"memory plugin source missing: {source} (expected the repo's "
+            f"hermes/plugins/{MEMORY_PLUGIN_DIRNAME}/)"
+        )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
+    return [f"seeded memory provider '{MEMORY_PLUGIN_DIRNAME}' -> {target}"]
+
+
 def run_bootstrap() -> list[dict[str, Any]]:
     """Provision every persona AND install BalaBot's skills; print a secret-free report."""
     reports: list[dict[str, Any]] = []
+    # The provider must exist on disk BEFORE any persona config points at it:
+    # memory.provider names a directory, and an absent provider is a hard
+    # activation failure at agent start.
+    plugin_actions = install_memory_plugin()
     # The default org exists BEFORE personas are provisioned: a persona is a
     # member of it, and the org layer 404s on every secret route without it.
     org_actions = init_org("balacode")
@@ -482,6 +528,9 @@ def run_bootstrap() -> list[dict[str, Any]]:
     # reported on its own line rather than hidden inside a persona's actions.
     print(f"[balabot {__version__}] organization '{DEFAULT_ORG}':")
     for action in org_actions:
+        print(f"  - {action}")
+    print(f"[balabot {__version__}] memory provider:")
+    for action in plugin_actions:
         print(f"  - {action}")
     return reports
 

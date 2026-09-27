@@ -84,6 +84,14 @@ def fake_repo(tmp_path):
         (skill / "references").mkdir(parents=True)
         (skill / "SKILL.md").write_text(
             f"---\nname: {skill_name}\n---\nbody\n", encoding="utf-8")
+    # The memory provider the bootstrap seeds into $HERMES_HOME/plugins/. It is
+    # fatal for it to be absent (that is how a packaging regression — a provider
+    # missing from the image — gets caught instead of silently disabling the
+    # pre-compaction checkpoint), so the fixture must mirror the real repo.
+    plugin = root / "hermes" / "plugins" / bootstrap_mod.MEMORY_PLUGIN_DIRNAME
+    plugin.mkdir(parents=True)
+    (plugin / "__init__.py").write_text(
+        "# MemoryProvider checkpoint provider (fixture)\n", encoding="utf-8")
     return root
 
 

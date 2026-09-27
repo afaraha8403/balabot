@@ -34,9 +34,16 @@ from typing import Any, Callable
 import yaml
 
 from .bootstrap import LEDGER_DIRNAME
+from .jev import noul_probability
 
 GOVERNOR = "governor"
 PRINCIPAL = "principal"
+
+#: Confirmation gate for an escalated frustration signal. A noul answer carries
+#: no "value" key — only a probability under "noul" — so the old
+#: `answer.get("value") and probability >= 0.6` condition could never be true
+#: against the live API: genuine frustration was recorded as deferred forever.
+FRUSTRATION_CONFIRMATION_GATE = 0.6
 
 
 class GrowthError(RuntimeError):
@@ -198,8 +205,8 @@ def classify(signals: list[Signal], text: str, jev: Callable[..., dict[str, Any]
                 "reason": "no Jev callable injected; signal recorded as deferred, not confirmed"}
     response = jev(state, JEV_QUESTIONS)
     answer = response.get("answers", {}).get("is_frustration", {})
-    probability = float(answer.get("probability", 0.0))
-    confirmed = bool(answer.get("value", False)) and probability >= 0.6
+    probability = noul_probability(answer, context="frustration escalation")
+    confirmed = probability >= FRUSTRATION_CONFIRMATION_GATE
     return {
         "escalate": True,
         "confirmed": confirmed,

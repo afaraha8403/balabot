@@ -36,6 +36,10 @@ COPY fleet/ /opt/balabot/fleet/
 # the RUN below); ui/node_modules and ui/dist are dockerignored so host build
 # artefacts can never leak into the context.
 COPY ui/ /opt/balabot/ui/
+# The Jev continuity memory provider. Seeded into the DATA ROOT at boot by
+# balabot.bootstrap.install_memory_plugin(): /opt/data is a named volume, so a
+# COPY straight into it would be shadowed by the mount at runtime.
+COPY hermes/ /opt/balabot/hermes/
 COPY entrypoint.sh /usr/local/bin/balabot-entrypoint.sh
 
 # /data holds per-persona workspaces (rules files must live in the workspace,

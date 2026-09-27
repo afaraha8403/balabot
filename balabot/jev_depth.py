@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .jev import Jev, JevError
+from .jev import Jev, JevError, noul_probability
 
 #: The cookbook's gate threshold: below 0.30, select nothing rather than guess.
 SKILL_GATE_THRESHOLD = 0.30
@@ -100,7 +100,7 @@ def is_decision_worthy(
             True, f"gate unavailable - failed open ({exc})", 0.0, failed_open=True
         )
     answer = (response.get("answers") or {}).get("decision_worthy") or {}
-    probability = float(answer.get("probability", 0.0))
+    probability = noul_probability(answer, context="decision gate")
     confidence = float(response.get("confidence", probability))
     worthy = probability >= 0.5  # over-admit: borderline goes in, not out
     return Decision(worthy, "jev decision gate", confidence)
@@ -168,7 +168,8 @@ def select_skills(
     return [
         name
         for name in ranked
-        if float((answers.get(name) or {}).get("probability", 0.0)) >= SKILL_GATE_THRESHOLD
+        if noul_probability(answers.get(name) or {}, context=f"skill {name}")
+        >= SKILL_GATE_THRESHOLD
     ]
 
 
