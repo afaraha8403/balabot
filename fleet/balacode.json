@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "org": "balacode",
+  "container": "agent-computer-balacode",
+  "agents": [
+    { "id": "principal", "display": ":1", "socket": "/run/cua-driver/principal.sock" },
+    { "id": "governor", "display": ":2", "socket": "/run/cua-driver/governor.sock" }
+  ]
+}

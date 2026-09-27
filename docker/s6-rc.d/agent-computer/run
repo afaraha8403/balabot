@@ -1,11 +1,22 @@
 #!/command/with-contenv sh
 # shellcheck shell=sh
 #
-# BalaBot — Agent Computer service.
+# BalaBot — Agent Computer service (manifest-driven, per-org spaces).
 #
-# Brings up one X display per persona plus a cua-driver daemon per persona, so
-# a bot has a real screen the user can watch and drive. This is core product,
-# not optional infrastructure: the Agent Computer pane is a first-class surface.
+# Brings up one X display per declared agent plus a cua-driver daemon per
+# agent, so a bot has a real screen the user can watch and drive. This is
+# core product, not optional infrastructure: the Agent Computer pane is a
+# first-class surface.
+#
+# The agent set is read from FLEET MANIFESTS (fleet/<org>.json — see
+# balabot.fleet): every org's manifest declares its container space, and this
+# script starts one Xvfb + openbox + cua-driver daemon per declared agent.
+# The shipped fleet/balacode.json describes today's build (principal on :1,
+# governor on :2), so single-org behaviour is unchanged: balacode is the org
+# whose computer this container IS. Adding another org's manifest to fleet/
+# (with a container name and displays of its own) brings its space up on the
+# same container — per-agent isolation is per-display; per-ORG isolation is
+# structural via each org's own container in production.
 #
 # Layout mirrors the separate GrokBot stack that proved the design
 # (grokbot-computer): per-agent Xvfb display, per-agent cua-driver socket under
@@ -16,15 +27,18 @@
 # the slot exits 0 and the companion finish script returns 125 ("permanent
 # failure, do not restart"), so s6-svstat reports DOWN instead of the slot
 # flapping in a restart loop. A missing driver is a build problem, not a crash
-# to retry — the honest state is DOWN.
+# to retry — the honest state is DOWN. Same for a missing/unparseable
+# manifest: honest DOWN, not a guessed default agent list.
 #
 # Permissions: cua-driver runs in BOUNDED mode against a capability manifest
 # (/etc/cua/policy.json) and must be told to accept it non-interactively. The
-# daemon is never started in an unbounded mode.
+# daemon is never started in an unbounded mode — every agent, in every org
+# space, gets the same bounded ceiling.
 
 set -eu
 
 DRIVER=/usr/local/bin/cua-driver
+FLEET_DIR="${BALABOT_HOME:-/opt/balabot}/fleet"
 
 if [ ! -x "$DRIVER" ]; then
     echo "[agent-computer] DORMANT — cua-driver is not installed at $DRIVER."
@@ -42,6 +56,75 @@ for bin in Xvfb openbox dbus-daemon; do
     fi
 done
 
+# --- Read the fleet manifests ------------------------------------------------
+# The manifest format is validated by balabot.fleet for the Python side; the
+# shell side does the minimal safe parse here (org id must be filename-safe,
+# agent ids must be sane tokens) and refuses to start on anything it cannot
+# trust — an unknown shape is a build problem, and DOWN is the honest state.
+if [ ! -d "$FLEET_DIR" ]; then
+    echo "[agent-computer] DORMANT — no fleet directory at $FLEET_DIR."
+    exit 0
+fi
+
+AGENTS_FILE=/tmp/agent-computer-agents.txt
+: >"$AGENTS_FILE"
+
+manifests_found=0
+for manifest_path in "$FLEET_DIR"/*.json; do
+    [ -f "$manifest_path" ] || continue
+    manifests_found=$((manifests_found + 1))
+    org=$(basename "$manifest_path" .json)
+    case "$org" in
+        *[!A-Za-z0-9_-]*|'') 
+            echo "[agent-computer] DORMANT — unsafe org id '$org' in $manifest_path."
+            exit 0
+            ;;
+    esac
+    # Each agents[] entry is {"id": "...", "display": ":N", "socket": "..."}.
+    # Extract with a fixed-shape regex; a manifest that does not parse means
+    # the fleet file is broken, so stop honestly rather than guess. (The
+    # failure handler must stay on the same line as the heredoc marker: the
+    # here-document body begins on the next physical line regardless of the
+    # rest of the command.)
+    python3 - "$manifest_path" <<'PYEOF' >>"$AGENTS_FILE" || { echo "[agent-computer] DORMANT — manifest failed to parse: $manifest_path."; exit 0; }
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as fh:
+    m = json.load(fh)
+import os
+if m.get("org") != os.path.basename(path)[:-len(".json")]:
+    raise SystemExit("org/filename mismatch")
+if m.get("version") != 1:
+    raise SystemExit("unsupported manifest version")
+agents = m.get("agents")
+if not isinstance(agents, list) or not agents:
+    raise SystemExit("agents must be a non-empty list")
+seen_d, seen_s = set(), set()
+for a in agents:
+    aid, disp, sock = a.get("id"), a.get("display"), a.get("socket")
+    if not isinstance(aid, str) or not aid or "/" in aid or " " in aid:
+        raise SystemExit("bad agent id")
+    if not isinstance(disp, str) or not disp.startswith(":") or not disp[1:].isdigit():
+        raise SystemExit("bad display")
+    if not isinstance(sock, str) or not sock.startswith("/"):
+        raise SystemExit("bad socket")
+    if disp in seen_d or sock in seen_s:
+        raise SystemExit("duplicate display or socket within manifest")
+    seen_d.add(disp); seen_s.add(sock)
+    print(f"{aid}\t{disp}\t{sock}")
+PYEOF
+done
+
+if [ "$manifests_found" -eq 0 ]; then
+    echo "[agent-computer] DORMANT — no fleet manifests found in $FLEET_DIR."
+    exit 0
+fi
+
+if [ ! -s "$AGENTS_FILE" ]; then
+    echo "[agent-computer] DORMANT — fleet manifests declared no agents."
+    exit 0
+fi
+
 # One session bus shared by every agent's desktop session.
 export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/session-bus"
 mkdir -p /run/cua-driver /run/dbus
@@ -51,30 +134,41 @@ dbus-daemon --session --fork --address="$DBUS_SESSION_BUS_ADDRESS" 2>/dev/null |
 SCREEN_W=1920
 SCREEN_H=1080
 
-# Personas are read from the same source of truth the app uses where possible;
-# this list must stay in step with balabot.bootstrap.PERSONAS.
-i=1
-for agent in principal governor; do
-    display=":$i"
-    echo "[agent-computer] starting $agent on display $display"
+# One Xvfb + openbox + cua-driver daemon per declared agent, from the
+# manifests. Display numbers come from the manifest itself, so two orgs'
+# agents must not claim the same display on this container — the Python
+# validation refused duplicates within a manifest, and here we skip (loudly)
+# a display already taken on this container.
+while IFS="$(printf '\t')" read -r agent display socket; do
+    [ -n "$agent" ] || continue
+
+    if xvfb_pid=$(cat "/tmp/xvfb-$agent.pid" 2>/dev/null) && kill -0 "$xvfb_pid" 2>/dev/null; then
+        echo "[agent-computer] $agent already running on $(cat "/tmp/xvfb-$agent.display" 2>/dev/null) — skipping"
+        continue
+    fi
+
+    echo "[agent-computer] starting $agent on display $display (socket $socket)"
 
     Xvfb "$display" -screen 0 "${SCREEN_W}x${SCREEN_H}x24" -nolisten tcp \
         >"/tmp/xvfb-$agent.log" 2>&1 &
+    echo $! >"/tmp/xvfb-$agent.pid"
+    echo "$display" >"/tmp/xvfb-$agent.display"
     sleep 0.5
 
     # A window manager is not cosmetic here: without one, windows open unmanaged
     # and never receive focus, so typing has nowhere to land.
     DISPLAY="$display" openbox --sm-disable >"/tmp/openbox-$agent.log" 2>&1 &
 
+    # BOUNDED mode with the capability manifest, non-interactively approved:
+    # the daemon is never started unbounded, for any org's agent.
     DISPLAY="$display" "$DRIVER" serve \
-        --socket "/run/cua-driver/$agent.sock" \
+        --socket "$socket" \
         --permission-mode bounded \
         --capability-manifest /etc/cua/policy.json \
         --approve-capability-manifest \
         >"/tmp/cua-driver-$agent.log" 2>&1 &
 
-    i=$((i + 1))
-done
+done <"$AGENTS_FILE"
 
 # Supervise the displays for the lifetime of the container. If this returns,
 # s6 restarts the whole set, which is the correct recovery.
