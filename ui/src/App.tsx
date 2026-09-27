@@ -12,6 +12,7 @@ import {ClickableCard} from '@astryxdesign/core/ClickableCard';
 import {Card} from '@astryxdesign/core/Card';
 import {Grid} from '@astryxdesign/core/Grid';
 import {useStreamingText} from '@astryxdesign/core/hooks';
+import {ThinkingOrb} from 'thinking-orbs';
 import {Avatar} from '@astryxdesign/core/Avatar';
 import {Icon} from '@astryxdesign/core/Icon';
 import {IconButton} from '@astryxdesign/core/IconButton';
@@ -563,9 +564,20 @@ export default function App() {
                   sender="assistant"
                   avatar={<Avatar name={activeBot.name} size="md" tooltip={false} />}>
                   <ChatMessageBubble variant="ghost">
-                    <Text type="supporting" color="accent">
-                      Typing…
-                    </Text>
+                    {/* The agent is running but has not emitted text yet. A
+                        thinking orb says "working" far better than the word
+                        "Typing…", and `state` is a real signal here: the bot is
+                        executing, not typing. theme is PINNED dark rather than
+                        left on auto — the app tags <html> with
+                        data-astryx-theme, not data-theme, so auto would fall
+                        through to prefers-color-scheme and paint dark ink on our
+                        always-black surface for anyone in light mode. */}
+                    <ThinkingOrb
+                      state="working"
+                      size={32}
+                      theme="dark"
+                      aria-label={`${activeBot.name} is working`}
+                    />
                   </ChatMessageBubble>
                 </ChatMessageRow>
               ) : null}

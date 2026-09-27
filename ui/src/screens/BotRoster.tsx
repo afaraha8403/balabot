@@ -5,7 +5,7 @@ import {List} from '@astryxdesign/core/List';
 import {ListItem} from '@astryxdesign/core/List';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
-import {StatusDot} from '@astryxdesign/core/StatusDot';
+import {ThinkingOrb} from 'thinking-orbs';
 import type {Bot, Session} from '../api';
 
 // Messenger-style roster rows: avatar · bold name · one-line preview · timestamp.
@@ -116,7 +116,15 @@ export function BotRoster({
                 {e.when}
               </Text>
               {e.isTyping ? (
-                <StatusDot variant="accent" label="Typing" isPulsing />
+                // Same signal as the in-thread orb, at the inline-text preset.
+                // Replaces a pulsing StatusDot: the roster and the thread now
+                // speak the same visual language for "this bot is working".
+                <ThinkingOrb
+                  state="working"
+                  size={20}
+                  theme="dark"
+                  aria-label={`${e.bot.name} is working`}
+                />
               ) : e.isGroup ? (
                 <Badge label={`${e.members?.length ?? 2}`} variant="neutral" />
               ) : null}
