@@ -209,6 +209,82 @@ async function s07_api_honesty() {
 
 // ---------------------------------------------------------------- main
 
+async function s08_tool_activity(browser) {
+  // The working indicator and the tool-call rows must be driven by REAL gateway
+  // activity, not decoration. A tool-forcing prompt makes the agent call its
+  // terminal tool, and we assert that the actual tool name and its target reach
+  // the DOM. A mocked/absent tool feed cannot pass this.
+  const stamp = 'E2ETOOL' + Date.now().toString().slice(-6);
+  const { ctx, page } = await openPage(browser);
+  await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 40000 });
+  await sleep(4500);
+
+  await page.evaluate(() => {
+    const els = Array.from(document.querySelectorAll('a, button, li, [role=option], [role=button]'));
+    const hit = els.find((e) => /principal/i.test(e.innerText || '') && e.offsetParent !== null);
+    if (hit) hit.click();
+  });
+  await sleep(2500);
+
+  const field = await page.evaluate(() => {
+    const cands = Array.from(document.querySelectorAll('input[type=text], textarea, [contenteditable=true]'));
+    const vis = cands.filter((e) => !e.disabled && e.offsetParent !== null);
+    const el = vis.find((e) => /message/i.test(e.getAttribute('placeholder') || '') || /message/i.test(e.getAttribute('aria-label') || ''))
+      || vis.find((e) => e.tagName === 'TEXTAREA')
+      || vis[vis.length - 1];
+    if (!el) return null;
+    el.setAttribute('data-e2e-composer2', '1');
+    return el.tagName;
+  });
+  if (!field) {
+    await ctx.close();
+    return record('s08 a real tool call is surfaced (ChatToolCalls + orb)', false, 'no composer');
+  }
+
+  await page.click('[data-e2e-composer2="1"]');
+  await page.keyboard.type(`Use your terminal tool to run exactly: echo ${stamp} — then report the output. You must call the tool.`);
+  await page.keyboard.press('Enter');
+
+  let sawToolRow = false;
+  let sawOrbNamingTool = false;
+  let sawTarget = false;
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    const s = await page.evaluate(() => {
+      const t = document.body.innerText || '';
+      const orbs = Array.from(document.querySelectorAll('canvas')).map((c) => c.getAttribute('aria-label') || '');
+      return {
+        t,
+        rows: document.querySelectorAll('[class*="astryx-chat-tool"]').length,
+        orbLabels: orbs,
+      };
+    });
+    if (s.rows > 0) sawToolRow = true;
+    if (s.orbLabels.some((l) => /is running \w+/.test(l))) sawOrbNamingTool = true;
+    if (s.t.includes(stamp)) sawTarget = true;
+    if (sawToolRow && sawTarget && sawOrbNamingTool) break;
+    // The orb only occupies the thread in the window between "turn started" and
+    // "first text token arrived", so it must be sampled faster than a second or
+    // the window closes between polls.
+    await sleep(250);
+  }
+
+  // Let the turn finish, then confirm the call PERSISTS on the settled message
+  // rather than vanishing with the orb.
+  await sleep(12000);
+  const after = await page.evaluate(() => ({
+    rows: document.querySelectorAll('[class*="astryx-chat-tool"]').length,
+    orbs: document.querySelectorAll('canvas').length,
+  }));
+  await ctx.close();
+
+  record(
+    's08 a real tool call is surfaced (ChatToolCalls + orb)',
+    sawToolRow && sawTarget && sawOrbNamingTool && after.rows > 0,
+    `toolRow=${sawToolRow} target=${sawTarget} orbNamedTool=${sawOrbNamingTool} persistedRows=${after.rows} orbsAfter=${after.orbs}`,
+  );
+}
+
 const browser = await launch({ headless: true, humanize: true });
 console.log(`\nBalaBot UI E2E  ->  ${BASE}\n`);
 
@@ -220,6 +296,7 @@ const scenarios = [
   ['s05', s05_screens_render],
   ['s06', s06_mobile_viewport],
   ['s07', s07_api_honesty],
+  ['s08', s08_tool_activity],
 ];
 
 for (const [id, fn] of scenarios) {

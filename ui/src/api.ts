@@ -11,10 +11,25 @@ export type Bot = {
   botId?: string;
 };
 
+/**
+ * One tool invocation reported mid-stream by the gateway
+ * (`event: hermes.tool.progress`). Arrives twice per call: once running, once
+ * completed. `label` is the target — the actual command, path or query.
+ */
+export type ToolProgress = {
+  tool: string;
+  emoji?: string;
+  label?: string;
+  toolCallId: string;
+  status: 'pending' | 'running' | 'completed' | 'error';
+};
+
 export type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
   content: string;
   at: number;
+  /** Tool calls the assistant made while producing this message. */
+  toolCalls?: ToolProgress[];
 };
 
 export type Session = {
@@ -158,6 +173,7 @@ export async function streamChat(
     reason?: string;
     requestId: string;
   }) => void,
+  onToolEvent?: (t: ToolProgress) => void,
 ): Promise<string> {
   const res = await fetch('/api/chat', {
     method: 'POST',
@@ -235,6 +251,31 @@ export async function streamChat(
           description: r.description,
           reason: r.reason,
           requestId: r.request_id ?? `${r.name}-${Date.now()}`,
+        });
+      }
+    } else if (eventName === 'hermes.tool.progress') {
+      // Real agent activity: which tool, on what target, and whether it is
+      // still running. This is what makes the working indicator truthful
+      // rather than a decorative spinner.
+      const t = payload as {
+        tool?: string;
+        emoji?: string;
+        label?: string;
+        toolCallId?: string;
+        status?: string;
+      };
+      if (onToolEvent && t.tool) {
+        const status =
+          t.status === 'pending' || t.status === 'running' ||
+          t.status === 'completed' || t.status === 'error'
+            ? t.status
+            : 'running';
+        onToolEvent({
+          tool: t.tool,
+          emoji: t.emoji,
+          label: t.label,
+          toolCallId: t.toolCallId ?? `${t.tool}-${Date.now()}`,
+          status,
         });
       }
     } else if (eventName === 'error') {

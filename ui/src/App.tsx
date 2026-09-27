@@ -7,12 +7,19 @@ import {ChatMessageList} from '@astryxdesign/core/Chat';
 import {ChatMessage as ChatMessageRow} from '@astryxdesign/core/Chat';
 import {ChatMessageBubble} from '@astryxdesign/core/Chat';
 import {ChatMessageMetadata} from '@astryxdesign/core/Chat';
+import {ChatToolCalls} from '@astryxdesign/core/Chat';
 import {Timestamp} from '@astryxdesign/core/Timestamp';
 import {ClickableCard} from '@astryxdesign/core/ClickableCard';
 import {Card} from '@astryxdesign/core/Card';
 import {Grid} from '@astryxdesign/core/Grid';
 import {useStreamingText} from '@astryxdesign/core/hooks';
 import {ThinkingOrb} from 'thinking-orbs';
+import {
+  activeTool,
+  mergeToolProgress,
+  orbStateForTool,
+  toToolCallStatus,
+} from './orbState';
 import {Avatar} from '@astryxdesign/core/Avatar';
 import {Icon} from '@astryxdesign/core/Icon';
 import {IconButton} from '@astryxdesign/core/IconButton';
@@ -44,7 +51,7 @@ import {DecisionsScreen} from './screens/DecisionsScreen';
 import {GovernanceScreen} from './screens/GovernanceScreen';
 import {OpsScreen} from './screens/OpsScreen';
 import {CostScreen} from './screens/CostScreen';
-import {api, streamChat, checkHealth, getFleet, type Bot, type ChatMessage, type Handoff, type Session, type SecretCard} from './api';
+import {api, streamChat, checkHealth, getFleet, type Bot, type ChatMessage, type Handoff, type Session, type SecretCard, type ToolProgress} from './api';
 import {
   IconAgentComputer,
   IconAgents,
@@ -105,6 +112,10 @@ export default function App() {
   const [excluded, setExcluded] = useState<string[]>([]);
   const [banner, setBanner] = useState('');
   const [secretCards, setSecretCards] = useState<SecretCard[]>([]);
+  // Tool activity for the turn in flight. Mirrored into a ref because send()
+  // must read the final list after the stream resolves, not a stale closure.
+  const [toolCalls, setToolCalls] = useState<ToolProgress[]>([]);
+  const toolCallsRef = useRef<ToolProgress[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
   // Astryx's responsive contract: above 1024px the third region (the rosters and
@@ -217,6 +228,8 @@ export default function App() {
 
     patchSession(session.id, s => ({...s, messages: history, title: s.messages.length === 0 ? text.slice(0, 40) : s.title}));
     setStreamText('');
+    setToolCalls([]);
+    toolCallsRef.current = [];
     setIsStreaming(true);
 
     const controller = new AbortController();
@@ -245,8 +258,19 @@ export default function App() {
             },
           ]);
         },
+        t => {
+          // Real tool activity from `hermes.tool.progress`. Merge on toolCallId:
+          // the gateway sends the same call twice (running, then completed).
+          toolCallsRef.current = mergeToolProgress(toolCallsRef.current, t);
+          setToolCalls(toolCallsRef.current);
+        },
       );
-      const finalMsg: ChatMessage = {role: 'assistant', content: finalText, at: Date.now()};
+      const finalMsg: ChatMessage = {
+        role: 'assistant',
+        content: finalText,
+        at: Date.now(),
+        toolCalls: toolCallsRef.current.length ? toolCallsRef.current : undefined,
+      };
       patchSession(session.id, s => ({...s, messages: [...s.messages, finalMsg]}));
     } catch (err) {
       const aborted = controller.signal.aborted;
@@ -539,7 +563,23 @@ export default function App() {
                           />
                         )
                       }>
-                      {isUser ? m.content : <Markdown isStreaming={false}>{m.content}</Markdown>}
+                      {isUser ? (
+                        m.content
+                      ) : (
+                        <VStack gap={2}>
+                          {m.toolCalls?.length ? (
+                            <ChatToolCalls
+                              calls={m.toolCalls.map(t => ({
+                                key: t.toolCallId,
+                                name: t.tool,
+                                target: t.label,
+                                status: toToolCallStatus(t.status),
+                              }))}
+                            />
+                          ) : null}
+                          <Markdown isStreaming={false}>{m.content}</Markdown>
+                        </VStack>
+                      )}
                     </ChatMessageBubble>
                   </ChatMessageRow>
                 );
@@ -555,7 +595,19 @@ export default function App() {
                         {activeBot.name}
                       </Text>
                     }>
-                    <Markdown isStreaming>{displayed}</Markdown>
+                    <VStack gap={2}>
+                      {toolCalls.length ? (
+                        <ChatToolCalls
+                          calls={toolCalls.map(t => ({
+                            key: t.toolCallId,
+                            name: t.tool,
+                            target: t.label,
+                            status: toToolCallStatus(t.status),
+                          }))}
+                        />
+                      ) : null}
+                      <Markdown isStreaming>{displayed}</Markdown>
+                    </VStack>
                   </ChatMessageBubble>
                 </ChatMessageRow>
               ) : null}
@@ -573,10 +625,18 @@ export default function App() {
                         through to prefers-color-scheme and paint dark ink on our
                         always-black surface for anyone in light mode. */}
                     <ThinkingOrb
-                      state="working"
+                      state={orbStateForTool(activeTool(toolCalls)?.tool)}
                       size={32}
                       theme="dark"
-                      aria-label={`${activeBot.name} is working`}
+                      aria-label={
+                        activeTool(toolCalls)
+                          ? `${activeBot.name} is running ${activeTool(toolCalls)!.tool}${
+                              activeTool(toolCalls)!.label
+                                ? `: ${activeTool(toolCalls)!.label}`
+                                : ''
+                            }`
+                          : `${activeBot.name} is working`
+                      }
                     />
                   </ChatMessageBubble>
                 </ChatMessageRow>
