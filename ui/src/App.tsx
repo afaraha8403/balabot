@@ -46,6 +46,9 @@ import {SecretRequestCard} from './SecretRequestCard';
 import {SkillLibraryDialog} from './SkillLibraryDialog';
 import {GroupChatDialog} from './GroupChatDialog';
 import {BotCreationDialog} from './BotCreationDialog';
+import {BotEditDialog} from './BotEditDialog';
+import {BotDeleteDialog} from './BotDeleteDialog';
+import {OrphansDialog} from './OrphansDialog';
 import {useMediaQuery} from '@astryxdesign/core/hooks';
 import {useResizable, ResizeHandle} from '@astryxdesign/core/Resizable';
 import {BotRoster} from './screens/BotRoster';
@@ -72,6 +75,7 @@ import {
   IconMemory,
   IconMessages,
   IconOps,
+  IconOrphans,
   IconSkills,
   IconWarning,
 } from './icons';
@@ -153,6 +157,9 @@ export default function App() {
   const [showSkills, setShowSkills] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
   const [showBotCreation, setShowBotCreation] = useState(false);
+  const [editBot, setEditBot] = useState<Bot | null>(null);
+  const [deleteBotTarget, setDeleteBotTarget] = useState<Bot | null>(null);
+  const [showOrphans, setShowOrphans] = useState(false);
   const [excluded, setExcluded] = useState<string[]>([]);
   // Live sub-agent rows (real spawn ledger). Polled so the roster reflects
   // spawns as they start and stop; never invented client-side.
@@ -220,6 +227,24 @@ export default function App() {
   useEffect(() => {
     void reloadBots();
   }, [reloadBots]);
+
+  // After an edit, refresh the roster so renamed titles show everywhere.
+  const onBotEdited = useCallback(
+    (_botId: string) => {
+      void reloadBots();
+    },
+    [reloadBots],
+  );
+
+  // After a delete, refresh the roster. reloadBots re-selects: if the deleted
+  // bot was active, its id is no longer in the list and the fallback picks the
+  // first remaining bot, so the chat selection is always valid.
+  const onBotDeleted = useCallback(
+    (_result: {deleted: boolean; bot_id: string}) => {
+      void reloadBots();
+    },
+    [reloadBots],
+  );
 
   // Poll the real spawn ledger via /api/subagents. An empty list is a real
   // answer (nothing spawned); a failed fetch just leaves the last state.
@@ -397,6 +422,11 @@ export default function App() {
           label="Group chat"
           icon={<IconGroupChat />}
           onClick={() => setShowGroups(true)}
+        />
+        <SideNavItem
+          label="Unregistered profiles"
+          icon={<IconOrphans />}
+          onClick={() => setShowOrphans(true)}
         />
       </SideNavSection>
       <SideNavSection title="Control">
@@ -584,6 +614,8 @@ export default function App() {
                     setActiveSessionId(null);
                     setScreen('chat');
                   }}
+                  onEditBot={setEditBot}
+                  onDeleteBot={setDeleteBotTarget}
                 />
               </VStack>
             )}
@@ -915,6 +947,26 @@ export default function App() {
         <BotCreationDialog
           bots={bots}
           onClose={() => setShowBotCreation(false)}
+          onFleetChanged={() => void reloadBots()}
+        />
+      ) : null}
+      {editBot ? (
+        <BotEditDialog
+          bot={editBot}
+          onClose={() => setEditBot(null)}
+          onUpdated={onBotEdited}
+        />
+      ) : null}
+      {deleteBotTarget ? (
+        <BotDeleteDialog
+          bot={deleteBotTarget}
+          onClose={() => setDeleteBotTarget(null)}
+          onDeleted={onBotDeleted}
+        />
+      ) : null}
+      {showOrphans ? (
+        <OrphansDialog
+          onClose={() => setShowOrphans(false)}
           onFleetChanged={() => void reloadBots()}
         />
       ) : null}

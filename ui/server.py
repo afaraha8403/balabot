@@ -13,6 +13,11 @@
     /api/orgs, /api/org/secrets, /api/org/grants,
     /api/org/skills/library|pin|promote, /api/org/requests   real: container registry
     POST /api/chat                      SSE passthrough to /p/<profile>/v1/chat/completions
+    GET  /api/orphans                   real: unrostered profile dirs, classified
+    POST /api/orphans/{name}/adopt      real: adopt an orphan into the roster
+    DELETE /api/orphans/{name}          real: purge an orphan profile + artifacts
+    DELETE /api/bots/{bot_id}           real: delete a persistent user-created bot
+    PATCH /api/bots/{bot_id}            real: edit a persistent bot's metadata
 
 HONESTY RULE: where real data exists it is returned; where it does not, the
 endpoint answers {"available": false, "reason": "..."} with HTTP 200 so the UI
@@ -1487,6 +1492,162 @@ def bot_proposals_delete(pid: str):
             _org_status_error(res)
         return unavailable(res.get("reason", "could not delete the proposal"))
     return {"deleted": True}
+
+
+# ── Agent lifecycle: orphan classification, adoption, purge; roster
+#    delete/edit. Same container-side pattern as the create route: the
+#    lifecycle module runs INSIDE the container (that is where the profiles,
+#    runtime dirs and the fleet roster live), driven via _org_run. ────────────
+
+_LIFECYCLE_LIST_SNIPPET = '''\
+from balabot import lifecycle
+data = lifecycle.list_orphans()
+print(json.dumps(data))
+'''
+
+_LIFECYCLE_ADOPT_SNIPPET = '''\
+from balabot import lifecycle
+try:
+    meta = lifecycle.adopt_orphan(payload['name'])
+except lifecycle.CreationError as exc:
+    print(json.dumps({'ok': False, 'error': 'conflict',
+                      'detail': str(exc),
+                      'status': getattr(exc, 'status', 409)}))
+    raise SystemExit(0)
+print(json.dumps({'adopted': True, 'bot': meta}))
+'''
+
+_LIFECYCLE_PURGE_SNIPPET = '''\
+from balabot import lifecycle
+try:
+    res = lifecycle.purge_orphan(payload['name'])
+except lifecycle.CreationError as exc:
+    print(json.dumps({'ok': False, 'error': 'conflict',
+                      'detail': str(exc),
+                      'status': getattr(exc, 'status', 409)}))
+    raise SystemExit(0)
+print(json.dumps({'deleted': True, 'profile': res['profile'],
+                  'removed': res['removed'], 'roster_row': res['roster_row']}))
+'''
+
+_LIFECYCLE_REAP_SNIPPET = '''\
+from balabot import lifecycle
+res = lifecycle.reap_subagent_artifacts()
+print(json.dumps({'reaped': res['reaped'], 'count': res['count']}))
+'''
+
+_LIFECYCLE_DELETE_BOT_SNIPPET = '''\
+from balabot import lifecycle
+try:
+    res = lifecycle.delete_registered_bot(payload['bot_id'])
+except lifecycle.CreationError as exc:
+    print(json.dumps({'ok': False, 'error': 'conflict',
+                      'detail': str(exc),
+                      'status': getattr(exc, 'status', 409)}))
+    raise SystemExit(0)
+print(json.dumps({'deleted': True, 'bot_id': res['bot_id'],
+                  'removed': res['removed'], 'org_removed': res['org_removed']}))
+'''
+
+_LIFECYCLE_UPDATE_BOT_SNIPPET = '''\
+from balabot import lifecycle
+try:
+    row = lifecycle.update_registered_bot(payload['bot_id'], fields=payload['fields'])
+except lifecycle.CreationError as exc:
+    print(json.dumps({'ok': False, 'error': 'bad_request',
+                      'detail': str(exc),
+                      'status': getattr(exc, 'status', 400)}))
+    raise SystemExit(0)
+print(json.dumps({'updated': True, 'bot': row}))
+'''
+
+
+@app.get("/api/orphans")
+def orphans_list():
+    """Unrostered profile dirs, honestly classified. Never invented rows —
+    the container's own profiles tree is the source."""
+    if not container_ok():
+        return unavailable("balabot container is not running — no profile data")
+    res = _org_run(_wrap(_LIFECYCLE_LIST_SNIPPET, False), timeout=60.0)
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "could not read the profiles tree"))
+    return {"available": True, **{k: v for k, v in res.items() if k != "ok"}}
+
+
+@app.post("/api/orphans/{name}/adopt")
+def orphans_adopt(name: str):
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot adopt")
+    res = _org_run(_wrap(_LIFECYCLE_ADOPT_SNIPPET, True), payload={"name": name},
+                   timeout=60.0)
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not adopt the profile"))
+    return {"adopted": True, "bot": res["bot"]}
+
+
+@app.delete("/api/orphans/{name}")
+def orphans_purge(name: str):
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot purge")
+    res = _org_run(_wrap(_LIFECYCLE_PURGE_SNIPPET, True), payload={"name": name},
+                   timeout=60.0)
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not purge the profile"))
+    return res
+
+
+@app.post("/api/orphans/reap")
+def orphans_reap():
+    """Reap every empty-shell profile (no SOUL.md, no config.yaml) — sub-agent
+    debris that got a profile-shaped footprint. Shipped + `default` are never
+    touched (the module skips FORBIDDEN_NAMES). Real orphan profiles are NOT
+    reaped: they are a person's work and need an explicit adopt-or-purge."""
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot reap")
+    res = _org_run(_wrap(_LIFECYCLE_REAP_SNIPPET, False), timeout=120.0)
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "could not reap sub-agent artifacts"))
+    return {"reaped": res.get("reaped", []), "count": res.get("count", 0)}
+
+
+@app.delete("/api/bots/{bot_id}")
+def bots_delete(bot_id: str):
+    """Delete a persistent user-created bot. Refuses principal/governor."""
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot delete bots")
+    res = _org_run(_wrap(_LIFECYCLE_DELETE_BOT_SNIPPET, True),
+                   payload={"bot_id": bot_id}, timeout=120.0)
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not delete the bot"))
+    return res
+
+
+@app.patch("/api/bots/{bot_id}")
+async def bots_update(bot_id: str, request: Request):
+    """Edit a persistent bot's metadata (any subset of
+    name/title/description/icon/color). Refuses principal/governor."""
+    try:
+        fields = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    if not isinstance(fields, dict) or not fields:
+        raise HTTPException(status_code=400,
+                            detail="at least one field is required")
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot edit bots")
+    res = _org_run(_wrap(_LIFECYCLE_UPDATE_BOT_SNIPPET, True),
+                   payload={"bot_id": bot_id, "fields": fields}, timeout=60.0)
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not update the bot"))
+    return {"updated": True, "bot": res["bot"]}
 
 
 # ── the chat turn: SSE passthrough to the profile's OpenAI-compatible API ────

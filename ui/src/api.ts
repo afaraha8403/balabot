@@ -643,3 +643,155 @@ export async function deleteBotProposal(pid: string): Promise<{deleted: boolean}
   return api(`/api/bot-proposals/${pid}`, {method: 'DELETE'});
 }
 
+// ── bot edit / delete + orphan reconciliation (frozen contract) ──────────────
+//
+//   PATCH  /api/bots/{bot_id}          body: subset of {name,title,description,icon,color}
+//           200 {updated, bot} · 409 {detail} shipped/unknown-field · 404 {detail}
+//   DELETE /api/bots/{bot_id}          200 {deleted, bot_id, removed, org_removed}
+//           · 409 {detail} principal/governor · 404 {detail}
+//   GET    /api/orphans                200 {profiles, shipped, rostered, note}
+//   POST   /api/orphans/{name}/adopt   200 {adopted, bot}
+//   DELETE /api/orphans/{name}         200 {deleted, profile, removed, roster_row}
+//
+// Every error response carries {detail}, so the typed wrappers surface the
+// backend's reason rather than a bare status code.
+
+/**
+ * Product taxonomy (binding): principal and governor are SHIPPED/LOCKED.
+ * The UI never offers edit or delete for them, and the backend independently
+ * refuses with 409 — this set is what drives the "locked" affordance.
+ */
+export const SHIPPED_BOT_IDS: ReadonlySet<string> = new Set(['principal', 'governor']);
+export function isShippedBot(bot: Pick<Bot, 'id'>): boolean {
+  return SHIPPED_BOT_IDS.has(bot.id);
+}
+
+export type BotEditableMeta = {
+  name: string;
+  title: string;
+  description: string;
+  icon: string;
+  color: string;
+};
+
+export type BotMetaRow = {
+  id: string;
+  name: string;
+  title: string;
+  icon: string;
+  color: string;
+  order: number;
+  description: string;
+  createdBy?: string;
+  createdFrom?: string;
+};
+
+export type UpdateBotResult = {updated: boolean; bot: BotMetaRow};
+export type DeleteBotResult = {
+  deleted: boolean;
+  bot_id: string;
+  removed: string[];
+  org_removed: boolean;
+};
+
+/**
+ * Like `api`, but on a non-ok response it parses the JSON error body and
+ * throws an Error carrying the backend's `detail` (409 shipped/unknown-field,
+ * 404 unknown) so dialogs can show the real reason, not "PATCH ... -> 409".
+ */
+export async function apiWithDetail<T>(
+  method: 'PATCH' | 'DELETE' | 'POST',
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    credentials: 'include',
+    headers: {'Content-Type': 'application/json'},
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let payload: unknown = null;
+  try {
+    payload = await res.json();
+  } catch {
+    // non-JSON error body — fall through to the status-code message
+  }
+  if (!res.ok) {
+    const detail = (payload as {detail?: string} | null)?.detail;
+    throw new Error(detail ?? `${method} ${path} -> ${res.status}`);
+  }
+  return payload as T;
+}
+
+/** PATCH /api/bots/{bot_id} — any subset of the editable meta fields. */
+export async function updateBot(
+  botId: string,
+  patch: Partial<BotEditableMeta>,
+): Promise<UpdateBotResult> {
+  return apiWithDetail<UpdateBotResult>('PATCH', `/api/bots/${encodeURIComponent(botId)}`, patch);
+}
+
+/** DELETE /api/bots/{bot_id} — refuses (409) for principal/governor. */
+export async function deleteBot(botId: string): Promise<DeleteBotResult> {
+  return apiWithDetail<DeleteBotResult>('DELETE', `/api/bots/${encodeURIComponent(botId)}`);
+}
+
+/** GET /api/orphans — real profiles on disk the roster cannot see. */
+export type OrphanShape = 'orphan-profile' | 'subagent-artifact';
+
+export type OrphanProfile = {
+  id: string;
+  name: string;
+  path: string;
+  sizeBytes: number;
+  hasSoul: boolean;
+  hasConfig: boolean;
+  gatewayRunning: boolean;
+  shape: OrphanShape;
+  createdAt: string;
+};
+
+export type OrphansResponse = {
+  profiles: OrphanProfile[];
+  shipped: string[];
+  rostered: string[];
+  note?: string;
+};
+
+export type AdoptOrphanResult = {adopted: boolean; bot: BotMetaRow};
+export type PurgeOrphanResult = {
+  deleted: boolean;
+  profile: string;
+  removed: string[];
+  roster_row: boolean;
+};
+
+export async function listOrphans(): Promise<OrphansResponse> {
+  return api<OrphansResponse>('/api/orphans');
+}
+
+export async function adoptOrphan(name: string): Promise<AdoptOrphanResult> {
+  return apiWithDetail<AdoptOrphanResult>(
+    'POST',
+    `/api/orphans/${encodeURIComponent(name)}/adopt`,
+  );
+}
+
+export async function purgeOrphan(name: string): Promise<PurgeOrphanResult> {
+  return apiWithDetail<PurgeOrphanResult>(
+    'DELETE',
+    `/api/orphans/${encodeURIComponent(name)}`,
+  );
+}
+
+export type ReapArtifactsResult = {
+  reaped: string[];
+  count: number;
+};
+
+/** Reap every empty-shell profile (sub-agent debris). Never touches a real
+ *  orphan profile — those need an explicit adopt or purge. */
+export async function reapSubagentArtifacts(): Promise<ReapArtifactsResult> {
+  return apiWithDetail<ReapArtifactsResult>('POST', '/api/orphans/reap');
+}
+

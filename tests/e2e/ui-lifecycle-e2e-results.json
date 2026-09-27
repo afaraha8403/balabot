@@ -1,0 +1,105 @@
+{
+  "base": "http://127.0.0.1:9119",
+  "container": "balabot-balabot-1",
+  "when": "2026-09-27T19:38:20.169Z",
+  "passed": 19,
+  "total": 19,
+  "mutationCheck": "remove `if (isShippedBot(bot))` early return in ui/src/BotRowMenu.tsx -> caught by s03/s04/s06",
+  "results": [
+    {
+      "name": "s01 /api/orphans classifies both fixture shapes",
+      "ok": true,
+      "detail": "orphan list now: zz-lc-art, zz-lc-real"
+    },
+    {
+      "name": "s02 roster lists principal, governor and scout",
+      "ok": true,
+      "detail": "{\"principal\":true,\"governor\":true,\"scout\":true}"
+    },
+    {
+      "name": "s03 shipped rows show the locked indicator (2x, aria-label)",
+      "ok": true,
+      "detail": "ariaLabelCount=2 (innerText sees it: false — the label lives in the attribute, not the text)"
+    },
+    {
+      "name": "s04 shipped rows expose NO edit/delete affordance (scout menu is the positive control)",
+      "ok": true,
+      "detail": "managePrincipal=false manageGovernor=false scoutMenuExpanded=1 scoutEdit=true scoutDelete=true"
+    },
+    {
+      "name": "s05 PATCH /api/bots/principal refused 409 with backend detail (API layer in page context)",
+      "ok": true,
+      "detail": "status=409 detail='principal' is a shipped persona — it is never editable or deletable"
+    },
+    {
+      "name": "s06 DELETE /api/bots/principal refused 409 with backend detail (API layer in page context)",
+      "ok": true,
+      "detail": "status=409 detail='principal' is a shipped persona — it is never editable or deletable"
+    },
+    {
+      "name": "s07 consent flow creates zz-lc-bot and registers it in the roster",
+      "ok": true,
+      "detail": "id=zz-lc-bot title=zz-lc-bot — zz-lc-bot e2e lifecycle role shippedFlag=false"
+    },
+    {
+      "name": "s08 edit a created bot title through the UI dialog",
+      "ok": true,
+      "detail": "title=zz-lc-title-k7ztr1 visibleAfterSelect=true"
+    },
+    {
+      "name": "s09 edited title persists across reload (fleet row + rendered roster)",
+      "ok": true,
+      "detail": "fleetTitle=zz-lc-title-k7ztr1 rendered=true"
+    },
+    {
+      "name": "s10 DELETE unknown bot refused 404 with backend detail (API layer)",
+      "ok": true,
+      "detail": "status=404 detail=no bot named 'zz-lc-never-existed' in the roster"
+    },
+    {
+      "name": "s11 delete a created bot through the UI confirm flow",
+      "ok": true,
+      "detail": "checkbox=true armed=true rowGone=true"
+    },
+    {
+      "name": "s12 deleted bot vanishes: roster, profile dir, gateway dir, launcher alias",
+      "ok": true,
+      "detail": "inRoster=false fleetRow=false profileGone=true gatewayGone=true aliasGone=true"
+    },
+    {
+      "name": "s13 shipped personas never appear in the orphan list",
+      "ok": true,
+      "detail": "shipped=principal,governor orphans=zz-lc-art,zz-lc-real leaked=none"
+    },
+    {
+      "name": "s14 unregistered-profiles surface opens and lists both fixture orphans",
+      "ok": true,
+      "detail": "realRow=true artRow=true pathsShown=true"
+    },
+    {
+      "name": "s15 orphan-profile renders distinctly from subagent-artifact",
+      "ok": true,
+      "detail": "dlg=true apiIds=zz-lc-art,zz-lc-real real=\"Real profile\" art=\"Sub-agent artifact\""
+    },
+    {
+      "name": "s16 adopt an orphan through the UI -> appears in the roster",
+      "ok": true,
+      "detail": "rowGone=true inRoster=true"
+    },
+    {
+      "name": "s17 purge an orphan through the UI inline confirm -> dir gone",
+      "ok": true,
+      "detail": "rowGone=true dirGone=true"
+    },
+    {
+      "name": "s18 Reap debris removes artifacts but spares real orphan profiles",
+      "ok": true,
+      "detail": "artifactGone=true dirGone=true realSurvived=true realDirExists=true"
+    },
+    {
+      "name": "s19 empty state renders when there are no orphans",
+      "ok": true,
+      "detail": "emptyState=true orphanRows=0"
+    }
+  ]
+}

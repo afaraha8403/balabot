@@ -27,11 +27,29 @@ USER                    most privilege — approves, overrides, owns the machine
   └── PRINCIPAL BOT     runtime ops, system health, and AGENT GROWTH
         └── GOVERNOR    the shared decision ledger (OKF) every other agent reads
               └── PERSISTENT AGENTS   do the real work; user-facing; delegate the heavy lifting
-                    └── SUB-AGENTS    temporary, short- or long-lived, spawned per job
+                    └── SUB-AGENTS    temporary, short-lived, unnamed, spawned per job
 ```
 
-The principal and the governor are the two agents **shipped out of the box** — every BalaBot install
-has them from day one.
+### The three classes of agent (and who may touch them)
+
+| Class | Members | Named? | Long-lived? | Editable / deletable? |
+|---|---|---|---|---|
+| **Shipped** | `principal`, `governor` | yes | yes | **No — locked by the product.** Their souls are pinned in the image (`personas/`); nothing at runtime may change their fundamental nature. |
+| **Persistent, user-created** | anything else the owner asks for (e.g. `scout`) | yes | yes | **Yes — both.** |
+| **Sub-agents** | spun up per job, then gone | **no — they are a job, not an identity** | no | n/a; they report back and disappear. Never long-lived. |
+
+**Creating an agent is a peer act, gated by the owner's request.** Any persistent agent may create
+another persistent agent — *when the owner asks* ("hire me a chief of staff", "create me an
+employee", "make me a bot"). The gate is the owner's request, not a tier: the principal is not the
+only provisioner. When the owner asks for an agent, they are asking for a **persistent** one.
+
+**"Create me an agent" does NOT mean "shape a profile directory."** An agent exists *in the product*
+only when it is **registered in the roster** — `/opt/data/fleet/bots.json`, the registry the UI reads
+(`createdBy` / `createdFrom` recorded, created through the consent path: owner request, or a
+bot-filed proposal the owner approves). A Hermes profile sitting in `/opt/data/profiles/` with no
+roster row is an **orphan**: the app cannot list it, the owner cannot reach it, and the UI is right to
+report that it does not exist. Sub-agents are never named profiles either — they are spawned
+processes (the spawn ledger), and they are not long-lived.
 
 ## Governor — the decision ledger
 
@@ -362,30 +380,36 @@ computer-use agent that stutters and one that flows.
 
 ### Sub-agents — temporary
 
-Short- or long-lived, scoped to one job, created by a persistent agent, invisible to the user except
-through the parent. Parent sees the summary; the child never sees the parent's history.
+Scoped to one job, created by a persistent agent, invisible to the user except through the parent.
+Parent sees the summary; the child never sees the parent's history.
+
+**A sub-agent is a job, not an identity.** It is a spawned process (the spawn ledger), never a named
+profile: no SOUL.md, no roster row, no name. It reports back and goes away — it is never long-lived.
+Anything that must last is a **persistent agent**, which means a roster row (see
+"The three classes of agent"). A profile directory with no roster row is an orphan, not a sub-agent.
 
 ## Mapping onto Hermes (what already exists vs what must be built)
 
 | BalaBot concept | Hermes primitive | State |
 |---|---|---|
-| Principal bot | a profile shipped pre-configured in the image | **to build** |
-| Persistent agent | a named Hermes profile + its own API server/gateway | exists (steve/jim/oscar prove it) |
+| Principal bot | a profile shipped pre-configured in the image | **shipped** (with the governor; both locked) |
+| Persistent agent | a named Hermes profile **+ a roster row** in `/opt/data/fleet/bots.json` | **shipped** — create (consent flow), edit, delete, adopt |
 | Sub-agent (temporary) | `delegate_task` children — isolated context, own terminal, summary-only return | exists |
-| Sub-agent (long-lived) | a profile spawned on demand | exists, no UI flow |
+| Sub-agent (long-lived) | — | **not a thing**: anything long-lived is a persistent agent with a roster row |
 | Agent's own screen | org-scoped agent computer (container, per-agent X display) | **shipped** |
 | Agent-to-agent messaging | `message_agent` + visible handoff frames | exists |
 | Skills & craft hygiene | curator state + the Skill Library view | **shipped** (readable); principal's review loop **to build** |
 | Secrets with per-agent grants | org registry + `secrets.sources` command helper | **shipped** |
-| Hierarchy enforcement | — | **to build** |
+| Hierarchy enforcement | shipped agents (`principal`, `governor`) + `default` refuse edit/delete/purge (409); orphan detection + reference-complete purge | **shipped** |
 | Sub-agent visibility in the UI | — | **to build** |
 
 ## What must be built for this to be real
 
 1. **Hierarchy as a permission layer, not prompt advice.** Who may restart whom, who may create
-   whom, who may grant what. Concretely: the principal may restart/stop persistent agents and
-   provision new ones; persistent agents may only spawn sub-agents and *request* peers; only the
-   user may replace the principal.
+   whom, who may grant what. Concretely: any persistent agent may create another persistent agent
+   **when the user asks** (the gate is the user's request, not the tier — see item 3); only the user
+   may replace the principal; and the shipped agents (`principal`, `governor`) plus the runtime's
+   `default` profile refuse edit/delete/purge at the API (409), not merely in prose.
 2. **The principal's ops toolset** — health of every agent, log reads, restart, and a periodic
    skills/craft review pass that reports findings rather than silently editing.
 3. ~~A single point of failure.~~ **Resolved:** peer creation is allowed, so the principal is not the

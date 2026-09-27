@@ -32,6 +32,7 @@ import {
   DocumentIcon,
   ExclamationTriangleIcon,
   EyeSlashIcon,
+  FolderIcon,
   InformationCircleIcon,
   MagnifyingGlassIcon,
   PaperClipIcon,
@@ -109,6 +110,8 @@ export const IconConceal = wrap(EyeSlashIcon);
 export const IconCollapsePanel = wrap(ChevronDoubleLeftIcon);
 /** Re-open a collapsed side panel. */
 export const IconExpandPanel = wrap(ChevronDoubleRightIcon);
+/** Unregistered (orphan) profiles — a folder the roster cannot see. */
+export const IconOrphans = wrap(FolderIcon);
 
 /**
  * A secret request: concealment when it is an ACCESS request, the warning

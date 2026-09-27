@@ -7,6 +7,7 @@ import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {ThinkingOrb} from 'thinking-orbs';
+import {BotRowMenu} from '../BotRowMenu';
 import type {Bot, Session, SubAgent} from '../api';
 
 // Messenger-style roster rows: avatar · bold name · one-line preview · timestamp.
@@ -68,6 +69,8 @@ export function BotRoster({
   isStreaming,
   subagents,
   onSelect,
+  onEditBot,
+  onDeleteBot,
 }: {
   bots: Bot[];
   activeBotId: string | null;
@@ -81,6 +84,10 @@ export function BotRoster({
    */
   subagents?: SubAgent[];
   onSelect: (id: string) => void;
+  /** Open the edit dialog (never called for shipped bots). */
+  onEditBot?: (bot: Bot) => void;
+  /** Open the delete-confirm dialog (never called for shipped bots). */
+  onDeleteBot?: (bot: Bot) => void;
 }) {
   const entries: RosterEntry[] = bots.map(bot => {
     const last = lastMessageFor(sessions, bot.id);
@@ -143,9 +150,18 @@ export function BotRoster({
           }
           endContent={
             <VStack gap={1} align="end">
-              <Text type="supporting" size="xsm">
-                {e.when}
-              </Text>
+              <HStack gap={1} vAlign="center">
+                <Text type="supporting" size="xsm">
+                  {e.when}
+                </Text>
+                {onEditBot && onDeleteBot ? (
+                  <BotRowMenu
+                    bot={e.bot}
+                    onEdit={onEditBot}
+                    onDelete={onDeleteBot}
+                  />
+                ) : null}
+              </HStack>
               {e.isTyping ? (
                 // Same signal as the in-thread orb, at the inline-text preset.
                 // Replaces a pulsing StatusDot: the roster and the thread now
