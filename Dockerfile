@@ -25,6 +25,13 @@ ENV BALABOT_HOME=/opt/balabot \
 COPY balabot/ /opt/balabot/balabot/
 COPY skills/ /opt/balabot/skills/
 COPY personas/ /opt/balabot/personas/
+# The per-org fleet manifests. The agent-computer run script is
+# manifest-driven: with no fleet/ dir it finds zero declared agents and
+# correctly goes DORMANT, which means NO Xvfb, NO cua-driver, NO sockets —
+# the Agent Computer silently disappears. Repo copy alone is not enough;
+# the manifest must ship inside the image. Caught by E2E against the rebuilt
+# artifact (S5 principal+governor frames), not by unit tests.
+COPY fleet/ /opt/balabot/fleet/
 COPY entrypoint.sh /usr/local/bin/balabot-entrypoint.sh
 
 # /data holds per-persona workspaces (rules files must live in the workspace,
