@@ -79,6 +79,8 @@ export type SkillEntry = {
   description?: string;
   grants?: string[] | string;
   state?: string;
+  /** Real skill category on disk (server-reported), e.g. 'balabot', 'devops'. */
+  category?: string;
 };
 
 export type SkillLibrary = {
@@ -366,8 +368,9 @@ export async function postOrgGrant(body: {
   return api('/api/org/grants', {method: 'POST', body: JSON.stringify(body)});
 }
 
-export async function getSkillLibrary(): Promise<SkillLibrary> {
-  return api<SkillLibrary>('/api/org/skills/library');
+export async function getSkillLibrary(botId?: string): Promise<SkillLibrary> {
+  const q = botId ? `?bot=${encodeURIComponent(botId)}` : '';
+  return api<SkillLibrary>(`/api/skills/library${q}`);
 }
 
 export async function postSkillPin(body: {

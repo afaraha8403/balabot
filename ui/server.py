@@ -418,6 +418,101 @@ def orgs():
     return _org_unavailable()
 
 
+def _skill_rows(profile: str) -> list[dict] | None:
+    """Every SKILL.md in a profile's tree, with its real category and blurb.
+
+    Walks the container's own filesystem rather than trusting a registry: the
+    profile tree IS the truth about what an agent has. None means the read
+    failed (container down, tree absent), which the caller reports honestly
+    rather than rendering an empty list as "no skills".
+    """
+    script = (
+        "python3 - <<'PY'\n"
+        "import json, pathlib\n"
+        "base = pathlib.Path('/opt/data/profiles/" + profile + "/skills')\n"
+        "if not base.is_dir():\n"
+        "    print('[]')\n"
+        "    raise SystemExit\n"
+        "rows = []\n"
+        "for md in sorted(base.rglob('SKILL.md')):\n"
+        "    rel = md.relative_to(base)\n"
+        "    parts = rel.parts\n"
+        "    category = parts[0] if len(parts) > 2 else ''\n"
+        "    desc = ''\n"
+        "    try:\n"
+        "        for line in md.read_text(encoding='utf-8', errors='replace').splitlines()[:24]:\n"
+        "            if line.startswith('description:'):\n"
+        "                desc = line.split(':', 1)[1].strip().strip('\\\"')\n"
+        "                break\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    rows.append({'name': parts[-2], 'category': category,\n"
+        "                 'description': desc, 'path': str(rel).replace(chr(92), '/'),\n"
+        "                 'hasCategoryDoc': (base / category / 'DESCRIPTION.md').is_file() if category else False})\n"
+        "print(json.dumps(rows))\n"
+        "PY"
+    )
+    out = _docker_exec(script, timeout=45.0)
+    if out is None:
+        return None
+    try:
+        return json.loads(out.strip().splitlines()[-1])
+    except Exception:
+        return None
+
+
+@app.get("/api/skills/library")
+def skills_library(bot: str = ""):
+    """The real skill library for one bot, or all of them.
+
+    Everything found is reported as `brought`, the source naming whether it is
+    BalaBot's own shipped set (`balabot/`) or the profile's shipped install.
+    `learned` is deliberately left EMPTY: a skill's origin is not inferable from
+    the filesystem, and no curator state exists yet, so attributing anything to
+    the self-improvement loop would be an invented claim.
+    """
+    if bot and bot not in PROFILES:
+        raise HTTPException(status_code=404, detail=f"unknown bot {bot}")
+    if not container_ok():
+        return unavailable("balabot container is not running "
+                           "- cannot read the skill trees")
+    targets = [bot] if bot else PROFILES
+    library: dict[str, dict] = {}
+    for prof in targets:
+        rows = _skill_rows(prof)
+        if rows is None:
+            library[prof] = {"available": False,
+                             "reason": f"could not read the skill tree for {prof}"}
+            continue
+        # Classification uses only what is CERTAIN from disk. An earlier pass
+        # inferred "authored in this profile" from the absence of a category
+        # DESCRIPTION.md, which silently relabelled 13 shipped Hermes skills as
+        # agent-written because two categories happen not to carry that file.
+        # Invented provenance is worse than none, so: the balabot/ category is
+        # BalaBot's shipped set, everything else is the profile's shipped
+        # install, and `learned` stays EMPTY until real curator state exists.
+        brought, learned = [], []
+        for r in rows:
+            source = ("ships with BalaBot" if r["category"] == "balabot"
+                      else "ships with this install")
+            brought.append({"name": r["name"], "source": source,
+                            "category": r["category"] or "(uncategorised)",
+                            "description": r["description"], "state": "active"})
+        library[prof] = {
+            "available": True,
+            "learned": learned,
+            "brought": brought,
+            "total": len(rows),
+            "note": (f"{len(brought)} skills installed in this profile. Nothing is "
+                     "attributed to the self-improvement loop: there is no curator "
+                     "state yet, and a skill's origin is not inferable from disk "
+                     "alone, so only installed skills are reported."),
+        }
+    if bot:
+        return library[bot]
+    return {"available": True, "bots": library}
+
+
 @app.get("/api/org/requests")
 def org_requests():
     return {"requests": []}  # keep the poller quiet; org layer is not wired

@@ -35,6 +35,8 @@ type Detail = SkillEntry | null;
 type Props = {
   /** The fleet's bots — the real share targets now that there is no org layer. */
   bots: Bot[];
+  /** Which bot's skill tree to show. The library is per-profile, not global. */
+  activeBotId: string | null;
   onClose: () => void;
 };
 
@@ -53,8 +55,13 @@ function stateToken(entry: SkillEntry) {
   return <Token label={state || 'unknown'} size="sm" color={color} />;
 }
 
-export function SkillLibraryDialog({bots, onClose}: Props) {
-  const [group, setGroup] = useState<Group>('learned');
+export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
+  // Opens on `brought`. Every skill a profile has today was INSTALLED (shipped
+  // with BalaBot or with the install); none can be attributed to the
+  // self-improvement loop, because no curator state exists yet. Defaulting to
+  // `learned` therefore opened the screen on an empty list — which is true but
+  // useless, and was reported as "the skills are empty".
+  const [group, setGroup] = useState<Group>('brought');
   const [library, setLibrary] = useState<SkillLibrary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -65,7 +72,7 @@ export function SkillLibraryDialog({bots, onClose}: Props) {
     setIsLoading(true);
     setError('');
     try {
-      const lib = await getSkillLibrary();
+      const lib = await getSkillLibrary(activeBotId ?? undefined);
       setLibrary({
         learned: lib.learned ?? [],
         brought: lib.brought ?? [],
@@ -77,7 +84,7 @@ export function SkillLibraryDialog({bots, onClose}: Props) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [activeBotId]);
 
   useEffect(() => {
     void reload();

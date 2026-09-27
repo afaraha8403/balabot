@@ -241,33 +241,47 @@ async function s08_tool_activity(browser) {
     return record('s08 a real tool call is surfaced (ChatToolCalls + orb)', false, 'no composer');
   }
 
+  // Record every orb label and tool-row count the page ever renders. The working
+  // orb only occupies the thread between "turn started" and "first text token",
+  // so polling races it and the scenario flakes; an observer cannot miss it.
+  await page.evaluate(() => {
+    window.__orbLabels = [];
+    window.__maxRows = 0;
+    const seen = new Set();
+    const sample = () => {
+      document.querySelectorAll('canvas').forEach((c) => {
+        const l = c.getAttribute('aria-label') || '';
+        if (l && !seen.has(l)) { seen.add(l); window.__orbLabels.push(l); }
+      });
+      const n = document.querySelectorAll('[class*="astryx-chat-tool"]').length;
+      if (n > window.__maxRows) window.__maxRows = n;
+    };
+    sample();
+    window.__orbTimer = setInterval(sample, 60);
+  });
+
   await page.click('[data-e2e-composer2="1"]');
   await page.keyboard.type(`Use your terminal tool to run exactly: echo ${stamp} — then report the output. You must call the tool.`);
   await page.keyboard.press('Enter');
 
   let sawToolRow = false;
-  let sawOrbNamingTool = false;
   let sawTarget = false;
   const deadline = Date.now() + 120000;
   while (Date.now() < deadline) {
-    const s = await page.evaluate(() => {
-      const t = document.body.innerText || '';
-      const orbs = Array.from(document.querySelectorAll('canvas')).map((c) => c.getAttribute('aria-label') || '');
-      return {
-        t,
-        rows: document.querySelectorAll('[class*="astryx-chat-tool"]').length,
-        orbLabels: orbs,
-      };
-    });
+    const s = await page.evaluate(() => ({
+      t: document.body.innerText || '',
+      rows: document.querySelectorAll('[class*="astryx-chat-tool"]').length,
+    }));
     if (s.rows > 0) sawToolRow = true;
-    if (s.orbLabels.some((l) => /is running \w+/.test(l))) sawOrbNamingTool = true;
     if (s.t.includes(stamp)) sawTarget = true;
-    if (sawToolRow && sawTarget && sawOrbNamingTool) break;
-    // The orb only occupies the thread in the window between "turn started" and
-    // "first text token arrived", so it must be sampled faster than a second or
-    // the window closes between polls.
-    await sleep(250);
+    if (sawToolRow && sawTarget) break;
+    await sleep(400);
   }
+  const recorded = await page.evaluate(() => {
+    clearInterval(window.__orbTimer);
+    return {labels: window.__orbLabels || [], maxRows: window.__maxRows || 0};
+  });
+  const sawOrbNamingTool = recorded.labels.some((l) => /is running \w+/.test(l));
 
   // Let the turn finish, then confirm the call PERSISTS on the settled message
   // rather than vanishing with the orb.
@@ -281,7 +295,7 @@ async function s08_tool_activity(browser) {
   record(
     's08 a real tool call is surfaced (ChatToolCalls + orb)',
     sawToolRow && sawTarget && sawOrbNamingTool && after.rows > 0,
-    `toolRow=${sawToolRow} target=${sawTarget} orbNamedTool=${sawOrbNamingTool} persistedRows=${after.rows} orbsAfter=${after.orbs}`,
+    `toolRow=${sawToolRow} target=${sawTarget} orbNamedTool=${sawOrbNamingTool} persistedRows=${after.rows} orbsAfter=${after.orbs} orbLabels=${JSON.stringify(recorded.labels).slice(0, 160)}`,
   );
 }
 

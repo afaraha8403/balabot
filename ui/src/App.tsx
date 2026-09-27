@@ -781,6 +781,7 @@ export default function App() {
       {showSkills ? (
         <SkillLibraryDialog
           bots={bots}
+          activeBotId={activeBotId}
           onClose={() => setShowSkills(false)}
         />
       ) : null}
