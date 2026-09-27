@@ -15,17 +15,26 @@ import {
   getSkillLibrary,
   postSkillPin,
   postSkillPromote,
+  type Bot,
   type SkillEntry,
   type SkillLibrary,
 } from './api';
+
+import {
+  IconAdd,
+  IconError,
+  IconApply,
+  IconInfo,
+  IconUpload,
+  IconWarning,
+} from './icons';
 
 type Group = 'learned' | 'brought';
 type Detail = SkillEntry | null;
 
 type Props = {
-  /** Active org id used by pin/promote calls. */
-  orgId: string;
-  members: string[];
+  /** The fleet's bots — the real share targets now that there is no org layer. */
+  bots: Bot[];
   onClose: () => void;
 };
 
@@ -44,7 +53,7 @@ function stateToken(entry: SkillEntry) {
   return <Token label={state || 'unknown'} size="sm" color={color} />;
 }
 
-export function SkillLibraryDialog({orgId, members, onClose}: Props) {
+export function SkillLibraryDialog({bots, onClose}: Props) {
   const [group, setGroup] = useState<Group>('learned');
   const [library, setLibrary] = useState<SkillLibrary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -80,7 +89,7 @@ export function SkillLibraryDialog({orgId, members, onClose}: Props) {
   const togglePin = async (entry: SkillEntry) => {
     const pinned = entry.state === 'pinned';
     try {
-      await postSkillPin({org: orgId, name: entry.name, pinned: !pinned});
+      await postSkillPin({name: entry.name, pinned: !pinned});
       await reload();
     } catch (e) {
       setError((e as Error).message);
@@ -89,7 +98,7 @@ export function SkillLibraryDialog({orgId, members, onClose}: Props) {
 
   const promote = async (name: string, share: string | string[]) => {
     try {
-      await postSkillPromote({org: orgId, name, share});
+      await postSkillPromote({name, share});
       setPromoteTarget(null);
       await reload();
     } catch (e) {
@@ -108,7 +117,7 @@ export function SkillLibraryDialog({orgId, members, onClose}: Props) {
 
         {error ? (
           <HStack gap={2} vAlign="center">
-            <Icon icon="error" color="red" />
+            <IconError color="red" />
             <Text type="supporting">{error}</Text>
           </HStack>
         ) : null}
@@ -123,7 +132,7 @@ export function SkillLibraryDialog({orgId, members, onClose}: Props) {
               isCompact
               title="Nothing here yet"
               description={note}
-              icon={<Icon icon="info" />}
+              icon={<IconInfo />}
             />
           ) : (
             <EmptyState
@@ -134,7 +143,7 @@ export function SkillLibraryDialog({orgId, members, onClose}: Props) {
                   ? 'Skills this org taught its bots will appear here.'
                   : 'Skills installed from outside will appear here.'
               }
-              icon={<Icon icon="info" />}
+              icon={<IconInfo />}
             />
           )
         ) : null}
@@ -158,21 +167,21 @@ export function SkillLibraryDialog({orgId, members, onClose}: Props) {
                       label={entry.state === 'pinned' ? `Unpin ${entry.name}` : `Pin ${entry.name}`}
                       size="sm"
                       variant="ghost"
-                      icon={<Icon icon={entry.state === 'pinned' ? 'check' : 'search'} />}
+                      icon={entry.state === 'pinned' ? <IconApply /> : <IconAdd />}
                       onClick={() => void togglePin(entry)}
                     />
                     <IconButton
                       label={`Promote ${entry.name}`}
                       size="sm"
                       variant="ghost"
-                      icon={<Icon icon="arrowUp" />}
+                      icon={<IconUpload />}
                       onClick={() => setPromoteTarget({name: entry.name, share: 'all'})}
                     />
                     <IconButton
                       label={`Details for ${entry.name}`}
                       size="sm"
                       variant="ghost"
-                      icon={<Icon icon="info" />}
+                      icon={<IconInfo />}
                       onClick={() => setDetail(entry)}
                     />
                   </HStack>
@@ -191,7 +200,7 @@ export function SkillLibraryDialog({orgId, members, onClose}: Props) {
               size="sm"
               options={[
                 {value: 'all', label: 'All bots'},
-                ...members.map(m => ({value: m, label: m})),
+                ...bots.map(b => ({value: b.id, label: b.name})),
               ]}
             />
             <HStack gap={2} hAlign="end">

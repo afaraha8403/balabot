@@ -7,6 +7,7 @@ import {Dialog, DialogHeader} from '@astryxdesign/core/Dialog';
 import {Icon} from '@astryxdesign/core/Icon';
 import {IconButton} from '@astryxdesign/core/IconButton';
 import {newSession} from './sessions';
+import {IconAdd, IconClose} from './icons';
 import type {Session} from './api';
 
 type Props = {
@@ -30,7 +31,7 @@ export function SessionsDialog({sessions, activeId, onSwitch, onDelete, onNew, o
           <Button
             label="New conversation"
             variant="primary"
-            icon={<Icon icon="arrowUp" />}
+            icon={<IconAdd />}
             onClick={() => {
               onNew(newSession('', 'New chat'));
               onClose();
@@ -56,7 +57,7 @@ export function SessionsDialog({sessions, activeId, onSwitch, onDelete, onNew, o
                       label={`Delete conversation ${s.title}`}
                       size="sm"
                       variant="ghost"
-                      icon={<Icon icon="close" />}
+                      icon={<IconClose />}
                       onClick={e => {
                         e.stopPropagation();
                         setConfirmId(s.id);

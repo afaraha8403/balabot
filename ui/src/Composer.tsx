@@ -6,10 +6,10 @@ import {ChatDictationButton} from '@astryxdesign/core/Chat';
 import {useChatDictation} from '@astryxdesign/core/Chat';
 import type {ChatComposerInputHandle} from '@astryxdesign/core/Chat';
 import {Token} from '@astryxdesign/core/Token';
-import {Icon} from '@astryxdesign/core/Icon';
 import {IconButton} from '@astryxdesign/core/IconButton';
 import {HStack} from '@astryxdesign/core/Stack';
 import {VStack} from '@astryxdesign/core/VStack';
+import {IconAttach, IconFile} from './icons';
 
 export type Attachment = {id: string; name: string};
 
@@ -69,7 +69,7 @@ export function Composer({isStreaming, onSubmit, onStop, isDisabled}: Props) {
                 <Token
                   key={a.id}
                   label={a.name}
-                  icon={<Icon icon="externalLink" />}
+                  icon={<IconFile />}
                   onRemove={() =>
                     setAttachments(prev => prev.filter(x => x.id !== a.id))
                   }
@@ -84,7 +84,7 @@ export function Composer({isStreaming, onSubmit, onStop, isDisabled}: Props) {
           label="Attach file"
           size="sm"
           variant="ghost"
-          icon={<Icon icon="externalLink" />}
+          icon={<IconAttach />}
           onClick={() => {
             const el = document.createElement('input');
             el.type = 'file';

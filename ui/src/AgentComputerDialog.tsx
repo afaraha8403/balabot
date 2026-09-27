@@ -11,6 +11,7 @@ import {Timestamp} from '@astryxdesign/core/Timestamp';
 import {Token} from '@astryxdesign/core/Token';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {Spinner} from '@astryxdesign/core/Spinner';
+import {IconWarning} from './icons';
 import {
   getComputerFrame,
   sendComputerAction,
@@ -160,7 +161,7 @@ export function AgentComputerDialog({bot, onClose}: Props) {
             isCompact
             title="Screen unavailable"
             description={frame.note ?? 'No frame data returned.'}
-            icon={<Icon icon="warning" />}
+            icon={<IconWarning />}
           />
         )}
 

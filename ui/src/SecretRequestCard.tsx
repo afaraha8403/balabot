@@ -10,6 +10,8 @@ import {Selector} from '@astryxdesign/core/Selector';
 import {Token} from '@astryxdesign/core/Token';
 import {Timestamp} from '@astryxdesign/core/Timestamp';
 import {Avatar} from '@astryxdesign/core/Avatar';
+import {IconClose, IconConcealOrWarning, IconError, IconSuccess} from './icons';
+import type {Bot} from './api';
 import {
   ChatMessage as ChatMessageRow,
   ChatMessageBubble,
@@ -22,10 +24,8 @@ import {
 
 type Props = {
   card: SecretCard;
-  /** Active org id the secret belongs to (from the org switcher). */
-  orgId: string;
-  /** Member profiles offered by the share selector ("Choose bots"). */
-  members: string[];
+  /** The fleet's bots — the real share targets now that there is no org layer. */
+  bots: Bot[];
   onResolve: (requestId: string, status: SecretCard['status']) => void;
 };
 
@@ -36,7 +36,7 @@ type Props = {
  * anywhere. After Save the input is cleared immediately and only the
  * name + fingerprint confirmation remains.
  */
-export function SecretRequestCard({card, orgId, members, onResolve}: Props) {
+export function SecretRequestCard({card, bots, onResolve}: Props) {
   // The ONLY state that ever holds the value; cleared right after the POST.
   const [value, setValue] = useState('');
   const [share, setShare] = useState('all');
@@ -55,7 +55,6 @@ export function SecretRequestCard({card, orgId, members, onResolve}: Props) {
     try {
       await postOrgGrant({
         principal: card.bot,
-        org: orgId,
         kind: 'secret',
         name: card.name,
         action: 'grant',
@@ -74,7 +73,6 @@ export function SecretRequestCard({card, orgId, members, onResolve}: Props) {
     try {
       await postOrgGrant({
         principal: card.bot,
-        org: orgId,
         kind: 'secret',
         name: card.name,
         action: 'revoke',
@@ -94,7 +92,6 @@ export function SecretRequestCard({card, orgId, members, onResolve}: Props) {
     try {
       const shareValue = share === 'choose' ? chooseBots : share;
       const result = await postOrgSecret({
-        org: orgId,
         name: card.name,
         value,
         share: shareValue,
@@ -128,7 +125,7 @@ export function SecretRequestCard({card, orgId, members, onResolve}: Props) {
         }>
         <VStack gap={3} maxWidth={420}>
           <HStack gap={2} vAlign="center" wrap="wrap">
-            <Icon icon={isAccessRequest ? 'eyeSlash' : 'warning'} color="warning" />
+            <IconConcealOrWarning isAccess={isAccessRequest} />
             <Text weight="semibold">{card.name}</Text>
             <Token label={card.bot || 'bot'} size="sm" color="blue" />
             <Timestamp value={new Date(card.at).toISOString()} format="time" />
@@ -144,7 +141,7 @@ export function SecretRequestCard({card, orgId, members, onResolve}: Props) {
           {resolved ? (
             card.status?.state === 'saved' ? (
               <HStack gap={2} vAlign="center" wrap="wrap">
-                <Icon icon="success" color="green" />
+                <IconSuccess color="green" />
                 <Text type="supporting">
                   Saved. Fingerprint {card.status.fingerprint || '—'}
                 </Text>
@@ -196,20 +193,20 @@ export function SecretRequestCard({card, orgId, members, onResolve}: Props) {
                 ]}
                 width="100%"
               />
-              {share === 'choose' && members.length > 0 ? (
+              {share === 'choose' && bots.length > 0 ? (
                 <Selector
                   label="Bots"
                   value={chooseBots[0] ?? ''}
                   onChange={v => setChooseBots(v ? [v] : [])}
                   size="sm"
                   placeholder="Pick a bot"
-                  options={members.map(m => ({value: m, label: m}))}
+                  options={bots.map(b => ({value: b.id, label: b.name}))}
                   width="100%"
                 />
               ) : null}
               {error ? (
                 <HStack gap={2} vAlign="center">
-                  <Icon icon="error" color="red" />
+                  <IconError color="red" />
                   <Text type="supporting">{error}</Text>
                 </HStack>
               ) : null}
@@ -246,7 +243,7 @@ export function SecretCardDismissButton({onDismiss}: {onDismiss: () => void}) {
       label="Dismiss"
       size="sm"
       variant="ghost"
-      icon={<Icon icon="close" />}
+      icon={<IconClose />}
       onClick={onDismiss}
     />
   );

@@ -299,7 +299,7 @@ export async function getOrgs(): Promise<OrgSummary[]> {
  * component state beyond the password input itself.
  */
 export async function postOrgSecret(body: {
-  org: string;
+  org?: string;
   name: string;
   value: string;
   description?: string;
@@ -317,7 +317,7 @@ export async function postOrgSecret(body: {
 
 export async function postOrgGrant(body: {
   principal: string;
-  org: string;
+  org?: string;
   kind: string;
   name: string;
   action: 'grant' | 'revoke';
@@ -330,7 +330,7 @@ export async function getSkillLibrary(): Promise<SkillLibrary> {
 }
 
 export async function postSkillPin(body: {
-  org: string;
+  org?: string;
   name: string;
   pinned: boolean;
 }): Promise<unknown> {
@@ -338,7 +338,7 @@ export async function postSkillPin(body: {
 }
 
 export async function postSkillPromote(body: {
-  org: string;
+  org?: string;
   name: string;
   share: string | string[];
 }): Promise<unknown> {

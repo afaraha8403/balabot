@@ -34,7 +34,7 @@ import {SessionsDialog} from './SessionsDialog';
 import {AgentComputerDialog} from './AgentComputerDialog';
 import {SecretRequestCard} from './SecretRequestCard';
 import {SkillLibraryDialog} from './SkillLibraryDialog';
-import {OrgSwitcher} from './OrgSwitcher';
+import {useMediaQuery} from '@astryxdesign/core/hooks';
 import {BotRoster} from './screens/BotRoster';
 import {AgentsScreen} from './screens/AgentsScreen';
 import {MemoryScreen} from './screens/MemoryScreen';
@@ -42,7 +42,22 @@ import {DecisionsScreen} from './screens/DecisionsScreen';
 import {GovernanceScreen} from './screens/GovernanceScreen';
 import {OpsScreen} from './screens/OpsScreen';
 import {CostScreen} from './screens/CostScreen';
-import {api, streamChat, checkHealth, getFleet, getOrgs, type Bot, type ChatMessage, type Handoff, type Session, type SecretCard, type OrgSummary} from './api';
+import {api, streamChat, checkHealth, getFleet, type Bot, type ChatMessage, type Handoff, type Session, type SecretCard} from './api';
+import {
+  IconAgentComputer,
+  IconAgents,
+  IconBotKnowledge,
+  IconClose,
+  IconConversations,
+  IconCost,
+  IconDecisions,
+  IconGovernance,
+  IconMemory,
+  IconMessages,
+  IconOps,
+  IconSkills,
+  IconWarning,
+} from './icons';
 import {loadSessions, saveSessions, loadLastBot, saveLastBot, newSession} from './sessions';
 
 /** Opening suggestions shown on the empty state. */
@@ -85,21 +100,18 @@ export default function App() {
   const [showSkills, setShowSkills] = useState(false);
   const [excluded, setExcluded] = useState<string[]>([]);
   const [banner, setBanner] = useState('');
-  const [org, setOrg] = useState<OrgSummary | null>(null);
   const [secretCards, setSecretCards] = useState<SecretCard[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Astryx's responsive contract: above 1024px the third region (the rosters and
+  // detail panels) has room; below it, it is dropped rather than squeezed, and
+  // the nav collapses to MobileNav at the shell's own breakpoint.
+  const isNarrow = useMediaQuery('(max-width: 1024px)');
 
   // Load bots + fleet + health
   useEffect(() => {
     void (async () => {
       try {
-        // Org layer is optional (endpoints roll out in parallel) — never fatal.
-        try {
-          const orgs = await getOrgs();
-          setOrg(orgs[0] ?? null);
-        } catch {
-          setOrg(null);
-        }
         // Fleet discipline: never render or request excluded profiles.
         // Nothing alarming is shown for them — they are simply absent.
         try {
@@ -145,44 +157,6 @@ export default function App() {
   useEffect(() => {
     saveSessions(sessions);
   }, [sessions]);
-
-  // Poll pending org requests (every 4s, while open) into the existing secret
-  // cards. ADDITIONAL source alongside the SSE frames — never a replacement.
-  useEffect(() => {
-    let alive = true;
-    const poll = async () => {
-      try {
-        const r = await api<{requests: Array<{
-          id: string; org: string; bot: string; kind: string;
-          name: string; detail?: string; status: string; ts: string;
-        }>}>('/api/org/requests' + (org?.id ? `?org=${encodeURIComponent(org.id)}&status=pending` : ''));
-        if (!alive) return;
-        const pending = r.requests ?? [];
-        setSecretCards(prev => {
-          const known = new Set(prev.map(c => c.requestId));
-          const fresh: SecretCard[] = pending
-            .filter(req => (req.kind === 'secret' || req.kind === 'secret_access') && !known.has(req.id))
-            .map(req => ({
-              kind: req.kind === 'secret_access' ? 'secret_access_request' : 'secret_request',
-              bot: req.bot,
-              name: req.name,
-              description: req.detail || undefined,
-              requestId: req.id,
-              at: Date.parse(req.ts) || Date.now(),
-            }));
-          return fresh.length > 0 ? [...prev, ...fresh] : prev;
-        });
-      } catch {
-        // Polling is best-effort; SSE frames still deliver live requests.
-      }
-    };
-    void poll();
-    const t = setInterval(() => void poll(), 4000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, [org?.id]);
 
   const activeBot = bots.find(b => b.id === activeBotId) ?? null;
 
@@ -292,7 +266,7 @@ export default function App() {
         <SideNavItem
           label="Messages"
           isSelected={screen === 'chat'}
-          icon="menu"
+          icon={<IconMessages />}
           onClick={() => setScreen('chat')}
         />
       </SideNavSection>
@@ -300,36 +274,46 @@ export default function App() {
         <SideNavItem
           label="Agents"
           isSelected={screen === 'agents'}
+          icon={<IconAgents />}
           onClick={() => setScreen('agents')}
         />
         <SideNavItem
           label="Memory"
           isSelected={screen === 'memory'}
+          icon={<IconMemory />}
           onClick={() => setScreen('memory')}
         />
         <SideNavItem
           label="Decisions"
           isSelected={screen === 'decisions'}
+          icon={<IconDecisions />}
           onClick={() => setScreen('decisions')}
         />
         <SideNavItem
           label="Governance"
           isSelected={screen === 'governance'}
+          icon={<IconGovernance />}
           onClick={() => setScreen('governance')}
         />
         <SideNavItem
           label="Ops"
           isSelected={screen === 'ops'}
+          icon={<IconOps />}
           onClick={() => setScreen('ops')}
         />
         <SideNavItem
           label="Cost & usage"
           isSelected={screen === 'cost'}
+          icon={<IconCost />}
           onClick={() => setScreen('cost')}
         />
       </SideNavSection>
       <SideNavSection title="Sessions">
-        <SideNavItem label="Conversations" onClick={() => setShowSessions(true)} />
+        <SideNavItem
+          label="Conversations"
+          icon={<IconConversations />}
+          onClick={() => setShowSessions(true)}
+        />
       </SideNavSection>
     </SideNav>
   );
@@ -361,18 +345,14 @@ export default function App() {
             label="Conversations"
             size="sm"
             variant="ghost"
-            icon={<Icon icon="arrowsUpDown" />}
+            icon={<IconConversations />}
             onClick={() => setShowSessions(true)}
-          />
-          <OrgSwitcher
-            value={org?.id ?? ''}
-            onChange={o => setOrg(o)}
           />
           <IconButton
             label="Skill library"
             size="sm"
             variant="ghost"
-            icon={<Icon icon="wrench" />}
+            icon={<IconSkills />}
             onClick={() => setShowSkills(true)}
           />
           {activeBot ? (
@@ -380,7 +360,7 @@ export default function App() {
               label={`${activeBot.name} memory & knowledge`}
               size="sm"
               variant="ghost"
-              icon={<Icon icon="wrench" />}
+              icon={<IconBotKnowledge />}
               onClick={() => setShowPanel(true)}
             />
           ) : null}
@@ -389,7 +369,7 @@ export default function App() {
               label="Agent computer"
               size="sm"
               variant="ghost"
-              icon={<Icon icon="search" />}
+              icon={<IconAgentComputer />}
               onClick={() => setShowComputer(true)}
             />
           ) : null}
@@ -546,8 +526,7 @@ export default function App() {
                 <SecretRequestCard
                   key={card.requestId}
                   card={card}
-                  orgId={org?.id ?? ''}
-                  members={org?.members ?? []}
+                  bots={bots}
                   onResolve={(requestId, status) => {
                     setSecretCards(prev =>
                       prev.map(c => (c.requestId === requestId ? {...c, status} : c)),
@@ -562,7 +541,10 @@ export default function App() {
         )
       }
       end={
-        activeBot ? (
+        // Responsive contract (>1024: nav | roster | thread | live panel;
+        // <=1024: the live panel is dropped, not squeezed — its content opens on
+        // demand from the top-bar "Agent computer" button.
+        isNarrow ? undefined : activeBot ? (
           <LayoutPanel width={300} hasDivider label="Live screen" padding={4}>
             <VStack gap={3}>
               <HStack gap={2} vAlign="center">
@@ -613,16 +595,22 @@ export default function App() {
   );
 
   return (
-    <AppShell topNav={topNav} sideNav={sideNav} height="fill" contentPadding={0}>
+    <AppShell
+      topNav={topNav}
+      sideNav={sideNav}
+      mobileNav={{breakpoint: 'md'}}
+      height="fill"
+      contentPadding={0}
+    >
       {banner ? (
         <HStack gap={2} padding={3} vAlign="center" wrap="wrap">
-          <Icon icon="warning" color="warning" />
+          <IconWarning size="sm" color="warning" />
           <Text type="supporting">{banner}</Text>
           <IconButton
             label="Dismiss"
             size="sm"
             variant="ghost"
-            icon={<Icon icon="close" />}
+            icon={<IconClose />}
             onClick={() => setBanner('')}
           />
         </HStack>
@@ -658,8 +646,7 @@ export default function App() {
       ) : null}
       {showSkills ? (
         <SkillLibraryDialog
-          orgId={org?.id ?? ''}
-          members={org?.members ?? []}
+          bots={bots}
           onClose={() => setShowSkills(false)}
         />
       ) : null}

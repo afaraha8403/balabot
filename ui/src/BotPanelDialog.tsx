@@ -11,6 +11,7 @@ import {TextInput} from '@astryxdesign/core/TextInput';
 import {TextArea} from '@astryxdesign/core/TextArea';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {Dialog, DialogHeader} from '@astryxdesign/core/Dialog';
+import {IconClose, IconInfo} from './icons';
 import {api, type MemoryItem, type KbDoc, type Bot} from './api';
 
 type PanelKind = 'memory' | 'kb';
@@ -150,7 +151,7 @@ export function BotPanelDialog({bot, onClose}: Props) {
                 ? 'Add a memory to persist context for this bot.'
                 : 'Add knowledge documents for this bot.'
             }
-            icon={<Icon icon="info" />}
+            icon={<IconInfo />}
           />
         ) : (
           <List hasDividers density="compact">
@@ -165,7 +166,7 @@ export function BotPanelDialog({bot, onClose}: Props) {
                         label={`Delete memory ${m.id}`}
                         size="sm"
                         variant="ghost"
-                        icon={<Icon icon="close" />}
+                        icon={<IconClose />}
                         onClick={() => void remove(m.id)}
                       />
                     }
@@ -181,7 +182,7 @@ export function BotPanelDialog({bot, onClose}: Props) {
                         label={`Delete document ${d.title}`}
                         size="sm"
                         variant="ghost"
-                        icon={<Icon icon="close" />}
+                        icon={<IconClose />}
                         onClick={() => void remove(d.id)}
                       />
                     }
