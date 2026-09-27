@@ -415,7 +415,17 @@ class BalabotJevProvider(_HostMemoryProvider):
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         """The inner provider's tools (fact_store / fact_feedback) MUST keep
-        working — the product depends on them. This plugin adds no core tool."""
+        working — the product depends on them. This plugin adds no core tool.
+
+        Builds the delegate on demand. The host registers a provider and counts
+        ``len(get_tool_schemas())`` BEFORE ``initialize()`` runs, so a delegate
+        built only in ``initialize()`` made this wrapper log "registered (0 tools)"
+        while the bundled provider it wraps reported 2 — the bots lost fact_store
+        and fact_feedback even though the provider was genuinely "activated".
+        Observed live 2026-09-27; the activation receipt is what caught it.
+        """
+        if self._delegate is None:
+            self._build_delegate()
         if self._delegate is None:
             return []
         try:

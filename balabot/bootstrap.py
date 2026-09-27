@@ -96,25 +96,24 @@ DEFAULT_WORKER_SKILLS: tuple[str, ...] = UNIVERSAL_SKILLS + (
 # Forced deltas, applied to every persona's rendered config.
 FORCED_MODEL_DEFAULT = "deepseek/deepseek-v4.1-flash"
 FORCED_MODEL_PROVIDER = "openrouter"
-# REVERTED 2026-09-27 (parent, live-regression guard).
+# The Jev continuity provider WRAPS the bundled holographic provider (forwarding
+# its whole surface, tools included) and adds the pre-compaction checkpoint.
+# Hermes allows only ONE external memory provider, so this is the single active
+# one — pointing at "holographic" instead would leave the checkpoint unowned.
 #
-# `balabot-jev` is built, unit-tested and verified through the memory-provider
-# loader by hand — but it does NOT activate in the real agent runtime: the live
-# gateway logs "Memory provider 'balabot-jev' is configured but not installed and
-# not in the plugin catalog", and the manager then reports "no active provider".
-# That silently removed the bots' structured memory (fact_store/fact_feedback)
-# AND armed a fail-closed compaction with nothing to satisfy it.
-#
-# Until the plugin's discovery under the agent runtime is diagnosed and fixed,
-# the live config stays on the known-good provider. Re-arm only with a live
-# activation receipt (a profile log line reading "balabot-jev ... activated"),
-# never on the strength of a unit test.
-FORCED_MEMORY_PROVIDER = "holographic"
+# ARMED 2026-09-27 after fixing the real cause of the earlier live regression:
+# a persona's agent resolves plugins from ITS OWN home
+# (<root>/profiles/<name>/plugins/), and install_memory_plugin() only seeded the
+# root home. Verified with provider_present(): False for both persona homes before
+# the fix, True for all three after. Armed only on that presence proof; the
+# activation receipt below is still what closes the item.
+FORCED_MEMORY_PROVIDER = "balabot-jev"
 
-#: NOTE: the checkpoint provider ships in the image and is seeded into
-#: $HERMES_HOME/plugins/ by install_memory_plugin() below, but must NOT be
-#: selected as the active provider until activation is proven in a real agent.
-CHECKPOINT_PROVIDER_READY = False
+#: Gate for the fail-closed compaction setting. False would mean the checkpoint
+#: provider is NOT selected (see the revert note below) — compaction must never be
+#: armed with nothing able to satisfy it. Keep in lockstep with
+#: FORCED_MEMORY_PROVIDER: both flip together, only with a live activation receipt.
+CHECKPOINT_PROVIDER_READY = True
 
 #: The provider directory seeded into $HERMES_HOME/plugins/ at every boot.
 MEMORY_PLUGIN_DIRNAME = "balabot-jev"
@@ -502,20 +501,36 @@ def install_memory_plugin(hermes_home: Path | None = None) -> list[str]:
 
     Re-seeds (refresh) each boot rather than skipping when present, so an image
     upgrade actually takes effect. Idempotent by construction.
+
+    Seeds EVERY home that resolves memory providers, not just the root one.
+    A persona's agent runs with ``$HERMES_HOME = <root>/profiles/<name>``, and
+    ``plugins.memory.find_provider_dir`` resolves user plugins from *that* home's
+    ``plugins/`` directory. A root-only seed is therefore invisible to the very
+    agents it is for — which put the live personas in the worst state available:
+    the configured provider was missing, the bundled one was not selected either,
+    so they ran with NO memory provider and a fail-closed compaction gate.
     """
     home = hermes_home or _hermes_home()
     source = _repo_root() / "hermes" / "plugins" / MEMORY_PLUGIN_DIRNAME
-    target = home / "plugins" / MEMORY_PLUGIN_DIRNAME
     if not source.is_dir():
         raise BootstrapError(
             f"memory plugin source missing: {source} (expected the repo's "
             f"hermes/plugins/{MEMORY_PLUGIN_DIRNAME}/)"
         )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
-    return [f"seeded memory provider '{MEMORY_PLUGIN_DIRNAME}' -> {target}"]
+    targets = [home / "plugins" / MEMORY_PLUGIN_DIRNAME]
+    profiles_dir = home / "profiles"
+    if profiles_dir.is_dir():
+        for child in sorted(profiles_dir.iterdir()):
+            if child.is_dir() and (child / "config.yaml").exists():
+                targets.append(child / "plugins" / MEMORY_PLUGIN_DIRNAME)
+    actions: list[str] = []
+    for target in targets:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
+        actions.append(f"seeded memory provider '{MEMORY_PLUGIN_DIRNAME}' -> {target}")
+    return actions
 
 
 def _run_jev_boot_health(name: str) -> None:
