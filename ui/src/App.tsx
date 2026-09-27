@@ -460,8 +460,16 @@ export default function App() {
       }
       content={
         activeBot ? (
-          <ChatLayout
-            composer={
+          // ChatLayout's `flex: 1` is inert unless its parent is a flex
+          // container — the LayoutContent the `content` slot renders is
+          // display:block, so without this wrapper the chat box simply took its
+          // content height (measured 2673px inside a 736px parent) and the
+          // composer rode off the bottom of the screen. The framework's own
+          // ai-chat template wraps its ChatLayout the same way.
+          <HStack height="100%">
+            <ChatLayout
+              style={{flex: 1, minHeight: 0}}
+              composer={
               <Composer
                 isStreaming={isStreaming}
                 onSubmit={text => void send(text)}
@@ -588,7 +596,8 @@ export default function App() {
                 />
               ))}
             </ChatMessageList>
-          </ChatLayout>
+            </ChatLayout>
+          </HStack>
         ) : (
           <EmptyState title="No bots loaded" description="Waiting on /api/bots…" />
         )
