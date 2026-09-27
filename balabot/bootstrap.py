@@ -41,6 +41,15 @@ PROFILE_ENV_KEYS = (
     # Propagating the operator's single key into each profile .env keeps one
     # credential for the whole container.
     "API_SERVER_KEY",
+    # Timeout ceilings. These MUST go in the profile .env, not just the process
+    # env: Hermes loads its .env with override=True (hermes_cli/env_loader.py), so
+    # a value in the file BEATS one set in the container's environment. The base
+    # image ships TERMINAL_TIMEOUT=60 in its .env.example, which is tighter than
+    # the code default of 180 and leaves an agent unable to finish a build,
+    # install, or scrape. Routing them here (like API_SERVER_KEY) is what makes
+    # the compose environment actually take effect.
+    "TERMINAL_TIMEOUT",
+    "DELEGATION_CHILD_TIMEOUT_SECONDS",
 )
 
 PERSONAS = ("principal", "governor")

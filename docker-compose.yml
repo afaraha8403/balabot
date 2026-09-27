@@ -38,6 +38,30 @@ services:
       # without a valid `Authorization: Bearer $API_SERVER_KEY` (401).
       API_SERVER_HOST: "0.0.0.0"
 
+      # ── Timeout ceilings ──────────────────────────────────────────────────
+      # These are the limits that bound what an agent in the product can get
+      # done. They are set explicitly here rather than left to the base image's
+      # .env.example, whose defaults are tuned for a human at a REPL and are too
+      # tight for agents doing real work.
+
+      # Hermes' .env.example ships TERMINAL_TIMEOUT=60, which is TIGHTER than the
+      # code default of 180 (tools/terminal_tool.py falls back to 180 when the var
+      # is unset). 60s means an agent cannot run a build, an install, or a scrape
+      # to completion. 600 is the hard foreground ceiling
+      # (TERMINAL_MAX_FOREGROUND_TIMEOUT, terminal_tool.py:75) and is the most a
+      # synchronous command can use.
+      TERMINAL_TIMEOUT: "600"
+
+      # Subagent inactivity cap. 0 disables it, which is Hermes' own default: a
+      # positive value kills a child after that many seconds of NO progress and
+      # discards its whole context, which upstream removed because legitimate
+      # heavy work (deep reviews, research fan-outs, slow reasoning models) died
+      # mid-task. Stuck children are caught by the heartbeat staleness monitor
+      # instead. Set deliberately so a stray profile value cannot re-introduce a
+      # wall-clock kill on agents doing long work.
+      DELEGATION_CHILD_TIMEOUT_SECONDS: "0"
+
+
     # The inherited default command is Hermes' interactive CLI, which exits
     # cleanly when stdin is not a terminal. Keep a TTY attached so
     # `docker compose up` lands you in a live principal agent.
