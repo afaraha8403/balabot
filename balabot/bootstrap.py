@@ -96,11 +96,25 @@ DEFAULT_WORKER_SKILLS: tuple[str, ...] = UNIVERSAL_SKILLS + (
 # Forced deltas, applied to every persona's rendered config.
 FORCED_MODEL_DEFAULT = "deepseek/deepseek-v4.1-flash"
 FORCED_MODEL_PROVIDER = "openrouter"
-# The Jev continuity provider WRAPS the bundled holographic provider (forwarding
-# its whole surface, tools included) and adds the pre-compaction checkpoint.
-# Hermes allows only ONE external memory provider, so this is the single active
-# one — pointing at "holographic" instead would leave the checkpoint unowned.
-FORCED_MEMORY_PROVIDER = "balabot-jev"
+# REVERTED 2026-09-27 (parent, live-regression guard).
+#
+# `balabot-jev` is built, unit-tested and verified through the memory-provider
+# loader by hand — but it does NOT activate in the real agent runtime: the live
+# gateway logs "Memory provider 'balabot-jev' is configured but not installed and
+# not in the plugin catalog", and the manager then reports "no active provider".
+# That silently removed the bots' structured memory (fact_store/fact_feedback)
+# AND armed a fail-closed compaction with nothing to satisfy it.
+#
+# Until the plugin's discovery under the agent runtime is diagnosed and fixed,
+# the live config stays on the known-good provider. Re-arm only with a live
+# activation receipt (a profile log line reading "balabot-jev ... activated"),
+# never on the strength of a unit test.
+FORCED_MEMORY_PROVIDER = "holographic"
+
+#: NOTE: the checkpoint provider ships in the image and is seeded into
+#: $HERMES_HOME/plugins/ by install_memory_plugin() below, but must NOT be
+#: selected as the active provider until activation is proven in a real agent.
+CHECKPOINT_PROVIDER_READY = False
 
 #: The provider directory seeded into $HERMES_HOME/plugins/ at every boot.
 MEMORY_PLUGIN_DIRNAME = "balabot-jev"
@@ -146,13 +160,12 @@ def _force_deltas(cfg: dict[str, Any], workspace: Path, name: str) -> None:
     cfg.setdefault("memory", {})
     cfg["memory"]["provider"] = FORCED_MEMORY_PROVIDER
 
-    # Fail closed before a lossy compaction. With a checkpoint-capable provider
-    # active, compaction is refused (BLOCKED_MISSING_PREREQUISITE, transcript
-    # preserved) unless the provider confirmed a durable checkpoint. This is the
-    # Principal's "verify the extraction happened" duty, enforced by the host
-    # rather than promised in a prompt.
+    # Fail closed before a lossy compaction — ONLY once a checkpoint-capable
+    # provider has been proven to activate in a real agent. Arming this while the
+    # configured provider fails to load makes compaction fail closed with nothing
+    # to satisfy it (observed live 2026-09-27), so it is gated on that receipt.
     cfg.setdefault("compression", {})
-    cfg["compression"]["checkpoint_required"] = True
+    cfg["compression"]["checkpoint_required"] = bool(CHECKPOINT_PROVIDER_READY)
 
     cfg.setdefault("terminal", {})
     cfg["terminal"]["cwd"] = str(workspace)
