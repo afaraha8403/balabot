@@ -64,6 +64,35 @@ from .checkpoint import (
 
 logger = logging.getLogger(__name__)
 
+
+class _RankingJev:
+    """Minimal Jev stand-in for the ranking ladder — no network at import.
+
+    Prefers a REAL balabot.jev.Jev client (built lazily, off the import path)
+    when TYPESAFE_API_KEY exists. Without a key it exposes ``available=False``,
+    which score_candidates() turns into a typed DegradedError — the caller
+    degrades to unranked recall, exactly the documented contract. Tests
+    monkeypatch :func:`run_relevance_ladder` at this module (or inject a fake
+    Jev) — the real endpoint is never called from here without a key.
+    """
+
+    available: bool = True
+
+    def __init__(self) -> None:
+        self._real: Any = None
+        try:
+            from balabot.jev import Jev  # lazy, never at module import
+
+            self._real = Jev()
+        except Exception:
+            self.available = False
+
+    def system_one(self, state, questions, *, shadow=False):
+        if self._real is None:
+            raise RuntimeError("Jev unavailable for relevance ranking")
+        return self._real.system_one(state, questions, shadow=shadow)
+
+
 # Prefer the host's canonical constant; fall back to the v2 value so the
 # plugin stays importable (and testable) outside a full Hermes install.
 try:  # pragma: no cover - exercised only inside a real Hermes host
@@ -273,7 +302,90 @@ class BalabotJevProvider(_HostMemoryProvider):
                 got = inner(query)
             if got:
                 parts.append(got)
+        ranked = self._jev_ranked_suffix(query, sid)
+        if ranked:
+            parts.append(ranked)
         return "\n\n".join(parts)
+
+    # -- the Jev relevance ladder (non-blocking prefetch re-rank) ---------------
+
+    #: Candidates the ladder is worth a Jev call for. A longer recall is
+    #: debatable, but these keep the single scoring call cheap (one batch, and
+    #: byte-stable-prefix caching still holds: the per-query header is built
+    #: from the query itself, never from anything stateful above it).
+    RELEVANCE_MAX_CANDIDATES = 30
+    RELEVANCE_THRESHOLD = 0.75
+
+    def _candidate_from_turn(self, entry: Any) -> Optional[Any]:
+        """Adapt a recalled candidate into a ladder Candidate.
+
+        Accepts the shapes the inner provider/meaningful recall produces:
+        a str, or a mapping with 'text'/'content' plus an optional id/ref.
+        Returns None for anything unusable — never raises.
+        """
+        from balabot.memory_relevance import Candidate  # lazy; import-safe
+
+        if isinstance(entry, str) and entry.strip():
+            return Candidate(ref=f"m{abs(hash(entry)) % 10**8}", text=entry.strip())
+        if isinstance(entry, dict):
+            text = entry.get("text") or entry.get("content") or ""
+            if isinstance(text, str) and text.strip():
+                ref = str(entry.get("id") or entry.get("ref")
+                          or f"m{abs(hash(text)) % 10**8}")
+                return Candidate(ref=ref, text=text.strip())
+        return None
+
+    def _jev_ranked_suffix(self, query: str, session_id: str = "") -> str:
+        """Run the Jev relevance ladder over recalled candidates and return
+        a renderable string of the KEPT facts.
+
+        Non-blocking contract (the plan's hard requirement): a Jev failure of
+        ANY kind (module missing, no API key, network error, malformed answer)
+        is logged and degrades to the UNRANKED parts — the turn carries the
+        plain recall text plus an explicit '[Jev relevance ranking unavailable:'
+        notice. It never raises into the turn. The state string is built ONLY
+        from the query, so a stable prefix across repeated identical queries is
+        preserved for byte-stable-prefix caching.
+        """
+        if not query or not query.strip():
+            return ""
+        try:
+            from balabot.memory_relevance import Candidate, run_relevance_ladder  # lazy
+
+            # Candidates come from THIS session's durable recall — re-anchor
+            # state is exactly the recalled-fact bundle the delegate would
+            # have surfaced unranked. Few candidates → not worth a Jev call.
+            candidates: List[Any] = []
+            try:
+                bundle = self._get_store().re_anchor(session_id or self._session_id) or {}
+                for d in bundle.get("decisions") or []:
+                    cand = self._candidate_from_turn(d.get("text") if isinstance(d, dict) else d)
+                    if cand is not None:
+                        candidates.append(cand)
+            except Exception:
+                candidates = []
+            if not candidates:
+                return ""
+            candidates = candidates[: self.RELEVANCE_MAX_CANDIDATES]
+            ladder = run_relevance_ladder(
+                _RankingJev(), query, candidates,
+                threshold=self.RELEVANCE_THRESHOLD,
+            )
+            if not ladder.kept:
+                return ""
+            lines = [f"[Jev-ranked memory for: {query.strip()}]"]
+            for cand in ladder.kept:
+                lines.append(f"- {cand.text}")
+            return "\n".join(lines)
+        except Exception as exc:
+            logger.warning(
+                "balabot-jev: relevance ladder degraded to unranked recall "
+                "(Jev unavailable): %s", exc,
+            )
+            # Say so: the turn keeps the unranked parts and an explicit notice
+            # instead of silently pretending ranking happened.
+            return "[Jev relevance ranking unavailable — unranked recall only]"
+
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
         inner = getattr(self._delegate, "queue_prefetch", None)

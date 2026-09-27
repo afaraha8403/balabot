@@ -483,6 +483,11 @@ def subagents_route():
 # real driver output or a structured unavailable/error — never a placeholder.
 import sys as _sys
 
+# ROOT must be importable: `from balabot import ...` lives at <ROOT>/balabot/.
+# Inserting only ROOT.parent (the workspace dir) makes Python find the repo dir
+# as a NAMESPACE package ("cannot import name 'computer' — unknown location")
+# whenever the process env does not already carry the repo root on PYTHONPATH.
+_sys.path.insert(0, str(ROOT))
 _sys.path.insert(0, str(ROOT.parent))
 from balabot import computer as _computer  # noqa: E402
 
@@ -1675,6 +1680,14 @@ async def chat(request: Request):
             # never enter a frame.
             for frame in _drain_org_request_frames(profile):
                 yield frame
+            # Agent-to-agent handoffs queued for this profile (balabot.handoffs,
+            # written by the `message_agent` tool). Same per-profile drain shape
+            # as the org requests above: any bot-to-bot delivery becomes a
+            # visible `event: handoff` row in the transcript instead of the UI
+            # renderer being dead code.
+            from balabot.handoffs import drain_handoff_frames
+            for frame in drain_handoff_frames(profile):
+                yield frame
             async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=15.0)) as client:
                 async with client.stream("POST", url, json=payload, headers=headers) as r:
                     if r.status_code != 200:
@@ -1692,6 +1705,257 @@ async def chat(request: Request):
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no"})
+
+
+# ── conversations: the durable server-side session store ─────────────────────
+# Backing store: balabot/sessions.py (SQLite SessionStore) INSIDE the container
+# (BALABOT_CONTINUITY_DB, default /opt/data/sessions/continuity.db — a path on
+# the named docker volume, not reachable from the host). The routes therefore
+# mirror the org routes: every store operation runs in-container via _org_run,
+# with the request payload arriving as JSON through _BALABOT_ORG_PAYLOAD.
+#
+# HONESTY CONTRACT: when the container or store is unreachable the route
+# answers `unavailable(...)` with a named reason — never a silent empty list,
+# and never a fabricated row. A missing session id is a 404, not a default.
+
+_SESSIONS_LIST_SNIPPET = '''\
+from balabot.sessions import SessionStore
+with SessionStore() as store:
+    rows = store.list_sessions(payload['bot_id'])
+print(json.dumps({'sessions': rows}))
+'''
+
+_SESSIONS_CREATE_SNIPPET = '''\
+from balabot.sessions import SessionStore, SessionError
+try:
+    with SessionStore() as store:
+        store.create_session(payload['session_id'], payload['bot_id'],
+                             payload['purpose'])
+except SessionError as exc:
+    print(json.dumps({'ok': False, 'error': 'conflict',
+                      'detail': str(exc), 'status': 409}))
+    raise SystemExit(0)
+print(json.dumps({'created': True, 'session_id': payload['session_id']}))
+'''
+
+_SESSIONS_GET_SNIPPET = '''\
+from balabot.sessions import SessionStore, UnknownSession
+try:
+    with SessionStore() as store:
+        rows = store.list_sessions(payload['bot_id'])
+        row = next((r for r in rows if r['session_id'] == payload['session_id']), None)
+        if row is None:
+            raise UnknownSession(payload['session_id'])
+        anchor = store.re_anchor(payload['session_id'])
+except UnknownSession as exc:
+    print(json.dumps({'ok': False, 'error': 'not_found',
+                      'detail': str(exc), 'status': 404}))
+    raise SystemExit(0)
+print(json.dumps({'session': {**row, 'topic_spans': anchor['topic_spans'],
+                              'decisions': anchor['decisions'],
+                              'resume_state': anchor['resume_state'],
+                              'recent_window': anchor['recent_window']}}))
+'''
+
+_SESSIONS_DELETE_SNIPPET = '''\
+import json, os, sqlite3
+from balabot.sessions import DEFAULT_DB_PATH
+db = os.environ.get('BALABOT_CONTINUITY_DB', DEFAULT_DB_PATH)
+conn = sqlite3.connect(db)
+cur = conn.execute('DELETE FROM sessions WHERE session_id = ?',
+                   (payload['session_id'],))
+spans = conn.execute('DELETE FROM topic_spans WHERE session_id = ?',
+                     (payload['session_id'],)).rowcount
+decisions = conn.execute('DELETE FROM decisions WHERE session_id = ?',
+                         (payload['session_id'],)).rowcount
+conn.commit()
+conn.close()
+if cur.rowcount == 0:
+    print(json.dumps({'ok': False, 'error': 'not_found',
+                      'detail': f"no session {payload['session_id']!r}",
+                      'status': 404}))
+    raise SystemExit(0)
+print(json.dumps({'deleted': True, 'topic_spans_removed': spans,
+                  'decisions_removed': decisions}))
+'''
+
+_SESSIONS_PATCH_SNIPPET = '''\
+import json, os, sqlite3
+from balabot.sessions import DEFAULT_DB_PATH
+db = os.environ.get('BALABOT_CONTINUITY_DB', DEFAULT_DB_PATH)
+fields = payload['fields']
+sets, args = [], []
+for col in ('purpose',):
+    if col in fields and fields[col]:
+        sets.append(col + ' = ?')
+        args.append(fields[col])
+if not sets:
+    print(json.dumps({'ok': False, 'error': 'bad_request',
+                      'detail': 'at least one of purpose is required',
+                      'status': 400}))
+    raise SystemExit(0)
+conn = sqlite3.connect(DEFAULT_DB_PATH)
+args.append(payload['session_id'])
+cur = conn.execute('UPDATE sessions SET ' + ', '.join(sets) +
+                   ' WHERE session_id = ?', args)
+conn.commit()
+row = conn.execute('SELECT session_id, purpose, next_seq, compaction_count, '
+                   'last_compaction_at FROM sessions WHERE session_id = ?',
+                   args[-1:]).fetchone()
+conn.close()
+if row is None:
+    print(json.dumps({'ok': False, 'error': 'not_found',
+                      'detail': f"no session {payload['session_id']!r}",
+                      'status': 404}))
+    raise SystemExit(0)
+cols = ('session_id', 'purpose', 'next_seq', 'compaction_count',
+        'last_compaction_at')
+print(json.dumps({'updated': True,
+                  'session': dict(zip(cols, row))}))
+'''
+
+
+def _session_public(row: dict, bot: str) -> dict:
+    """Whitelist a list-row for the UI; camelCase keys the SPA reads. list_sessions()
+    does not return bot_id — the query param IS the bot, so it is stamped here."""
+    return {
+        "id": row.get("session_id", ""),
+        "botId": bot,
+        "title": row.get("purpose", "") or "Untitled conversation",
+        "purpose": row.get("purpose", ""),
+        "createdAt": None,
+        "nextSeq": row.get("next_seq"),
+        "compactionCount": row.get("compaction_count", 0),
+        "lastCompactionAt": row.get("last_compaction_at"),
+    }
+
+
+@app.get("/api/sessions")
+def sessions_list(bot: str = ""):
+    """All server-backed sessions for one bot, with their purpose record."""
+    if not bot:
+        raise HTTPException(status_code=400, detail="bot is required")
+    if not container_ok():
+        return unavailable("balabot container is not running — no conversation store")
+    res = _org_run(_wrap(_SESSIONS_LIST_SNIPPET, True),
+                   payload={"bot_id": bot})
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "could not read the session store"))
+    rows = [_session_public(r, bot) for r in (res.get("sessions") or [])]
+    return {"available": True, "bot": bot, "sessions": rows}
+
+
+@app.post("/api/sessions")
+async def sessions_create(request: Request):
+    """Create a conversation with its stated PURPOSE. A session without a
+    real botId can never be listed or deleted — refuse to create one."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    bot_id = (body.get("botId") or body.get("bot_id") or "").strip()
+    title = (body.get("title") or "New conversation").strip()
+    if not bot_id:
+        raise HTTPException(status_code=400,
+                            detail="botId is required — a session without a "
+                                   "bot is orphaned and unreachable")
+    if bot_id not in _all_bot_meta():
+        raise HTTPException(status_code=404, detail=f"unknown bot {bot_id!r}")
+    purpose = (body.get("purpose") or title).strip()
+    session_id = (body.get("id") or
+                  f"s_{int(time.time() * 1000):x}_"
+                  f"{secrets.token_hex(3)}").strip()
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot create conversations")
+    res = _org_run(_wrap(_SESSIONS_CREATE_SNIPPET, True), payload={
+        "session_id": session_id, "bot_id": bot_id, "purpose": purpose})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not create the session"))
+    return {"created": True, "session": {
+        "id": session_id, "botId": bot_id, "title": title,
+        "purpose": purpose, "messages": [], "handoffs": [],
+        "topicSpans": [], "createdAt": int(time.time() * 1000)}}
+
+
+@app.get("/api/sessions/{session_id}")
+def sessions_get(session_id: str, bot: str = ""):
+    """One session incl. its purpose + topic spans + decisions. The spans are
+    the 'this session is responsible for something' record: topic A over
+    msgs 1-40, topic B over 41-90 — addressable, not merged."""
+    if not bot:
+        raise HTTPException(status_code=400, detail="bot is required")
+    if not container_ok():
+        return unavailable("balabot container is not running — no conversation store")
+    res = _org_run(_wrap(_SESSIONS_GET_SNIPPET, True), payload={
+        "session_id": session_id, "bot_id": bot})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not read the session"))
+    s = res["session"]
+    return {"available": True, "session": {
+        "id": s.get("session_id", session_id),
+        "botId": s.get("bot_id", bot),
+        "title": s.get("purpose") or "Untitled conversation",
+        "purpose": s.get("purpose", ""),
+        "topicSpans": s.get("topic_spans", []),
+        "decisions": s.get("decisions", []),
+        "resumeState": s.get("resume_state", {}),
+        "recentWindow": s.get("recent_window"),
+        "nextSeq": s.get("next_seq"),
+        "compactionCount": s.get("compaction_count", 0),
+        "lastCompactionAt": s.get("last_compaction_at"),
+    }}
+
+
+@app.delete("/api/sessions/{session_id}")
+def sessions_delete(session_id: str):
+    """Delete a conversation and its topic spans + decisions (the whole
+    record — leaving orphaned spans behind would be worse than none)."""
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot delete conversations")
+    res = _org_run(_wrap(_SESSIONS_DELETE_SNIPPET, True),
+                   payload={"session_id": session_id})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not delete the session"))
+    return {"deleted": True, "id": session_id,
+            "topic_spans_removed": res.get("topic_spans_removed", 0),
+            "decisions_removed": res.get("decisions_removed", 0)}
+
+
+@app.patch("/api/sessions/{session_id}")
+async def sessions_update(session_id: str, request: Request):
+    """Rename / restate a session's purpose. The purpose record is the
+    session's responsibility statement — editing it is a first-class action."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    if not isinstance(body, dict) or not (body.get("purpose") or body.get("title")):
+        raise HTTPException(status_code=400,
+                            detail="purpose (or title) is required")
+    purpose = (body.get("purpose") or body.get("title") or "").strip()
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot update conversations")
+    res = _org_run(_wrap(_SESSIONS_PATCH_SNIPPET, True), payload={
+        "session_id": session_id, "fields": {"purpose": purpose}})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not update the session"))
+    s = res.get("session") or {}
+    return {"updated": True, "session": {
+        "id": s.get("session_id", session_id),
+        "purpose": s.get("purpose", purpose),
+        "title": s.get("purpose", purpose) or "Untitled conversation",
+        "nextSeq": s.get("next_seq"),
+        "compactionCount": s.get("compaction_count", 0),
+        "lastCompactionAt": s.get("last_compaction_at"),
+    }}
 
 
 # ── SPA ──────────────────────────────────────────────────────────────────────

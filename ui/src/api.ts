@@ -41,6 +41,12 @@ export type Session = {
   messages: ChatMessage[];
   handoffs: Handoff[];
   createdAt: number;
+  /** The session's purpose record (server-backed). Every session is responsible for something. */
+  purpose?: string;
+  /** Topic spans from the server store: [{topic, start_seq, end_seq}, ...]. */
+  topicSpans?: TopicSpan[];
+  /** Set when this session exists only in localStorage (server was unreachable). */
+  localOnly?: boolean;
 };
 
 export type Handoff = {
@@ -151,6 +157,96 @@ export type ComputerAction = {
 
 export type MemoryItem = {id: string; content: string; category?: string};
 export type KbDoc = {id: string; title: string; content: string};
+
+// ── server-backed conversations (GET/POST /api/sessions, /{id}, DELETE, PATCH) ──
+export type TopicSpan = {topic: string; start_seq: number; end_seq: number};
+
+export type ServerSessionDecision = {
+  text: string;
+  provenance: string;
+  created_at: string;
+};
+
+/**
+ * One row of GET /api/sessions?bot=<id>. `purpose` is the session's
+ * responsibility statement; topic spans arrive on the detail endpoint.
+ */
+export type ServerSession = {
+  id: string;
+  botId: string;
+  title: string;
+  purpose: string;
+  createdAt: number | null;
+  nextSeq?: number;
+  compactionCount?: number;
+  lastCompactionAt?: string | null;
+  topicSpans?: TopicSpan[];
+  decisions?: ServerSessionDecision[];
+  resumeState?: Record<string, unknown>;
+  recentWindow?: string;
+};
+
+export type SessionsResponse = {
+  available: boolean;
+  reason?: string;
+  bot?: string;
+  sessions?: ServerSession[];
+};
+
+export type ServerSessionResponse = {
+  available: boolean;
+  reason?: string;
+  session?: ServerSession;
+};
+
+export async function getSessions(botId: string): Promise<SessionsResponse> {
+  return api<SessionsResponse>(
+    `/api/sessions?bot=${encodeURIComponent(botId)}`,
+  );
+}
+
+export async function getServerSession(
+  botId: string,
+  sessionId: string,
+): Promise<ServerSessionResponse> {
+  return api<ServerSessionResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}?bot=${encodeURIComponent(botId)}`,
+  );
+}
+
+/**
+ * POST /api/sessions — create a conversation with its PURPOSE. A session
+ * without a real botId is orphaned (unlistable/undeletable), so the caller
+ * must pass one; the server refuses otherwise.
+ */
+export async function createServerSession(
+  botId: string,
+  title: string,
+  purpose?: string,
+  id?: string,
+): Promise<ServerSession> {
+  const res = await api<{created: boolean; session: ServerSession}>('/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({botId, title, purpose, id}),
+  });
+  return res.session;
+}
+
+export async function deleteServerSession(sessionId: string): Promise<void> {
+  await api(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function patchServerSession(
+  sessionId: string,
+  purpose: string,
+): Promise<void> {
+  await api(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({purpose}),
+  });
+}
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {

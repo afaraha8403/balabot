@@ -1,4 +1,6 @@
-import type {Session} from './api';
+import type {Dispatch, SetStateAction} from 'react';
+import {getSessions} from './api';
+import type {ServerSession, Session, SessionsResponse} from './api';
 
 const KEY = 'balabot.sessions.v1';
 const LAST_KEY = 'balabot.lastBot.v1';
@@ -18,6 +20,75 @@ export function saveShowThinking(value: boolean) {
     localStorage.setItem(SHOW_THINKING_KEY, value ? 'true' : 'false');
   } catch {
     /* ignore */
+  }
+}
+
+/**
+ * Add a server session row into the local Session[] surface. The server is
+ * the source of truth for the conversation REGISTER (id/botId/purpose/spans);
+ * message bodies stay in the browser and are merged in as they exist here.
+ * A session already present locally keeps its messages; one that is not gets
+ * an empty thread (or, for the server rows, none at all — the register is what
+ * we read from the server, not the transcripts).
+ */
+export function mergeServerSession(
+  sessions: Session[],
+  row: ServerSession,
+  botId: string,
+): Session[] {
+  const realBot = row.botId || botId; // never accept an empty botId
+  if (!realBot) return sessions;
+  const existing = sessions.find(s => s.id === row.id);
+  if (existing) {
+    return sessions.map(s =>
+      s.id === row.id
+        ? {...s, botId: s.botId || realBot, title: row.title || s.title,
+           purpose: row.purpose ?? s.purpose,
+           topicSpans: row.topicSpans ?? s.topicSpans,
+           localOnly: false}
+        : s,
+    );
+  }
+  return [
+    ...sessions,
+    {
+      id: row.id,
+      botId: realBot,
+      title: row.title || 'Untitled conversation',
+      purpose: row.purpose || '',
+      messages: [],
+      handoffs: [],
+      createdAt: row.createdAt ?? Date.now(),
+      topicSpans: row.topicSpans ?? [],
+      localOnly: false,
+    },
+  ];
+}
+
+/**
+ * Fetch the server's conversation register for `botId` and merge it into the
+ * local session list. Returns null when the server is honestly unavailable —
+ * callers keep the localStorage cache in that case, and the merged list marks
+ * server-backed rows as the source of truth.
+ */
+export async function syncSessionsFromServer(
+  botId: string,
+  setSessions: Dispatch<SetStateAction<Session[]>>,
+): Promise<SessionsResponse | null> {
+  if (!botId) return null;
+  try {
+    const res = await getSessions(botId);
+    if (res.available === false) return res; // honest unavailable — keep cache
+    setSessions(prev => {
+      let next = prev;
+      for (const row of res.sessions ?? []) {
+        next = mergeServerSession(next, row, botId);
+      }
+      return next;
+    });
+    return res;
+  } catch {
+    return null; // network failure — offline cache remains
   }
 }
 

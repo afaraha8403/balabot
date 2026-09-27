@@ -505,6 +505,35 @@ def install_memory_plugin(hermes_home: Path | None = None) -> list[str]:
     return [f"seeded memory provider '{MEMORY_PLUGIN_DIRNAME}' -> {target}"]
 
 
+def _run_jev_boot_health(name: str) -> None:
+    """Boot-time Jev reachability check, recorded as an incident.
+
+    This is the PRODUCTION call site of enforce_jev_dependency() — without it
+    the /api/jev/incidents feed can never have a row. Contract chosen from the
+    function's own error semantics:
+
+    - 'ok' -> nothing recorded, nothing raised.
+    - 'no-key' / other non-ok -> the function records the durable incident and
+      raises BootstrapError. At boot a TRANSIENT outage must not abort
+      provisioning (the agents still boot; Jev comes back), so the raise is
+      caught and converted into an action line — the incident is already on
+      disk, which is what the Principal reads. That is record-and-continue,
+      not catch-and-forget: the failure is durable and surfaced, just not
+      fatal at boot.
+    - A probe infrastructure error is caught the same way: never crashes
+      provisioning.
+    """
+    try:
+        enforce_jev_dependency(name)
+        return
+    except BootstrapError as exc:
+        # record_jev_incident already wrote the durable record (except in the
+        # no-key case, which deliberately records nothing — bootstrap has no
+        # config to blame and the entrypoint already refuses to start). The
+        # raise is downgraded here so a Jev outage cannot abort provisioning.
+        print(f"[balabot] WARNING: Jev boot health for '{name}': {exc}")
+
+
 def run_bootstrap() -> list[dict[str, Any]]:
     """Provision every persona AND install BalaBot's skills; print a secret-free report."""
     reports: list[dict[str, Any]] = []
@@ -519,6 +548,11 @@ def run_bootstrap() -> list[dict[str, Any]]:
         report = provision_persona(name)
         report["actions"].extend(install_skills(name))
         report["actions"].extend(init_ledger(name))
+        # Jev is a hard dependency: a boot-time health check per persona. On a
+        # transient outage it records a durable incident the Principal reads
+        # via /api/jev/incidents and continues — provisioning is never aborted
+        # by reachability alone.
+        _run_jev_boot_health(name)
         reports.append(report)
     for report in reports:
         print(f"[balabot {__version__}] persona '{report['persona']}':")

@@ -29,13 +29,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from balabot import orgs
+from balabot.handoffs import HandoffError, enqueue_handoff
 
 __all__ = [
     "request_secret",
     "list_org_secrets",
     "request_secret_access",
     "list_org_skills",
+    "message_agent",
     "list_pending_requests",
+    "enqueue_org_request",
     "main",
 ]
 
@@ -85,6 +88,43 @@ def _require_str(value, field: str) -> str:
 # ---- tools -----------------------------------------------------------------
 
 
+def enqueue_org_request(profile: str, event: dict) -> dict:
+    """Queue an org request into the org-request queue the UI server drains.
+
+    THE EXISTING QUEUE API: ui/server.py owns the queue (module-level
+    ``_org_request_queue`` + enqueue_org_request/_drain_org_request_frames +
+    GET/POST /api/org/requests). This producer does NOT invent a second queue —
+    it uses the same one, directly when ui.server is importable in-process
+    (tests, monolith runs), else via the POST /api/org/requests HTTP contract
+    the server itself serves. Either way the next /api/chat stream for
+    `profile` emits the ``event: secret_request`` / ``event:
+    secret_access_request`` SSE frame.
+
+    Raises only ValueError/HTTP-level connection errors — never a secret leak
+    (the payload is metadata only: kind/bot/name/description/reason).
+    """
+    try:  # in-process (tests, single-process deploys) — the real queue object
+        from ui import server as _ui_server
+
+        return _ui_server.enqueue_org_request(profile, event)
+    except Exception:
+        pass
+    # Fall back to the server's own HTTP contract (same queue, over POST).
+    import requests
+
+    host = os.environ.get("BALABOT_UI_HOST_URL", "http://127.0.0.1:9120")
+    try:
+        resp = requests.post(
+            f"{host}/api/org/requests",
+            json={"bot": profile, **event},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        return resp.json().get("request") or {}
+    except requests.RequestException as exc:
+        raise ValueError(f"org request queue unavailable: {exc}") from exc
+
+
 def request_secret(name: str, description: str | None = None, *,
                    bot_id: str | None = None, **kwargs) -> dict:
     """Record a PENDING secret request so the UI can surface the in-chat form.
@@ -109,6 +149,22 @@ def request_secret(name: str, description: str | None = None, *,
         "created_at": _now(),
         "status": "awaiting_user",
     })
+    # THE PRODUCER HALF of the secret_request SSE path: enqueue into the
+    # org-request queue ui/server.py drains as `event: secret_request` frames
+    # on this bot's next /api/chat stream. Without this the frames can never
+    # fire. The durable pending row stays too (it is the honest record when
+    # the UI process is not running); a queue failure never fails the request
+    # itself — the pending row is the source of truth.
+    profile = bot_id or "principal"
+    try:
+        enqueue_org_request(profile, {
+            "kind": "secret_request",
+            "bot": profile,
+            "name": name,
+            "description": description or "",
+        })
+    except Exception:
+        pass
     return {
         "requested": True,
         "name": row["name"],
@@ -157,6 +213,18 @@ def request_secret_access(bot_id: str, name: str, reason: str) -> dict:
         "created_at": _now(),
         "status": "awaiting_user",
     })
+    # Producer half: same org-request queue as request_secret (see there) —
+    # drained as `event: secret_access_request` SSE frames. Failure here never
+    # fails the request; the pending row is the source of truth.
+    try:
+        enqueue_org_request(bot_id, {
+            "kind": "secret_access_request",
+            "bot": bot_id,
+            "name": name,
+            "reason": reason,
+        })
+    except Exception:
+        pass
     return {
         "requested": True,
         "name": row["name"],
@@ -194,6 +262,101 @@ def list_org_skills(bot_id: str) -> list[dict] | dict:
     return rows
 
 
+def _roster_path() -> Path:
+    return _data_root() / "fleet" / "bots.json"
+
+
+def _rostered_ids() -> set[str]:
+    """IDs of bots that actually exist in the fleet roster — the source of
+    truth for who is messageable. Same file lifecycle.py owns; same shapes:
+    a top-level key per created bot, plus rows in the `bots` list."""
+    path = _roster_path()
+    if not path.exists():
+        return set()
+    try:
+        fleet = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return set()
+    if not isinstance(fleet, dict):
+        return set()
+    ids: set[str] = set()
+    for row in fleet.get("bots", []):
+        if isinstance(row, dict) and row.get("id"):
+            ids.add(str(row["id"]))
+    ids |= {k for k in fleet.keys() if k != "bots" and isinstance(fleet[k], dict)}
+    return ids
+
+
+_OWNER_IDENTITIES = frozenset({"user", "ali", "owner", "human", "admin"})
+
+
+def message_agent(from_bot: str, to_bot: str, message: str, **kwargs) -> dict:
+    """Bot-to-bot messaging: `from_bot` sends `message` to `to_bot`.
+
+    ROSTER RULE (hard): `to_bot` must be in the fleet roster
+    (<BALABOT_DATA_ROOT>/fleet/bots.json). An unrostered target is refused,
+    never silently accepted, and no message is queued for it.
+
+    IMPERSONATION RULE (hard): `from_bot` may never be a human identity
+    (user/ali/owner/human/admin) — the owner talks to bots directly, not
+    through a bot's tool calls. Self-send is refused too (a handoff to
+    yourself is a loop, not a message).
+
+    DELIVERY: the message is queued in `to_bot`'s inbox AND an `event: handoff`
+    frame (from/to/summary/at) is enqueued so the to-bot's next /api/chat
+    stream surfaces the delivery visibly in the transcript. The sender's
+    summary that travels the frame is the first line of the message, stripped
+    — the full message waits in the inbox; the frame is a notice, not a
+    transport for arbitrary content.
+
+    Returns a typed JSON-able dict (repo tool convention).
+    """
+    _require_str(from_bot, "from_bot")
+    _require_str(to_bot, "to_bot")
+    _require_str(message, "message")
+    if kwargs:
+        raise ValueError(
+            "message_agent accepts no extra kwarg(s) "
+            f"{sorted(kwargs)!r} — bots cannot smuggle sender identity, "
+            "system fields, or roles through this tool")
+    if from_bot.strip().lower() in _OWNER_IDENTITIES:
+        raise ValueError(
+            f"{from_bot!r} is a human identity — a bot can never message an "
+            "agent as the owner; the owner talks to bots directly")
+    if from_bot.strip() == to_bot.strip():
+        raise ValueError("a bot cannot message itself")
+    rostered = _rostered_ids()
+    if to_bot.strip() not in rostered:
+        raise ValueError(
+            f"{to_bot!r} is not in the fleet roster — only rostered bots "
+            "are messageable")
+    summary = message.strip().splitlines()[0][:120] if message.strip() else ""
+    # The delivery itself: the target's inbox.
+    _append_pending({
+        "id": f"ma_{uuid.uuid4().hex[:12]}",
+        "kind": "agent_message",
+        "bot_id": to_bot.strip(),
+        "from_bot": from_bot.strip(),
+        "message": message,
+        "created_at": _now(),
+        "status": "delivered",
+    })
+    # The visible handoff frame for the target's chat stream.
+    try:
+        frame = enqueue_handoff(from_bot.strip(), to_bot.strip(), summary)
+    except HandoffError as exc:  # pragma: no cover — guards above match
+        raise ValueError(f"handoff refused: {exc}") from exc
+    return {
+        "sent": True,
+        "from": from_bot.strip(),
+        "to": to_bot.strip(),
+        "summary": summary,
+        "delivered": "inbox",
+        "handoff_queued": True,
+        "frame": frame,
+    }
+
+
 def list_pending_requests(bot_id: str | None = None) -> list[dict]:
     """Pending requests the UI/backend can serve (optionally per bot)."""
     rows = _load_pending()
@@ -219,6 +382,7 @@ def main(argv: list[str] | None = None) -> int:
         "list_org_secrets": ["--bot"],
         "request_secret_access": ["--bot", "--name", "--reason"],
         "list_org_skills": ["--bot"],
+        "message_agent": ["--from", "--to", "--message"],
         "list_pending_requests": ["--bot"],
     }
     allowed = known_flags.get(tool)
@@ -262,6 +426,12 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("list_org_skills needs --bot <id>")
             _json_out(list_org_skills(bot))
             return 0
+        if tool == "message_agent":
+            src, dst, msg = _opt("--from"), _opt("--to"), _opt("--message")
+            if not (src and dst and msg):
+                raise ValueError("message_agent needs --from, --to, --message")
+            _json_out(message_agent(src, dst, msg))
+            return 0
         if tool == "list_pending_requests":
             _json_out(list_pending_requests(_opt("--bot")))
             return 0
@@ -272,7 +442,9 @@ def main(argv: list[str] | None = None) -> int:
           "request_secret --name N [--description D] [--bot B] | "
           "list_org_secrets --bot B | "
           "request_secret_access --bot B --name N --reason R | "
-          "list_org_skills --bot B | list_pending_requests [--bot B]",
+          "list_org_skills --bot B | "
+          "message_agent --from B --to B --message M | "
+          "list_pending_requests [--bot B]",
           file=sys.stderr)
     return 2
 

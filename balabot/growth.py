@@ -39,6 +39,18 @@ from .jev import noul_probability
 GOVERNOR = "governor"
 PRINCIPAL = "principal"
 
+
+def _require_non_empty(value: str, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    return value
+
+
+def _now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 #: Confirmation gate for an escalated frustration signal. A noul answer carries
 #: no "value" key — only a probability under "noul" — so the old
 #: `answer.get("value") and probability >= 0.6` condition could never be true
@@ -229,6 +241,52 @@ def _ledger_path(name: str = GOVERNOR) -> Path:
     return _dr() / "profiles" / name / LEDGER_DIRNAME / "frustration.jsonl"
 
 
+def record_decision(
+    statement: str,
+    *,
+    persona: str = GOVERNOR,
+    jev=None,
+    gate: Callable[..., Any] | None = None,
+    **extra: Any,
+) -> dict[str, Any] | None:
+    """Governor ledger append THROUGH the Jev decision gate.
+
+    This is the production call path of ``balabot.jev_depth.is_decision_worthy``
+    (the architecture doc's decision gate): nothing reaches the ledger without
+    passing "is this decision-worthy?" first. The gate is the governor's
+    OVER-ADMIT design, and it FAILS OPEN on any Jev failure — a Jev outage
+    never blocks work and never silently loses a decision; it only changes
+    what the record says about how it was admitted.
+
+    `gate` is injectable for tests (defaults to the real is_decision_worthy,
+    itself called with an injected jev client or None). Records admitted by a
+    failed-open gate carry ``gate_failed_open: True`` and the gate's reason,
+    so consolidation can treat them differently later.
+
+    Returns the written record, or None when the gate REJECTED the statement
+    (over-admit means borderline goes in; a clear "not a decision" stays out).
+    """
+    from .jev_depth import is_decision_worthy as _default_gate
+
+    _require_non_empty(statement, "statement")
+    if gate is None:
+        gate = lambda s, **kw: _default_gate(s, **kw)  # noqa: E731
+    verdict = gate(statement, jev=jev)
+    if not verdict.worthy:
+        return None
+    record = {
+        "type": "decision",
+        "persona": persona,
+        "text": statement,
+        "confidence": float(verdict.confidence),
+        "gate": verdict.reason,
+        "gate_failed_open": bool(verdict.failed_open),
+        "timestamp": _now(),
+        **extra,
+    }
+    return record_frustration(record, name=persona)
+
+
 def record_frustration(entry: dict[str, Any], name: str = GOVERNOR) -> dict[str, Any]:
     """Append ONE structured, secret-free ledger entry. Fail loud on any
     write failure. Never fabricates: what is returned is exactly what was written."""
@@ -378,6 +436,7 @@ __all__ = [
     "scan",
     "context_window",
     "classify",
+    "record_decision",
     "record_frustration",
     "read_frustration_entries",
     "growth_job",

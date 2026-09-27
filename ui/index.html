@@ -6,9 +6,26 @@
     <meta name="theme-color" content="#000000" />
     <meta name="description" content="BalaBot — your agent fleet: chat, hierarchy, memory, ops and spend." />
     <title>BalaBot</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="BalaBot" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // PWA: register the service worker. Defensive — a registration failure
+      // must never break app boot. The SW only handles an offline fallback;
+      // it never caches /api/* or the app itself (see public/sw.js).
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () {
+            /* offline fallback unavailable — non-fatal */
+          });
+        });
+      }
+    </script>
   </body>
 </html>

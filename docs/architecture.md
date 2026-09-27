@@ -397,11 +397,11 @@ Anything that must last is a **persistent agent**, which means a roster row (see
 | Sub-agent (temporary) | `delegate_task` children — isolated context, own terminal, summary-only return | exists |
 | Sub-agent (long-lived) | — | **not a thing**: anything long-lived is a persistent agent with a roster row |
 | Agent's own screen | org-scoped agent computer (container, per-agent X display) | **shipped** |
-| Agent-to-agent messaging | `message_agent` + visible handoff frames | exists |
-| Skills & craft hygiene | curator state + the Skill Library view | **shipped** (readable); principal's review loop **to build** |
+| Agent-to-agent messaging | `message_agent` + visible handoff frames | **designed, not built** — `grep -rn message_agent` over all `.py/.ts/.tsx` (excluding `node_modules`) returns 0 hits; no production code emits `event: handoff` frames. The UI's handoff renderer (`ui/src/api.ts:254`, `ui/src/App.tsx:795`) and the server's frame grammar (`ui/server.py:753`) are staged for it, and the in-chat secret-request queue already uses the same grammar, but the messaging capability itself does not exist. |
+| Skills & craft hygiene | curator state + the Skill Library view | **PARTIAL** — Skill Library is shipped and reads the live profile tree (`/api/skills/library`, `ui/server.py:993`); the curator's pin/promote routes are explicit stubs returning "not wired yet" (`ui/server.py:943-948`); principal's review loop **to build** |
 | Secrets with per-agent grants | org registry + `secrets.sources` command helper | **shipped** |
 | Hierarchy enforcement | shipped agents (`principal`, `governor`) + `default` refuse edit/delete/purge (409); orphan detection + reference-complete purge | **shipped** |
-| Sub-agent visibility in the UI | — | **to build** |
+| Sub-agent visibility in the UI | — | **shipped** — spawn-ledger reader (`ui/subagents.py`, `/api/subagents` at `ui/server.py:470`) polled by the UI (`ui/src/App.tsx:249-256`); rows are honest {parent, id, status} from the spawn ledger + `/proc` liveness |
 
 ## What must be built for this to be real
 

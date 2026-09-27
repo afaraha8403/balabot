@@ -58,7 +58,7 @@ import {DecisionsScreen} from './screens/DecisionsScreen';
 import {GovernanceScreen} from './screens/GovernanceScreen';
 import {OpsScreen} from './screens/OpsScreen';
 import {CostScreen} from './screens/CostScreen';
-import {api, streamChat, checkHealth, getFleet, getSubAgents, type Bot, type ChatMessage, type Handoff, type Session, type SecretCard, type SubAgent, type ToolProgress} from './api';
+import {api, streamChat, checkHealth, getFleet, getSubAgents, getSessions, getServerSession, createServerSession, deleteServerSession, type Bot, type ChatMessage, type Handoff, type Session, type SecretCard, type SubAgent, type ToolProgress, type SessionsResponse} from './api';
 import {
   IconAgentComputer,
   IconAgents,
@@ -79,7 +79,7 @@ import {
   IconSkills,
   IconWarning,
 } from './icons';
-import {loadSessions, saveSessions, loadLastBot, saveLastBot, newSession, loadShowThinking, saveShowThinking} from './sessions';
+import {loadSessions, saveSessions, loadLastBot, saveLastBot, newSession, loadShowThinking, saveShowThinking, syncSessionsFromServer} from './sessions';
 
 /** Opening suggestions shown on the empty state. */
 const PROMPTS = [
@@ -298,6 +298,30 @@ export default function App() {
   useEffect(() => {
     if (activeBotId) saveLastBot(activeBotId);
   }, [activeBotId]);
+
+  // SERVER-BACKED CONVERSATIONS: the server's SQLite store (balabot.sessions)
+  // is the source of truth for the conversation register — fetch it whenever
+  // the active bot changes. localStorage stays only as an offline cache
+  // (saveSessions below); when the server is honestly unavailable the cache
+  // is what renders, and nothing is invented client-side.
+  useEffect(() => {
+    if (!activeBotId) return;
+    let live = true;
+    void syncSessionsFromServer(activeBotId, setSessions).then(res => {
+      if (!live) return;
+      if (res && res.available === false) {
+        // Named reason, not a silent empty list.
+        setBanner(`Conversations: server store unavailable — ${res.reason ?? 'unknown reason'}`);
+      } else if (res === null) {
+        setBanner('Conversations: could not reach /api/sessions — showing the offline cache.');
+      } else {
+        setBanner('');
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [activeBotId, reloadBots]);
 
   const patchSession = (id: string, fn: (s: Session) => Session) => {
     setSessions(prev => prev.map(s => (s.id === id ? fn(s) : s)));
@@ -914,12 +938,50 @@ export default function App() {
           activeId={activeSessionId}
           onSwitch={setActiveSessionId}
           onDelete={id => {
-            setSessions(prev => prev.filter(s => s.id !== id));
-            setActiveSessionId(prev => (prev === id ? null : prev));
+            // Server is the source of truth: DELETE /api/sessions/{id} first;
+            // only a successful delete removes it locally. A failed call keeps
+            // the row and names the error rather than pretending it worked.
+            void (async () => {
+              try {
+                await deleteServerSession(id);
+              } catch (err) {
+                setBanner(`Delete failed: ${(err as Error).message}`);
+                return;
+              }
+              setSessions(prev => prev.filter(s => s.id !== id));
+              setActiveSessionId(prev => (prev === id ? null : prev));
+            })();
           }}
           onNew={s => {
-            setSessions(prev => [...prev, s]);
-            setActiveSessionId(s.id);
+            // A new conversation MUST carry a real botId (an empty one made
+            // sessions unreachable/unlistable). Create it server-side; the
+            // returned row — with its server id and purpose — enters state.
+            if (!activeBotId) return;
+            void (async () => {
+              let created: Session | null = null;
+              try {
+                const row = await createServerSession(
+                  activeBotId,
+                  s.title,
+                  `${activeBot?.name ?? activeBotId}: ${s.title}`,
+                  s.id,
+                );
+                created = {
+                  ...s,
+                  id: row.id,
+                  botId: row.botId || activeBotId,
+                  purpose: row.purpose,
+                  topicSpans: row.topicSpans ?? [],
+                };
+              } catch (err) {
+                setBanner(
+                  `Could not create the conversation on the server — ${(err as Error).message}`,
+                );
+                return;
+              }
+              setSessions(prev => [...prev, created as Session]);
+              setActiveSessionId((created as Session).id);
+            })();
           }}
           onClose={() => setShowSessions(false)}
         />
