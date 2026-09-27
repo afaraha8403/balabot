@@ -301,28 +301,41 @@ def s7_bot_consent() -> None:
     check("S7 proposal row deleted (bot kept)",
           st == 200 and json.loads(body_del).get("deleted") is True, pid)
 
-    # CLEAN UP the test bot itself, so re-runs stay honest and the live fleet
-    # stays free of test residue. The product has no bot-delete route (by
-    # design), so the fleet store is edited directly inside the container.
-    # NOTE the real path (/opt/data/fleet/bots.json, NOT /opt/data/bots.json),
-    # the real SHAPE (a dict keyed by bot id — there is also a vestigial
-    # "bots": [] key which is NOT the roster), and the ownership (root-owned
-    # mode 0600, so the exec must run as root or the write silently fails).
+    # CLEAN UP everything the run created, or the live product accumulates
+    # residue that looks like real data. THREE stores must be cleared, and
+    # getting any of them wrong leaves the bot visible somewhere:
+    #   1. /opt/data/fleet/bots.json      — a dict KEYED BY bot id (it also has
+    #      a vestigial "bots": [] key that is NOT the roster)
+    #   2. /opt/data/orgs/registry.json   — the org's member list
+    #   3. /opt/data/profiles/<id>/       — creation PROVISIONS a full persona
+    # All are root-owned mode 0600, so the exec must run as root or the write
+    # silently no-ops and the bot is left behind.
     cleanup = (
-        "import json,pathlib\n"
+        "import json,pathlib,shutil\n"
+        "bid=%r\n"
+        "# 1. fleet\n"
         "p=pathlib.Path('/opt/data/fleet/bots.json')\n"
         "d=json.loads(p.read_text())\n"
-        f"before=('{bot_id}' in d)\n"
-        f"d.pop('{bot_id}', None)\n"
+        "d.pop(bid, None)\n"
         "p.write_text(json.dumps(d,indent=2))\n"
-        "print('removed',1 if before else 0)\n"
-    )
-    r = _subprocess.run(
+        "# 2. org member list\n"
+        "rp=pathlib.Path('/opt/data/orgs/registry.json')\n"
+        "r=json.loads(rp.read_text())\n"
+        "for o in (r.get('orgs') or {}).values():\n"
+        "    if bid in (o.get('members') or []):\n"
+        "        o['members']=[m for m in o['members'] if m!=bid]\n"
+        "rp.write_text(json.dumps(r,indent=2))\n"
+        "# 3. provisioned profile + workspace\n"
+        "for sub in ('profiles','workspace'):\n"
+        "    shutil.rmtree(f'/opt/data/{sub}/{bid}', ignore_errors=True)\n"
+        "print('removed')\n"
+    ) % bot_id
+    r2 = _subprocess.run(
         ["docker", "exec", "-u", "root", "balabot-balabot-1", "python3", "-c", cleanup],
-        capture_output=True, text=True, timeout=60)
-    cleaned = r.returncode == 0 and "removed 1" in (r.stdout or "")
-    check("S7 test bot cleaned up (no fleet residue)", cleaned,
-          (r.stdout or r.stderr or "")[:90])
+        capture_output=True, text=True, timeout=90)
+    cleaned = r2.returncode == 0 and "removed" in (r2.stdout or "")
+    check("S7 test bot cleaned up (no fleet/org/profile residue)", cleaned,
+          (r2.stdout or r2.stderr or "")[:90])
 
 
 def main() -> int:
