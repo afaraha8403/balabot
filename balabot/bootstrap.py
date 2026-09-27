@@ -126,6 +126,29 @@ def _force_deltas(cfg: dict[str, Any], workspace: Path, name: str) -> None:
     }
 
 
+def init_org(name: str, *, repo_root: Path | None = None) -> list[str]:
+    """Register the default organization and its members at first boot.
+
+    Idempotent. Exists because the org layer is USELESS out of the box without
+    one: posting a secret answers 404 'unknown org' until an operator has run
+    the registry CLI by hand. A product that requires a manual CLI step before
+    its first feature works is not shipped.
+
+    The org is the tenant that owns context, skills, secrets and computer
+    spaces. Today's build is org 'balacode' (see fleet/balacode.json), and both
+    shipped personas are its members.
+    """
+    from . import orgs
+
+    actions: list[str] = []
+    if orgs.show_org(DEFAULT_ORG) is not None:
+        actions.append(f"org '{DEFAULT_ORG}' exists")
+    else:
+        orgs.add_org(DEFAULT_ORG, DEFAULT_ORG_NAME, members=list(PERSONAS))
+        actions.append(f"registered org '{DEFAULT_ORG}' with members {list(PERSONAS)}")
+    return actions
+
+
 def provision_persona(name: str, *, repo_root: Path | None = None) -> dict[str, Any]:
     """Provision one persona profile + workspace. Idempotent.
 
@@ -206,6 +229,12 @@ def provision_persona(name: str, *, repo_root: Path | None = None) -> dict[str, 
 # flat (skills/<skill>/) is NOT discovered — same class of silent failure as the
 # rules-file cwd walk. BalaBot's own skills ship under this category.
 BALABOT_SKILL_CATEGORY = "balabot"
+
+# The default organization. A deployment has at least one tenant, and the org
+# layer 404s without it, so first boot registers this one. Today's agent
+# computer IS this org's computer (see fleet/balacode.json).
+DEFAULT_ORG = "balacode"
+DEFAULT_ORG_NAME = "Balacode"
 
 
 # The Governor's shared decision ledger. Created for BOTH personas: it is one
@@ -382,6 +411,9 @@ def install_skills(name: str, *, repo_root: Path | None = None) -> list[str]:
 def run_bootstrap() -> list[dict[str, Any]]:
     """Provision every persona AND install BalaBot's skills; print a secret-free report."""
     reports: list[dict[str, Any]] = []
+    # The default org exists BEFORE personas are provisioned: a persona is a
+    # member of it, and the org layer 404s on every secret route without it.
+    org_actions = init_org("balacode")
     for name in PERSONAS:
         report = provision_persona(name)
         report["actions"].extend(install_skills(name))
@@ -391,6 +423,11 @@ def run_bootstrap() -> list[dict[str, Any]]:
         print(f"[balabot {__version__}] persona '{report['persona']}':")
         for action in report["actions"]:
             print(f"  - {action}")
+    # The org is provisioned once for the deployment, not per persona, so it is
+    # reported on its own line rather than hidden inside a persona's actions.
+    print(f"[balabot {__version__}] organization '{DEFAULT_ORG}':")
+    for action in org_actions:
+        print(f"  - {action}")
     return reports
 
 

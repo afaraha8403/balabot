@@ -258,6 +258,18 @@ def grant(subject_bot: str, resource: dict, *, subject_org: str, scope: str = "b
     _require_org(reg, subject_org)
     resource_org = resource.get("org", subject_org)
     _require_org(reg, resource_org)
+    # Supersede any LIVE grant for the same (subject, resource). Without this,
+    # re-saving a secret stacks a second live grant, and the delivery helper
+    # (secret_lines_for) then emits the SAME env var once per stale grant — a
+    # real bug found by exercising the product repeatedly rather than once.
+    # The old record is revoked, never deleted: the audit trail is the point.
+    for existing in reg["grants"]:
+        if (existing.get("revoked_at") is None
+                and existing.get("subject", {}).get("id") == subject_bot
+                and existing.get("resource", {}).get("kind") == resource["kind"]
+                and existing.get("resource", {}).get("name") == resource["name"]
+                and existing.get("resource_org") == resource_org):
+            existing["revoked_at"] = _now()
     g = {
         "id": f"g_{uuid.uuid4().hex[:12]}",
         "subject": {"kind": "bot", "id": subject_bot},

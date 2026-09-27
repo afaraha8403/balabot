@@ -88,15 +88,19 @@ def s10_honesty_sweep() -> None:
         except json.JSONDecodeError:
             check(f"S10 {p}", False, "not JSON (SPA fallback? route missing)")
             continue
+        # Order matters: a bare list response (e.g. /api/org/secrets -> []) has
+        # no .get, so the isinstance check must come FIRST. Getting this wrong
+        # crashed the sweep instead of reporting a result.
+        if isinstance(d, list):
+            check(f"S10 {p}", True, f"list of {len(d)}")
+            continue
         # Real data, or an explicit honest unavailable — never silent empty.
         # The jev/health shape ({"status":"no-key","detail":...}) is honest too:
-        # it reports that it CANNOT check, with a reason. Accept it explicitly
-        # rather than letting a narrow predicate mislabel a truthful answer as a
-        # failure — the sweep must flag dishonesty, not unfamiliar shapes.
+        # it reports that it CANNOT check, with a reason.
         honest = ("available" in d and d["available"] is False and bool(d.get("reason"))) \
             or d.get("available") is True \
-            or (isinstance(d, dict) and "status" in d and "detail" in d) \
-            or isinstance(d, list) or ("facts" in d) or ("bots" in d) or ("incidents" in d) \
+            or ("status" in d and "detail" in d) \
+            or ("facts" in d) or ("bots" in d) or ("incidents" in d) \
             or ("orgs" in d) or ("secrets" in d) or ("grants" in d) or ("requests" in d)
         check(f"S10 {p}", honest, body[:110])
 

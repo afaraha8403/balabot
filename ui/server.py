@@ -11,7 +11,7 @@
     GET  /api/decisions                 Jev decision log — available:false until one exists
     GET/POST /api/computer/{bot}/frame|action   real: cua-driver screens
     /api/orgs, /api/org/secrets, /api/org/grants,
-    /api/org/skills/library|pin|promote, /api/org/requests   available:false / empty
+    /api/org/skills/library|pin|promote, /api/org/requests   real: container registry
     POST /api/chat                      SSE passthrough to /p/<profile>/v1/chat/completions
 
 HONESTY RULE: where real data exists it is returned; where it does not, the
@@ -512,15 +512,407 @@ async def computer_action(bot_id: str, request: Request):
             "frame": res.get("frame"), "note": res.get("note")}
 
 
-# ── org surfaces: A-era concept, no B backing ────────────────────────────────
-def _org_unavailable():
-    return unavailable("orgs/secrets/grants were an earlier concept — the B "
-                       "architecture has no org registry backing this endpoint")
+# ── org surfaces: the real registry-backed HTTP layer ────────────────────────
+# Backing store: balabot/orgs.py INSIDE the container (registry + 0600 secret
+# store). The container's /opt/data is a NAMED DOCKER VOLUME (balabot_
+# balabot-state), not a bind mount, so the host cannot read it — running
+# balabot.orgs on the host would resolve paths to a meaningless \opt\data on
+# the host disk. Every org route therefore runs its registry work inside
+# balabot-balabot-1 via _org_run, the same way /api/memory and /api/computer
+# do. The registry holds metadata + fingerprints only; a secret VALUE never
+# appears in any response, log, or frame from this module.
+# See kb/plans/org-registry-schema.md.
+
+
+def _org_run(snippet: str, payload: dict | None = None,
+             timeout: float = 30.0) -> dict:
+    """Run an org-registry snippet INSIDE the container; return parsed JSON.
+
+    Never raises. The snippet is executed as `python3 -` (source on stdin),
+    with the container's real env and cwd (PYTHONPATH=/opt/balabot,
+    BALABOT_DATA_ROOT=/opt/data, cwd /opt/balabot). When `payload` is given
+    it is passed to the snippet via the dedicated environment variable
+    _BALABOT_ORG_PAYLOAD (JSON) — NEVER via argv and never interpolated into
+    a shell command line. (stdin cannot carry a payload: `python3 -` reads
+    ALL of stdin as source.) The snippet prints exactly one JSON document on
+    its last stdout line. On any failure (container down, non-zero exit,
+    non-JSON, or the snippet printing {"ok": false}) a structured error dict
+    is returned — the honest-unavailable contract.
+    """
+    argv = ["docker", "exec", "-i", "-w", "/opt/balabot",
+            "-e", "PYTHONPATH=/opt/balabot", "-e", "BALABOT_DATA_ROOT=/opt/data"]
+    if payload is not None:
+        # Environment variable, not argv: the value never appears in a
+        # process command line (which is world-readable via /proc).
+        argv += ["-e", "_BALABOT_ORG_PAYLOAD=" + json.dumps(payload)]
+    argv += [CONTAINER, "python3", "-"]
+    try:
+        r = subprocess.run(argv, input=snippet,
+                           capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        return {"ok": False, "error": "container_unreachable",
+                "reason": "could not exec in the balabot container "
+                          "(is it running?)"}
+    if r.returncode != 0:
+        return {"ok": False, "error": "container_snippet_failed",
+                "reason": (r.stderr or r.stdout)[-300:]}
+    try:
+        parsed = json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:
+        return {"ok": False, "error": "non_json_bridge",
+                "reason": f"container bridge returned non-JSON: {r.stdout[-300:]}"}
+    if isinstance(parsed, dict) and parsed.get("ok") is False:
+        return parsed
+    if isinstance(parsed, dict):
+        return {"ok": True, **parsed}
+    return {"ok": True, "data": parsed}
+
+
+# ── container-side snippets (run via _org_run; see its contract) ─────────────
+# The snippet bodies are STATIC. Data (including the secret VALUE) arrives as
+# JSON via the _BALABOT_ORG_PAYLOAD environment variable and is parsed inside
+# the container — never string-interpolated into the source, never argv.
+
+def _wrap(snippet: str, with_payload: bool) -> str:
+    head = "import json, sys\n"
+    if with_payload:
+        head += "payload = json.loads(os.environ.pop('_BALABOT_ORG_PAYLOAD'))\n"
+        return head.replace("import json, sys",
+                            "import json, os, sys") + snippet
+    return head + snippet
+
+
+_ORGS_LIST_SNIPPET = '''\
+from balabot import orgs
+print(json.dumps({'orgs': sorted(orgs.list_orgs(), key=lambda o: o['id'])}))
+'''
+
+_ORGS_VIEW_SNIPPET = '''\
+from balabot import orgs
+reg = orgs.load()
+org_members = {oid: o.get('members', []) for oid, o in reg['orgs'].items()}
+rows = []
+for s in reg['secrets']:
+    granted_to = []
+    for g in reg['grants']:
+        if (g['revoked_at'] is None and g['resource']['kind'] == 'secret'
+                and g['resource']['name'] == s['name']
+                and g['resource_org'] == s['org']):
+            if g['scope'] == 'org':
+                if g['subject_org'] == s['org']:
+                    granted_to.extend(f"org:{s['org']}:{m}"
+                                      for m in org_members.get(s['org'], []))
+                else:
+                    granted_to.append(f"org:{g['subject_org']}")
+            else:
+                granted_to.append(g['subject']['id'])
+    rows.append({'name': s['name'], 'org': s['org'],
+                 'description': s.get('description', ''),
+                 'fingerprint': s.get('fingerprint', '…'),
+                 'granted_to': sorted(set(granted_to))})
+print(json.dumps({'rows': rows}))
+'''
+
+_ORGS_GRANTS_LIST_SNIPPET = '''\
+from balabot import orgs
+print(json.dumps({'grants': orgs.load()['grants']}))
+'''
+
+# The secret VALUE arrives in `payload` (via stdin) and is used here, inside
+# the container, exactly once. Only the fingerprint and grant ids leave.
+_ORGS_SAVE_SNIPPET = '''\
+from balabot import orgs
+reg = orgs.load()
+org = payload['org']
+name = payload['name']
+if org not in reg['orgs']:
+    print(json.dumps({'ok': False, 'error': 'unknown_org',
+                      'detail': f'unknown org {org!r}', 'status': 404}))
+    raise SystemExit(0)
+elif payload.get('target_org') and payload['target_org'] not in reg['orgs']:
+    print(json.dumps({'ok': False, 'error': 'unknown_org',
+                      'detail': f"unknown target org {payload['target_org']!r}",
+                      'status': 404}))
+    raise SystemExit(0)
+else:
+    orgs.store_secret(name, org, payload['value'])
+    record = orgs.register_secret(name, org,
+                                  description=payload.get('description') or '')
+    made = []
+    resource = {'kind': 'secret', 'name': name}
+    scope = payload['share_scope']
+    if scope in ('one', 'choose'):
+        for bot in payload['bots']:
+            made.append(orgs.grant(bot, resource, subject_org=org, scope='bot'))
+    elif scope == 'all':
+        made.append(orgs.grant(org, resource, subject_org=org, scope='org',
+                               created_by='user'))
+    elif scope == 'another_org':
+        if not payload.get('target_org'):
+            print(json.dumps({'ok': False, 'error': 'bad_request',
+                              'detail': "share_scope 'another_org' requires target_org",
+                              'status': 400}))
+            raise SystemExit(0)
+        else:
+            # A cross-org grant is not a special case: same table, the
+            # receiving org is the subject.
+            made.append(orgs.grant(f"org:{payload['target_org']}",
+                                   {**resource, 'org': org},
+                                   subject_org=payload['target_org'],
+                                   scope='org', created_by='user'))
+    granted_to = []
+    if scope == 'all':
+        members = reg['orgs'][org].get('members', [])
+        granted_to = [f'org:{org}:{m}' for m in members]
+    elif scope == 'another_org':
+        granted_to = [f"org:{payload['target_org']}"] if payload.get('target_org') else []
+    else:
+        granted_to = list(payload['bots'] or [])
+    print(json.dumps({'fingerprint': record.get('fingerprint'),
+                      'grant_ids': [g['id'] for g in made],
+                      'granted_to': granted_to}))
+'''
+
+_ORGS_GRANT_CREATE_SNIPPET = '''\
+from balabot import orgs
+resource = payload['resource']
+try:
+    g = orgs.grant(
+        payload.get('subject_bot') or '',
+        {'kind': resource.get('kind'), 'name': resource.get('name'),
+         **({'org': resource['org']} if resource.get('org') else {})},
+        subject_org=payload.get('subject_org') or '',
+        scope=payload.get('scope') or 'bot',
+        access=payload.get('access') or 'inject',
+        created_by=payload.get('created_by') or 'user')
+    print(json.dumps({'grant': g}))
+except ValueError as exc:
+    print(json.dumps({'ok': False, 'error': 'bad_request',
+                      'detail': str(exc), 'status': 400}))
+except KeyError as exc:
+    print(json.dumps({'ok': False, 'error': 'unknown_org',
+                      'detail': str(exc), 'status': 404}))
+'''
+
+_ORGS_GRANT_REVOKE_SNIPPET = '''\
+from balabot import orgs
+gid = payload['grant_id']
+if not orgs.revoke(gid):
+    print(json.dumps({'ok': False, 'error': 'not_found',
+                      'detail': f'no grant {gid!r}', 'status': 404}))
+else:
+    row = next(g for g in orgs.load()['grants'] if g['id'] == gid)
+    print(json.dumps({'grant': row}))
+'''
+
+ORG_KINDS = ("secret", "skill", "workspace", "display")
+
+
+def _org_status_error(res: dict):
+    """Raise the HTTP status the container-side snippet asked for."""
+    raise HTTPException(status_code=int(res.get("status") or 503),
+                        detail=res.get("detail") or res.get("reason", "container error"))
+
+
+# Pending access requests, per bot profile, drained by the /api/chat SSE stream
+# as `event: secret_request` / `event: secret_access_request` frames. This is
+# the server-side emission path: the upstream is a plain OpenAI-compatible
+# passthrough with no such event of its own, so the frames are emitted HERE
+# (the same frame grammar the working `event: handoff` frames use).
+_org_request_queue: dict[str, list[dict]] = {}
+
+
+def enqueue_org_request(profile: str, event: dict) -> dict:
+    """Queue a request frame for a profile's next /api/chat stream."""
+    item = {
+        "id": f"r_{int(time.time() * 1000):x}",
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        **event,
+    }
+    _org_request_queue.setdefault(profile, []).append(item)
+    return item
+
+
+def _drain_org_request_frames(profile: str) -> list[str]:
+    """Pop queued requests for `profile` as SSE frames. Metadata only — the
+    secret NAME and description travel; a value can never appear here."""
+    frames: list[str] = []
+    pending = _org_request_queue.pop(profile, [])
+    for item in pending:
+        kind = item.get("kind", "secret_request")
+        payload = {"name": item.get("name", ""),
+                   "description": item.get("description", ""),
+                   "requestedBy": item.get("bot", ""),
+                   "bot": item.get("bot", ""),
+                   "request_id": item["id"]}
+        if kind == "secret_access_request":
+            payload["reason"] = item.get("reason", "")
+        frames.append(f"event: {kind}\ndata: {json.dumps(payload)}\n\n")
+    return frames
+
+
+def _org_meta_only(record: dict) -> dict:
+    """Whitelist the fields that may leave the backend. No value, ever."""
+    return {k: record.get(k) for k in
+            ("name", "org", "description", "fingerprint", "created_at",
+             "rotated_at") if k in record}
 
 
 @app.get("/api/orgs")
-def orgs():
-    return _org_unavailable()
+def orgs_list():
+    if not container_ok():
+        return unavailable("balabot container is not running — no org data")
+    res = _org_run(_wrap(_ORGS_LIST_SNIPPET, False))
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "could not read the org registry"))
+    rows = res.get("orgs") or []
+    if not rows:
+        return unavailable("no organizations are registered yet — "
+                           "register one via the registry CLI or POST /api/org/grants "
+                           "after creating it (python -m balabot.orgs)")
+    return {"available": True, "orgs": rows}
+
+
+@app.post("/api/org/secrets")
+async def org_secret_save(request: Request):
+    """Store a secret VALUE and create its grant(s). The value is passed ONCE,
+    via stdin into the container's store_secret, and never echoed, logged or
+    returned — only the container-side metadata + fingerprint come back out."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    name = body.get("name") or ""
+    value = body.get("value")
+    org = body.get("org") or ""
+    if not name or not isinstance(value, str) or not value or not org:
+        raise HTTPException(status_code=400,
+                            detail="name, value and org are required")
+    share_scope = body.get("share_scope") or "one"
+    if share_scope not in ("one", "all", "choose", "another_org"):
+        raise HTTPException(status_code=400,
+                            detail="share_scope must be one|all|choose|another_org")
+    bots = [b for b in (body.get("bots") or []) if isinstance(b, str)]
+    target_org = body.get("target_org")
+    if share_scope in ("one", "choose") and not bots:
+        raise HTTPException(status_code=400,
+                            detail="share_scope one/choose requires bots")
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot store secrets")
+    # The value arrives via stdin JSON (payload), never argv and never
+    # interpolated into a shell command line.
+    res = _org_run(_wrap(_ORGS_SAVE_SNIPPET, True), payload={
+        "name": name, "org": org, "value": value, "share_scope": share_scope,
+        "bots": bots, "target_org": target_org,
+        "description": body.get("description") or "",
+    })
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not store the secret in the container"))
+    return {"saved": True, "name": name,
+            "fingerprint": res.get("fingerprint", "…"),
+            "granted_to": res.get("granted_to", []),
+            "share_scope": share_scope,
+            "grant_ids": res.get("grant_ids", [])}
+
+
+@app.get("/api/org/secrets")
+def org_secrets_list():
+    if not container_ok():
+        return unavailable("balabot container is not running — no secret registry")
+    res = _org_run(_wrap(_ORGS_VIEW_SNIPPET, False))
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "could not read the secret registry"))
+    return res.get("rows", [])
+
+
+@app.get("/api/org/grants")
+def org_grants_list():
+    if not container_ok():
+        return unavailable("balabot container is not running — no grant data")
+    res = _org_run(_wrap(_ORGS_GRANTS_LIST_SNIPPET, False))
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "could not read the grant table"))
+    return {"grants": res.get("grants", [])}
+
+
+@app.post("/api/org/grants")
+async def org_grants_create(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    resource = body.get("resource") or {}
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot create grants")
+    res = _org_run(_wrap(_ORGS_GRANT_CREATE_SNIPPET, True), payload={
+        "subject_bot": body.get("subject_bot"),
+        "subject_org": body.get("subject_org"), "resource": resource,
+        "scope": body.get("scope"), "access": body.get("access"),
+        "created_by": body.get("created_by")})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not create the grant"))
+    return {"granted": True, "grant": res.get("grant")}
+
+
+@app.post("/api/org/grants/{grant_id}/revoke")
+def org_grants_revoke(grant_id: str):
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot revoke grants")
+    res = _org_run(_wrap(_ORGS_GRANT_REVOKE_SNIPPET, True),
+                   payload={"grant_id": grant_id})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not revoke the grant"))
+    # Revocation sets revoked_at; the row is never deleted (audit trail).
+    return {"revoked": True, "grant": res.get("grant")}
+
+
+@app.get("/api/org/requests")
+def org_requests_list():
+    """The access-request queue (pending, across profiles), oldest first."""
+    pending = [item for items in _org_request_queue.values() for item in items]
+    pending.sort(key=lambda i: i["created_at"])
+    return {"requests": pending, "count": len(pending)}
+
+
+@app.post("/api/org/requests")
+async def org_requests_enqueue(request: Request):
+    """A bot raises a secret request / access request. Metadata only."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    bot = body.get("bot") or ""
+    kind = body.get("kind") or "secret_request"
+    if kind not in ("secret_request", "secret_access_request"):
+        raise HTTPException(status_code=400, detail="kind must be secret_request "
+                             "or secret_access_request")
+    if not bot:
+        raise HTTPException(status_code=400, detail="bot is required")
+    name = body.get("name") or ""
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    item = enqueue_org_request(bot, {
+        "kind": kind, "bot": bot, "name": name,
+        "description": body.get("description") or "",
+        "reason": body.get("reason") or "",
+    })
+    return {"queued": True, "request": item}
+
+
+# Legacy skills stub: /api/skills/library (below) is the real route;
+# the org-scoped pin/promote actions are still honest stubs until wave 6
+# lands the skills registry.
+@app.api_route("/api/org/skills/pin", methods=["POST"])
+@app.api_route("/api/org/skills/promote", methods=["POST"])
+async def org_skills_stubs(request: Request):
+    return unavailable("org skills (pin/promote) are not wired yet — the "
+                       "skills registry is build-order step 6")
 
 
 def _skill_rows(profile: str) -> list[dict] | None:
@@ -618,20 +1010,6 @@ def skills_library(bot: str = ""):
     return {"available": True, "bots": library}
 
 
-@app.get("/api/org/requests")
-def org_requests():
-    return {"requests": []}  # keep the poller quiet; org layer is not wired
-
-
-@app.api_route("/api/org/secrets", methods=["GET", "POST"])
-@app.api_route("/api/org/grants", methods=["GET", "POST"])
-@app.api_route("/api/org/skills/library", methods=["GET"])
-@app.api_route("/api/org/skills/pin", methods=["POST"])
-@app.api_route("/api/org/skills/promote", methods=["POST"])
-async def org_endpoints(request: Request):
-    return _org_unavailable()
-
-
 # ── the chat turn: SSE passthrough to the profile's OpenAI-compatible API ────
 @app.post("/api/chat")
 async def chat(request: Request):
@@ -647,6 +1025,12 @@ async def chat(request: Request):
 
     async def stream():
         try:
+            # Pending org requests for this profile are emitted FIRST, as
+            # server-side SSE frames in the same grammar as `event: handoff`.
+            # Metadata only (name/description/requestedBy) — a secret value can
+            # never enter a frame.
+            for frame in _drain_org_request_frames(profile):
+                yield frame
             async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=15.0)) as client:
                 async with client.stream("POST", url, json=payload, headers=headers) as r:
                     if r.status_code != 200:

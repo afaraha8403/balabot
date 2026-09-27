@@ -1,115 +1,104 @@
-import {useState} from 'react';
+import {useRef, useState} from 'react';
 import {HStack} from '@astryxdesign/core/Stack';
 import {VStack} from '@astryxdesign/core/VStack';
 import {Text} from '@astryxdesign/core/Text';
-import {Icon} from '@astryxdesign/core/Icon';
 import {IconButton} from '@astryxdesign/core/IconButton';
 import {Button} from '@astryxdesign/core/Button';
-import {TextInput} from '@astryxdesign/core/TextInput';
-import {Selector} from '@astryxdesign/core/Selector';
 import {Token} from '@astryxdesign/core/Token';
 import {Timestamp} from '@astryxdesign/core/Timestamp';
 import {Avatar} from '@astryxdesign/core/Avatar';
+import {Selector} from '@astryxdesign/core/Selector';
 import {IconClose, IconConcealOrWarning, IconError, IconSuccess} from './icons';
 import type {Bot} from './api';
 import {
   ChatMessage as ChatMessageRow,
   ChatMessageBubble,
 } from '@astryxdesign/core/Chat';
-import {
-  postOrgSecret,
-  postOrgGrant,
-  type SecretCard,
-} from './api';
+import {postOrgSecret, type SecretCard, type SecretSaveResult} from './api';
+
+type ShareChoice = 'self' | 'all' | 'choose' | 'another-org';
 
 type Props = {
   card: SecretCard;
-  /** The fleet's bots — the real share targets now that there is no org layer. */
+  /** The fleet's bots — the real share targets. */
   bots: Bot[];
   onResolve: (requestId: string, status: SecretCard['status']) => void;
 };
 
 /**
- * In-chat secret request card. The value is typed into a PASSWORD input and
- * POSTed DIRECTLY to the backend from here — it is never dispatched as a chat
- * message, never lifted into parent state beyond the input, and never rendered
- * anywhere. After Save the input is cleared immediately and only the
- * name + fingerprint confirmation remains.
+ * In-chat secret request card — "the interface is in the chat, the value never is".
+ *
+ * SECURITY INVARIANT (do not refactor away):
+ * The secret VALUE is read from the password input's DOM ref at submit time,
+ * POSTed straight to POST /api/org/secrets, and the field is cleared
+ * immediately after. The value NEVER enters React state — no useState, no
+ * store, no chat message, no transcript render, no console.log. The only
+ * state in this component is share choice, save result metadata (name,
+ * fingerprint, granted scope), and error text.
  */
 export function SecretRequestCard({card, bots, onResolve}: Props) {
-  // The ONLY state that ever holds the value; cleared right after the POST.
-  const [value, setValue] = useState('');
-  const [share, setShare] = useState('all');
-  const [chooseBots, setChooseBots] = useState<string[]>([]);
+  // The ONLY reference to the value: the DOM input itself. Never mirrored
+  // into component state — read it from the ref at submit time only.
+  const valueInputRef = useRef<HTMLInputElement | null>(null);
+  const [share, setShare] = useState<ShareChoice>('self');
+  const [chosenBot, setChosenBot] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [result, setResult] = useState<SecretSaveResult | null>(null);
   const [error, setError] = useState('');
 
   const resolved = card.status !== undefined;
   const isAccessRequest = card.kind === 'secret_access_request';
 
-  const cancel = () => onResolve(card.requestId, {state: 'cancelled'});
-
-  const approveAccess = async () => {
-    setIsSaving(true);
-    setError('');
-    try {
-      await postOrgGrant({
-        principal: card.bot,
-        kind: 'secret',
-        name: card.name,
-        action: 'grant',
-      });
-      onResolve(card.requestId, {state: 'denied'}); // approved — reuse denial slot as "handled"
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setIsSaving(false);
-    }
+  /** Wipe the value from the DOM the moment we no longer need it. */
+  const clearValue = () => {
+    if (valueInputRef.current) valueInputRef.current.value = '';
   };
 
-  const denyAccess = async () => {
-    setIsSaving(true);
-    setError('');
-    try {
-      await postOrgGrant({
-        principal: card.bot,
-        kind: 'secret',
-        name: card.name,
-        action: 'revoke',
-      });
-      onResolve(card.requestId, {state: 'denied'});
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setIsSaving(false);
-    }
+  const cancel = () => {
+    clearValue();
+    onResolve(card.requestId, {state: 'cancelled'});
   };
 
   const save = async () => {
+    // Read the value straight from the DOM at submit time — it has never
+    // passed through React state at any point in this component's life.
+    const value = valueInputRef.current?.value ?? '';
     if (!value) return;
     setIsSaving(true);
     setError('');
     try {
-      const shareValue = share === 'choose' ? chooseBots : share;
-      const result = await postOrgSecret({
+      const shareValue =
+        share === 'self'
+          ? [card.bot]
+          : share === 'choose'
+            ? chosenBot
+              ? [chosenBot]
+              : []
+            : share; // 'all'
+      const res = await postOrgSecret({
         name: card.name,
         value,
         share: shareValue,
       });
-      // Clear the input IMMEDIATELY after the POST — before any re-render
-      // path could snapshot it. The value never lives anywhere else.
-      setValue('');
+      setResult(res);
       onResolve(card.requestId, {
         state: 'saved',
-        fingerprint: result.fingerprint ?? '',
+        fingerprint: res.fingerprint ?? '',
       });
     } catch (e) {
       setError((e as Error).message);
-      // Still clear: never leave the value sitting in the field on failure.
-      setValue('');
     } finally {
+      // Clear the field in every path — success and failure. The value never
+      // outlives this function.
+      clearValue();
       setIsSaving(false);
     }
+  };
+
+  const grantedScope = (res: SecretSaveResult): string => {
+    const g = res.granted_to;
+    if (Array.isArray(g) && g.length > 0) return g.join(', ');
+    return res.share_scope ?? 'unknown scope';
   };
 
   return (
@@ -134,9 +123,6 @@ export function SecretRequestCard({card, bots, onResolve}: Props) {
           {card.description ? (
             <Text type="supporting">{card.description}</Text>
           ) : null}
-          {isAccessRequest && card.reason ? (
-            <Text type="supporting">Reason: {card.reason}</Text>
-          ) : null}
 
           {resolved ? (
             card.status?.state === 'saved' ? (
@@ -144,6 +130,7 @@ export function SecretRequestCard({card, bots, onResolve}: Props) {
                 <IconSuccess color="green" />
                 <Text type="supporting">
                   Saved. Fingerprint {card.status.fingerprint || '—'}
+                  {result ? ` · shared with: ${grantedScope(result)}` : ''}
                 </Text>
               </HStack>
             ) : card.status?.state === 'denied' && isAccessRequest ? (
@@ -152,74 +139,83 @@ export function SecretRequestCard({card, bots, onResolve}: Props) {
               <Text type="supporting">Request cancelled.</Text>
             )
           ) : isAccessRequest ? (
-            <HStack gap={2}>
-              <Button
-                label="Approve"
-                variant="primary"
-                size="sm"
-                isLoading={isSaving}
-                onClick={() => void approveAccess()}
-              />
-              <Button
-                label="Deny"
-                variant="secondary"
-                size="sm"
-                isDisabled={isSaving}
-                onClick={() => void denyAccess()}
-              />
-            </HStack>
+            // Secret access grants have no real backend: /api/org/grants is a
+            // stub in the current server. An honest disabled state beats a
+            // control that pretends to grant.
+            <Text type="supporting" color="secondary">
+              This bot is asking to reuse an existing secret. Access grants are
+              not backed by the current server, so approve/deny is disabled
+              until a grants endpoint exists.
+            </Text>
           ) : (
             <VStack gap={3}>
-              <TextInput
-                label={`Value for ${card.name}`}
-                type="password"
-                value={value}
-                onChange={setValue}
-                size="sm"
-                isRequired
-                autoComplete="off"
-                description="Sent straight to the org secret store — never through the chat."
-                width="100%"
-              />
+              {/* Uncontrolled password input: the value lives ONLY in the
+                  DOM. Never add a value/onChange state pair here. */}
+              <VStack gap={1} width="100%">
+                <Text type="supporting" weight="semibold">
+                  Value for {card.name}
+                </Text>
+                <input
+                  ref={valueInputRef}
+                  type="password"
+                  autoComplete="off"
+                  placeholder="Paste the value — it is sent straight to the secret store"
+                  disabled={isSaving}
+                  style={{
+                    width: '100%',
+                    padding: 'var(--spacing-2) var(--spacing-3)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-surface)',
+                    color: 'var(--color-text)',
+                    font: 'inherit',
+                  }}
+                />
+                <Text type="supporting">
+                  Sent straight to the secret store — never through the chat.
+                </Text>
+              </VStack>
+
               <Selector
                 label="Share with"
                 value={share}
-                onChange={v => setShare(v ?? 'all')}
+                onChange={v => setShare((v as ShareChoice) ?? 'self')}
                 size="sm"
+                placeholder="Who may read this secret"
                 options={[
-                  {value: 'self', label: 'Only this bot'},
+                  {value: 'self', label: `${card.bot || 'This bot'} only`},
                   {value: 'all', label: 'All bots'},
-                  {value: 'choose', label: 'Choose bots'},
+                  {value: 'choose', label: 'Choose bots…'},
+                  {value: 'another-org', label: 'Another org… (no org registry on this server)', disabled: true},
                 ]}
                 width="100%"
               />
               {share === 'choose' && bots.length > 0 ? (
                 <Selector
                   label="Bots"
-                  value={chooseBots[0] ?? ''}
-                  onChange={v => setChooseBots(v ? [v] : [])}
+                  value={chosenBot}
+                  onChange={v => setChosenBot(v ?? '')}
                   size="sm"
                   placeholder="Pick a bot"
                   options={bots.map(b => ({value: b.id, label: b.name}))}
                   width="100%"
                 />
               ) : null}
+
               {error ? (
                 <HStack gap={2} vAlign="center">
                   <IconError color="red" />
                   <Text type="supporting">{error}</Text>
                 </HStack>
               ) : null}
+
               <HStack gap={2} hAlign="end">
                 <Button
                   label="Cancel"
                   variant="ghost"
                   size="sm"
                   isDisabled={isSaving}
-                  onClick={() => {
-                    setValue('');
-                    onResolve(card.requestId, {state: 'cancelled'});
-                  }}
+                  onClick={cancel}
                 />
                 <Button
                   label="Save"

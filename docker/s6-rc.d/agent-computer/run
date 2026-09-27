@@ -86,9 +86,12 @@ for manifest_path in "$FLEET_DIR"/*.json; do
     # failure handler must stay on the same line as the heredoc marker: the
     # here-document body begins on the next physical line regardless of the
     # rest of the command.)
-    python3 - "$manifest_path" <<'PYEOF' >>"$AGENTS_FILE" || { echo "[agent-computer] DORMANT — manifest failed to parse: $manifest_path."; exit 0; }
-import json, sys
-path = sys.argv[1]
+    # The manifest path rides in an env var rather than argv so the same
+    # script works under MSYS/git-bash (which rewrites POSIX-looking argv
+    # paths) and plain POSIX sh alike.
+    FLEET_MANIFEST="$manifest_path" python3 - <<'PYEOF' >>"$AGENTS_FILE" || { echo "[agent-computer] DORMANT — manifest failed to parse: $manifest_path."; exit 0; }
+import json, sys, os
+path = os.environ["FLEET_MANIFEST"]
 with open(path, encoding="utf-8") as fh:
     m = json.load(fh)
 import os

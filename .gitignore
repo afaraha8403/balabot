@@ -14,6 +14,10 @@ __pycache__/
 *.sqlite3
 .venv/
 venv/
+# Runtime logs. The adapter writes ui/server.log next to itself; it is
+# transient output, not source — committing it would bake today's startup
+# noise into the repo and make every run look like a diff.
+*.log
 
 # Editor / OS noise
 .vscode/

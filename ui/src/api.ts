@@ -65,11 +65,18 @@ export type SecretAccessRequestPayload = {
   request_id: string;
 };
 
+/**
+ * POST /api/org/secrets — the exact backend contract:
+ *   response: {saved, name, fingerprint, granted_to, share_scope}
+ * The VALUE is POSTed straight from the password input's ref and never
+ * round-trips through chat state, a store, or the transcript.
+ */
 export type SecretSaveResult = {
-  ok: boolean;
+  saved: boolean;
   name: string;
   fingerprint: string;
-  granted_to?: string[] | string;
+  granted_to?: string[];
+  share_scope?: string;
 };
 
 export type SkillEntry = {
@@ -86,6 +93,17 @@ export type SkillEntry = {
 export type SkillLibrary = {
   learned: SkillEntry[];
   brought: SkillEntry[];
+  note?: string;
+};
+
+/**
+ * GET /api/skills/library — real endpoint (server.py). Like every honest
+ * control-plane response it carries `available`; when false, `reason` says
+ * what is missing and the view must render that, not an empty list.
+ */
+export type SkillLibraryResponse = {available: boolean; reason?: string} & {
+  learned?: SkillEntry[];
+  brought?: SkillEntry[];
   note?: string;
 };
 
@@ -341,36 +359,9 @@ export async function getOrgs(): Promise<OrgSummary[]> {
  * The value must never be dispatched as a chat message or placed in
  * component state beyond the password input itself.
  */
-export async function postOrgSecret(body: {
-  org?: string;
-  name: string;
-  value: string;
-  description?: string;
-  share: string | string[];
-}): Promise<SecretSaveResult> {
-  const res = await fetch('/api/org/secrets', {
-    method: 'POST',
-    credentials: 'include',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`POST /api/org/secrets -> ${res.status}`);
-  return (await res.json()) as SecretSaveResult;
-}
-
-export async function postOrgGrant(body: {
-  principal: string;
-  org?: string;
-  kind: string;
-  name: string;
-  action: 'grant' | 'revoke';
-}): Promise<unknown> {
-  return api('/api/org/grants', {method: 'POST', body: JSON.stringify(body)});
-}
-
-export async function getSkillLibrary(botId?: string): Promise<SkillLibrary> {
+export async function getSkillLibrary(botId?: string): Promise<SkillLibraryResponse> {
   const q = botId ? `?bot=${encodeURIComponent(botId)}` : '';
-  return api<SkillLibrary>(`/api/skills/library${q}`);
+  return api<SkillLibraryResponse>(`/api/skills/library${q}`);
 }
 
 export async function postSkillPin(body: {
@@ -387,6 +378,35 @@ export async function postSkillPromote(body: {
   share: string | string[];
 }): Promise<unknown> {
   return api('/api/org/skills/promote', {method: 'POST', body: JSON.stringify(body)});
+}
+
+/**
+ * POST /api/org/secrets — the secret VALUE travels from the caller's password
+ * input straight into this request body and nowhere else. Never log it, never
+ * route it through a chat message or a store that renders in the transcript.
+ */
+export async function postOrgSecret(body: {
+  org?: string;
+  name: string;
+  value: string;
+  description?: string;
+  share: string | string[];
+}): Promise<SecretSaveResult> {
+  const res = await fetch('/api/org/secrets', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`POST /api/org/secrets -> ${res.status}`);
+  const result = (await res.json()) as SecretSaveResult;
+  if (!result.saved) {
+    throw new Error(
+      `the secret store did not save "${result.name}"` +
+        (result.fingerprint ? ` (fingerprint ${result.fingerprint})` : ''),
+    );
+  }
+  return result;
 }
 
 // ── control-plane endpoints (B-era): all follow the honesty contract ──

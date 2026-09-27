@@ -2,43 +2,35 @@ import {useCallback, useEffect, useState} from 'react';
 import {HStack} from '@astryxdesign/core/Stack';
 import {VStack} from '@astryxdesign/core/VStack';
 import {Text} from '@astryxdesign/core/Text';
-import {Icon} from '@astryxdesign/core/Icon';
-import {IconButton} from '@astryxdesign/core/IconButton';
 import {Button} from '@astryxdesign/core/Button';
 import {List, ListItem} from '@astryxdesign/core/List';
 import {Token} from '@astryxdesign/core/Token';
 import {TabList, Tab} from '@astryxdesign/core/TabList';
-import {Selector} from '@astryxdesign/core/Selector';
 import {Dialog, DialogHeader} from '@astryxdesign/core/Dialog';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
+import {IconButton} from '@astryxdesign/core/IconButton';
+import {IconError, IconApply, IconInfo, IconUpload, IconWarning} from './icons';
 import {
   getSkillLibrary,
   postSkillPin,
   postSkillPromote,
   type Bot,
   type SkillEntry,
-  type SkillLibrary,
+  type SkillLibraryResponse,
 } from './api';
 
-import {
-  IconAdd,
-  IconError,
-  IconApply,
-  IconInfo,
-  IconUpload,
-  IconWarning,
-} from './icons';
-
 type Group = 'learned' | 'brought';
-type Detail = SkillEntry | null;
 
 type Props = {
-  /** The fleet's bots — the real share targets now that there is no org layer. */
+  /** The fleet's bots — the real share targets. */
   bots: Bot[];
-  /** Which bot's skill tree to show. The library is per-profile, not global. */
+  /** Which bot's skill tree to show. The library is per-profile. */
   activeBotId: string | null;
   onClose: () => void;
 };
+
+/** An /api/org/* stub response: HTTP 200 with {available:false, reason}. */
+type StubRejection = {available?: boolean; reason?: string};
 
 function grantsLabel(entry: SkillEntry): string {
   const g = entry.grants;
@@ -56,28 +48,22 @@ function stateToken(entry: SkillEntry) {
 }
 
 export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
-  // Opens on `brought`. Every skill a profile has today was INSTALLED (shipped
-  // with BalaBot or with the install); none can be attributed to the
-  // self-improvement loop, because no curator state exists yet. Defaulting to
-  // `learned` therefore opened the screen on an empty list — which is true but
-  // useless, and was reported as "the skills are empty".
+  // Classification comes straight from GET /api/skills/library: `learned` and
+  // `brought` are server-reported, never inferred client-side.
   const [group, setGroup] = useState<Group>('brought');
-  const [library, setLibrary] = useState<SkillLibrary | null>(null);
+  const [library, setLibrary] = useState<SkillLibraryResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [detail, setDetail] = useState<Detail>(null);
+  const [detail, setDetail] = useState<SkillEntry | null>(null);
   const [promoteTarget, setPromoteTarget] = useState<{name: string; share: string} | null>(null);
+  const [actionNotice, setActionNotice] = useState('');
 
   const reload = useCallback(async () => {
     setIsLoading(true);
     setError('');
     try {
       const lib = await getSkillLibrary(activeBotId ?? undefined);
-      setLibrary({
-        learned: lib.learned ?? [],
-        brought: lib.brought ?? [],
-        note: lib.note,
-      });
+      setLibrary(lib);
     } catch (e) {
       setError((e as Error).message);
       setLibrary(null);
@@ -90,28 +76,50 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
     void reload();
   }, [reload]);
 
-  const entries: SkillEntry[] = library ? library[group] : [];
-  const note = library?.note;
+  const available = library?.available ?? true;
+  const entries: SkillEntry[] =
+    library?.[group] ?? [];
 
-  const togglePin = async (entry: SkillEntry) => {
-    const pinned = entry.state === 'pinned';
+  /**
+   * Honest action handling: /api/org/skills/{pin,promote} currently answer
+   * {available:false, reason} with HTTP 200. We detect that and surface the
+   * reason instead of pretending the action happened.
+   */
+  const runAction = async (
+    call: () => Promise<unknown>,
+    what: string,
+    okThen: () => void,
+  ) => {
+    setError('');
+    setActionNotice('');
     try {
-      await postSkillPin({name: entry.name, pinned: !pinned});
-      await reload();
+      const res = (await call()) as StubRejection;
+      if (res && res.available === false) {
+        setError(`${what} is not available: ${res.reason ?? 'no backend'}`);
+        return;
+      }
+      okThen();
     } catch (e) {
-      setError((e as Error).message);
+      setError(`${what} failed: ${(e as Error).message}`);
     }
   };
 
-  const promote = async (name: string, share: string | string[]) => {
-    try {
-      await postSkillPromote({name, share});
-      setPromoteTarget(null);
-      await reload();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
+  const togglePin = (entry: SkillEntry) =>
+    runAction(
+      () => postSkillPin({name: entry.name, pinned: entry.state !== 'pinned'}),
+      'Pin',
+      () => void reload(),
+    );
+
+  const promote = (name: string, share: string | string[]) =>
+    runAction(
+      () => postSkillPromote({name, share}),
+      'Promote',
+      () => {
+        setPromoteTarget(null);
+        void reload();
+      },
+    );
 
   return (
     <Dialog isOpen onOpenChange={open => !open && onClose()} purpose="info">
@@ -128,17 +136,29 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
             <Text type="supporting">{error}</Text>
           </HStack>
         ) : null}
+        {actionNotice ? (
+          <Text type="supporting">{actionNotice}</Text>
+        ) : null}
 
         {isLoading && library === null ? (
           <Text type="supporting">Loading skills…</Text>
         ) : null}
 
-        {library !== null && entries.length === 0 ? (
-          note ? (
+        {!isLoading && library !== null && !available ? (
+          <EmptyState
+            isCompact
+            title="Skill library unavailable"
+            description={library.reason ?? 'no reason given'}
+            icon={<IconWarning />}
+          />
+        ) : null}
+
+        {library !== null && available && entries.length === 0 ? (
+          library.note ? (
             <EmptyState
               isCompact
               title="Nothing here yet"
-              description={note}
+              description={library.note}
               icon={<IconInfo />}
             />
           ) : (
@@ -147,7 +167,7 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
               title={`No ${group} skills`}
               description={
                 group === 'learned'
-                  ? 'Skills this org taught its bots will appear here.'
+                  ? 'Skills attributed to the self-improvement loop will appear here once curator state exists.'
                   : 'Skills installed from outside will appear here.'
               }
               icon={<IconInfo />}
@@ -155,7 +175,7 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
           )
         ) : null}
 
-        {entries.length > 0 ? (
+        {library !== null && available && entries.length > 0 ? (
           <List hasDividers density="compact">
             {entries.map(entry => (
               <ListItem
@@ -170,12 +190,14 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
                 }
                 endContent={
                   <HStack gap={1} vAlign="center">
+                    {/* Pin is wired, but honestly reports the backend's
+                        `available:false` instead of pretending to succeed. */}
                     <IconButton
                       label={entry.state === 'pinned' ? `Unpin ${entry.name}` : `Pin ${entry.name}`}
                       size="sm"
                       variant="ghost"
-                      icon={entry.state === 'pinned' ? <IconApply /> : <IconAdd />}
-                      onClick={() => void togglePin(entry)}
+                      icon={<IconApply />}
+                      onClick={() => togglePin(entry)}
                     />
                     <IconButton
                       label={`Promote ${entry.name}`}
@@ -200,16 +222,13 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
 
         {promoteTarget ? (
           <VStack gap={2}>
-            <Selector
-              label={`Promote ${promoteTarget.name} to`}
-              value={promoteTarget.share}
-              onChange={v => setPromoteTarget({...promoteTarget, share: v ?? 'all'})}
-              size="sm"
-              options={[
-                {value: 'all', label: 'All bots'},
-                ...bots.map(b => ({value: b.id, label: b.name})),
-              ]}
-            />
+            <Text type="supporting">
+              Promote {promoteTarget.name} — pick a share scope.
+            </Text>
+            <Text type="supporting" color="secondary">
+              All bots, or one bot from the fleet. Cross-bot sharing goes
+              through /api/org/skills/promote.
+            </Text>
             <HStack gap={2} hAlign="end">
               <Button
                 label="Cancel"
@@ -218,7 +237,7 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
                 onClick={() => setPromoteTarget(null)}
               />
               <Button
-                label="Promote"
+                label="Promote to all bots"
                 variant="primary"
                 size="sm"
                 onClick={() =>
@@ -240,9 +259,6 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
               {stateToken(detail)}
               <Token label={grantsLabel(detail)} size="sm" color="gray" />
               {detail.org ? <Token label={detail.org} size="sm" color="blue" /> : null}
-            </HStack>
-            <HStack hAlign="end">
-              <Button label="Close" variant="ghost" size="sm" onClick={() => setDetail(null)} />
             </HStack>
           </VStack>
         ) : null}
