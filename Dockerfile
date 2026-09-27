@@ -56,12 +56,21 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 ARG CUA_DRIVER_VERSION=0.29.1
+# TWO different artifacts, so TWO hashes. Checking one against the other's hash
+# is a guaranteed build failure: the archive and the binary inside it never
+# share a checksum. Both are pinned, and both are verified.
+#   archive:  61a0c0f2…  (cua-driver-rs-0.29.1-linux-x86_64.tar.gz)
+#   binary:   a9c32628…  (verified byte-identical to the cua-driver running in
+#                         the separate GrokBot stack, which is where the pin
+#                         originally came from)
+ARG CUA_DRIVER_TARBALL_SHA256=61a0c0f24d6b03e31bb7a73390db875ecf0de2ce53aa435eadb03d70979d79a5
 ARG CUA_DRIVER_SHA256=a9c3262817103cdff6c09e351f6a3410206624a6f40eea5bd14b4abb3ddf9362
 RUN set -eux; \
     curl -fsSL -o /tmp/cua.tar.gz \
       "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_DRIVER_VERSION}/cua-driver-rs-${CUA_DRIVER_VERSION}-linux-x86_64.tar.gz"; \
-    echo "${CUA_DRIVER_SHA256}  /tmp/cua.tar.gz" | sha256sum -c -; \
+    echo "${CUA_DRIVER_TARBALL_SHA256}  /tmp/cua.tar.gz" | sha256sum -c -; \
     tar xzf /tmp/cua.tar.gz -C /tmp; \
+    echo "${CUA_DRIVER_SHA256}  /tmp/cua-driver-rs-${CUA_DRIVER_VERSION}-linux-x86_64/cua-driver" | sha256sum -c -; \
     install -m 0755 "/tmp/cua-driver-rs-${CUA_DRIVER_VERSION}-linux-x86_64/cua-driver" \
                     /usr/local/bin/cua-driver; \
     rm -rf /tmp/cua.tar.gz /tmp/cua-driver-rs-*; \
