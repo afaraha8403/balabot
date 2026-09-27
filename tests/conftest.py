@@ -50,7 +50,14 @@ def hermes_env(tmp_path, monkeypatch):
     data_root.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
     monkeypatch.setenv("BALABOT_DATA_ROOT", str(data_root))
-    for key in ("OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN", "TYPESAFE_API_KEY"):
+    # Clear every key bootstrap actually propagates, derived from the source of
+    # truth rather than a hand-kept list. A hardcoded list silently goes stale:
+    # when TERMINAL_TIMEOUT was added to PROFILE_ENV_KEYS, this fixture kept
+    # clearing only the three secrets, so an ambient TERMINAL_TIMEOUT leaked into
+    # the profile .env and broke test_env_file_empty_when_no_env_keys. The code was
+    # right; the test was not hermetic.
+    for key in ("OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN", "TYPESAFE_API_KEY",
+                *bootstrap_mod.PROFILE_ENV_KEYS):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     return {"hermes_home": hermes_home, "data_root": data_root}

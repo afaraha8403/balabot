@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -189,6 +190,54 @@ def provision_persona(name: str, *, repo_root: Path | None = None) -> dict[str, 
 BALABOT_SKILL_CATEGORY = "balabot"
 
 
+# The Governor's shared decision ledger. Created for BOTH personas: it is one
+# shared OKF bundle tree that both write to. Core promise behind it:
+# "if it is not in the ledger, it did not happen".
+LEDGER_DIRNAME = "ledger"
+
+
+def init_ledger(name: str, *, repo_root: Path | None = None) -> list[str]:
+    """Create the shared OKF decision ledger for a persona. Idempotent.
+
+    The ledger lives under the DATA root (<BALABOT_DATA_ROOT>/profiles/<name>/)
+    so it is volume-persisted alongside the workspace, and never committed into
+    the repo. Returns human-readable action strings.
+    """
+    data_root = _data_root()
+    ledger_dir = data_root / "profiles" / name / LEDGER_DIRNAME
+    actions: list[str] = []
+
+    index = ledger_dir / "index.md"
+    if index.is_file():
+        actions.append(f"ledger exists: {index}")
+        return actions
+
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    title = f"{name.title()} shared decision ledger"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    frontmatter = {
+        "type": "ledger",
+        "title": title,
+        "description": (
+            "Shared OKF decision ledger. Promise: if it is not in the "
+            "ledger, it did not happen."
+        ),
+        "timestamp": timestamp,
+        "tags": ["okf", "ledger", "decisions", name],
+    }
+    body = (
+        "\n# Shared Decision Ledger\n\n"
+        "Every binding decision is recorded here as an OKF entry.\n\n"
+        "**Promise:** if it is not in the ledger, it did not happen.\n"
+    )
+    index.write_text(
+        "---\n" + yaml.safe_dump(frontmatter, sort_keys=False) + "---\n" + body,
+        encoding="utf-8",
+    )
+    actions.append(f"initialised shared decision ledger at {index}")
+    return actions
+
+
 def install_skills(name: str, *, repo_root: Path | None = None) -> list[str]:
     """Install the repo's skills into a persona's profile skill tree.
 
@@ -223,6 +272,7 @@ def run_bootstrap() -> list[dict[str, Any]]:
     for name in PERSONAS:
         report = provision_persona(name)
         report["actions"].extend(install_skills(name))
+        report["actions"].extend(init_ledger(name))
         reports.append(report)
     for report in reports:
         print(f"[balabot {__version__}] persona '{report['persona']}':")

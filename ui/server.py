@@ -319,20 +319,37 @@ def ops():
 def memory():
     if not container_ok():
         return unavailable("balabot container is not running — cannot read the memory store")
+    # Verified against the live container: /opt/data/profiles/principal/ holds
+    # memory_store.db (tables: facts, entities, fact_entities, memory_banks,
+    # facts_fts*). There is no mem_<p>.db anywhere in the container.
+    # Entities are joined for real; category/tags are reported as themselves —
+    # never relabelled as entity data.
     facts = sqlite_json(
         "/opt/data/profiles/principal/memory_store.db",
-        "select fact_id, content, category, tags, trust_score, retrieval_count, "
-        "updated_at from facts order by updated_at desc limit 200")
+        "select f.fact_id, f.content, f.category, f.tags, f.trust_score, "
+        "f.retrieval_count, f.updated_at, "
+        "(select group_concat(e.name, ', ') from fact_entities fe "
+        "join entities e on e.entity_id = fe.entity_id "
+        "where fe.fact_id = f.fact_id) "
+        "from facts f order by f.updated_at desc limit 200")
     if facts is None:
         return unavailable("could not read the holographic store "
                            "(memory_store.db) inside the container")
     if not facts:
         return unavailable("the holographic memory store is empty — "
                            "no facts have been recorded yet")
-    rows = [{"id": f[0], "content": f[1], "entity": f[2] or "—",
-             "resolvedTo": f[3] or "—", "trust": float(f[4] or 0),
-             "sources": int(f[5] or 0), "updatedAt": str(f[6])} for f in facts]
-    return {"available": True, "facts": rows, "profile": "principal"}
+    rows = [{"id": f[0], "content": f[1], "entity": f[7] or "—",
+             "resolvedTo": "—", "trust": float(f[4] or 0),
+             "sources": int(f[5] or 0), "updatedAt": str(f[6]),
+             "category": f[2] or "", "tags": f[3] or ""} for f in facts]
+    counts = sqlite_json(
+        "/opt/data/profiles/principal/memory_store.db",
+        "select (select count(*) from entities), (select count(*) from memory_banks)")
+    return {"available": True, "facts": rows, "profile": "principal",
+            "entitiesCount": int(counts[0][0]) if counts else None,
+            "note": "Entity names come from the real entities/fact_entities "
+                    "tables; the store has no 'resolvedTo' concept, so that "
+                    "column is always '—'. category/tags are shown as-is."}
 
 
 # ── cost screen ──────────────────────────────────────────────────────────────

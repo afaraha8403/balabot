@@ -9,7 +9,13 @@ import pytest
 import yaml
 
 from balabot import bootstrap as bootstrap_mod
-from balabot.bootstrap import BootstrapError, install_skills, provision_persona, run_bootstrap
+from balabot.bootstrap import (
+    BootstrapError,
+    init_ledger,
+    install_skills,
+    provision_persona,
+    run_bootstrap,
+)
 
 
 def test_provisions_both_personas(hermes_env, fake_repo, monkeypatch):
@@ -118,6 +124,39 @@ def test_env_file_contains_only_env_present_keys(hermes_env, fake_repo, monkeypa
 def test_env_file_empty_when_no_env_keys(hermes_env, fake_repo):
     provision_persona("principal", repo_root=fake_repo)
     assert (hermes_env["hermes_home"] / "profiles" / "principal" / ".env").read_text() == ""
+
+
+def test_ledger_index_exists_after_provisioning(hermes_env, fake_repo):
+    init_ledger("governor")
+    index = hermes_env["data_root"] / "profiles" / "governor" / "ledger" / "index.md"
+    assert index.is_file()
+
+
+def test_ledger_index_frontmatter_has_type(hermes_env, fake_repo):
+    init_ledger("principal")
+    index = hermes_env["data_root"] / "profiles" / "principal" / "ledger" / "index.md"
+    text = index.read_text(encoding="utf-8")
+    assert text.startswith("---\n")
+    fm = yaml.safe_load(text.split("---\n")[1])
+    assert fm["type"]
+    assert "ledger" in fm["description"]
+
+
+def test_init_ledger_idempotent(hermes_env, fake_repo):
+    first = init_ledger("governor")
+    index = hermes_env["data_root"] / "profiles" / "governor" / "ledger" / "index.md"
+    content = index.read_text(encoding="utf-8")
+    second = init_ledger("governor")
+    assert index.read_text(encoding="utf-8") == content
+    assert "initialised" in first[0]
+    assert "exists" in second[0]
+
+
+def test_bootstrap_report_includes_ledger_actions(hermes_env, fake_repo, monkeypatch):
+    monkeypatch.setattr(bootstrap_mod, "_repo_root", lambda: fake_repo)
+    reports = run_bootstrap()
+    for report in reports:
+        assert any("ledger" in a for a in report["actions"])
 
 
 def test_no_secret_value_ever_printed(hermes_env, fake_repo, monkeypatch):
