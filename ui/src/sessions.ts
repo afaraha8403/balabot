@@ -28,7 +28,12 @@ export function loadSessions(): Session[] {
     const parsed = JSON.parse(raw) as Session[];
     if (!Array.isArray(parsed)) return [];
     // Older sessions predate handoffs; backfill so rendering never crashes.
-    return parsed.map(s => ({...s, handoffs: s.handoffs ?? []}));
+    return parsed
+      .map(s => ({...s, handoffs: s.handoffs ?? []}))
+      // Purge ghost sessions: a session with no botId can never match the
+      // per-bot filter, so it is unreachable — invisible and undeletable.
+      // Only message-less ghosts are dropped; nothing with content is discarded.
+      .filter(s => !!s.botId || (s.messages?.length ?? 0) > 0);
   } catch {
     return [];
   }

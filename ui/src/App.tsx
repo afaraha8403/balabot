@@ -909,6 +909,7 @@ export default function App() {
       {screen === 'cost' ? <CostScreen /> : null}
       {showSessions ? (
         <SessionsDialog
+          botId={activeBotId ?? ''}
           sessions={sessions.filter(s => s.botId === activeBotId)}
           activeId={activeSessionId}
           onSwitch={setActiveSessionId}

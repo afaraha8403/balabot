@@ -11,6 +11,10 @@ import {IconAdd, IconClose} from './icons';
 import type {Session} from './api';
 
 type Props = {
+  /** Bot the new conversation belongs to. Without it the session is orphaned:
+   *  the list filters on `s.botId === activeBotId`, so a session created with an
+   *  empty botId exists in storage but can never be shown or deleted. */
+  botId: string;
   sessions: Session[];
   activeId: string | null;
   onSwitch: (id: string) => void;
@@ -19,7 +23,7 @@ type Props = {
   onClose: () => void;
 };
 
-export function SessionsDialog({sessions, activeId, onSwitch, onDelete, onNew, onClose}: Props) {
+export function SessionsDialog({botId, sessions, activeId, onSwitch, onDelete, onNew, onClose}: Props) {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const target = sessions.find(s => s.id === confirmId);
 
@@ -32,8 +36,10 @@ export function SessionsDialog({sessions, activeId, onSwitch, onDelete, onNew, o
             label="New conversation"
             variant="primary"
             icon={<IconAdd />}
+            isDisabled={!botId}
             onClick={() => {
-              onNew(newSession('', 'New chat'));
+              if (!botId) return;
+              onNew(newSession(botId, 'New chat'));
               onClose();
             }}
           />
