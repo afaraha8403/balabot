@@ -22,7 +22,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import yaml
 
@@ -55,6 +55,43 @@ PROFILE_ENV_KEYS = (
 )
 
 PERSONAS = ("principal", "governor")
+
+# ---------------------------------------------------------------------------
+# Per-persona skill scoping. A persona gets ONLY the skills it needs: workers
+# must never carry operator/ledger tooling (owner-onboarding, contradiction-
+# audit, agent-liveness-recovery, agent-growth-review), and shipping the whole
+# skills/ dump to every agent is noise and privilege creep. Every persona and
+# every created worker gets the universal set (incl. platform-awareness — every
+# agent must know it lives inside BalaBot and how to behave on the platform).
+# ---------------------------------------------------------------------------
+UNIVERSAL_SKILLS = (
+    "platform-awareness",
+    "workspace-law",
+    "untrusted-ingestion",
+    "jev-signals",
+)
+PERSONA_SKILLS: dict[str, tuple[str, ...]] = {
+    "principal": UNIVERSAL_SKILLS + (
+        "delegation-discipline",
+        "agent-liveness-recovery",
+        "agent-growth-review",
+        "owner-onboarding",
+        "okf-decision-ledger",
+    ),
+    "governor": UNIVERSAL_SKILLS + (
+        "delegation-discipline",
+        "okf-decision-ledger",
+        "contradiction-audit",
+    ),
+}
+# Skills for a bot created via the consent ladder: universal baseline plus the
+# two working skills any worker needs. Deliberately NARROWER than either
+# persona: no contradiction-audit, no owner-onboarding, no liveness/growth
+# review — those are operator tooling, not worker tooling.
+DEFAULT_WORKER_SKILLS: tuple[str, ...] = UNIVERSAL_SKILLS + (
+    "delegation-discipline",
+    "okf-decision-ledger",
+)
 
 # Forced deltas, applied to every persona's rendered config.
 FORCED_MODEL_DEFAULT = "deepseek/deepseek-v4.1-flash"
@@ -387,12 +424,17 @@ def enforce_jev_dependency(name: str = "principal", *, client: Jev | None = None
     )
 
 
-def install_skills(name: str, *, repo_root: Path | None = None) -> list[str]:
+def install_skills(name: str, *, repo_root: Path | None = None,
+                   skills: Iterable[str] | None = None) -> list[str]:
     """Install the repo's skills into a persona's profile skill tree.
 
     Preserves the <category>/<skill>/ layout Hermes requires for discovery.
     Repo layout is skills/<skill>/SKILL.md, so each top-level skill dir is
     re-homed under BALABOT_SKILL_CATEGORY.
+
+    `skills` scopes WHAT is installed: an explicit iterable of skill names.
+    None defaults to the persona's scoped set (PERSONA_SKILLS) — never the
+    whole skills/ dump. Unknown/missing names are reported, not fatal.
     """
     root = repo_root if repo_root is not None else _repo_root()
     src_root = root / "skills"
@@ -402,16 +444,22 @@ def install_skills(name: str, *, repo_root: Path | None = None) -> list[str]:
     if not src_root.is_dir():
         return [f"no skills/ dir in repo ({src_root}) — nothing installed"]
 
+    wanted = tuple(skills) if skills is not None else PERSONA_SKILLS.get(
+        name, DEFAULT_WORKER_SKILLS)
     dest_root.mkdir(parents=True, exist_ok=True)
-    for skill_dir in sorted(p for p in src_root.iterdir() if p.is_dir()):
-        if not (skill_dir / "SKILL.md").is_file():
-            actions.append(f"skipped {skill_dir.name}: no SKILL.md")
+    for skill_name in wanted:
+        skill_dir = src_root / skill_name
+        if not skill_dir.is_dir():
+            actions.append(f"skipped {skill_name}: no such skill in repo")
             continue
-        dest = dest_root / skill_dir.name
+        if not (skill_dir / "SKILL.md").is_file():
+            actions.append(f"skipped {skill_name}: no SKILL.md")
+            continue
+        dest = dest_root / skill_name
         if dest.exists():
             shutil.rmtree(dest)
         shutil.copytree(skill_dir, dest)
-        actions.append(f"installed skill '{skill_dir.name}' -> {dest.relative_to(_hermes_home())}")
+        actions.append(f"installed skill '{skill_name}' -> {dest.relative_to(_hermes_home())}")
     return actions
 
 

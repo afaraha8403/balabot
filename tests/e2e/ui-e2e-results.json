@@ -1,6 +1,6 @@
 {
   "base": "http://127.0.0.1:9119",
-  "when": "2026-09-27T16:07:10.742Z",
+  "when": "2026-09-27T16:22:20.592Z",
   "passed": 8,
   "total": 8,
   "results": [
@@ -42,7 +42,7 @@
     {
       "name": "s08 a real tool call is surfaced (ChatToolCalls + orb)",
       "ok": true,
-      "detail": "toolRow=true target=true orbNamedTool=true persistedRows=1 orbsAfter=0 orbLabels=[\"Principal is working\",\"Principal is running terminal: echo E2ETOOL181999\"]"
+      "detail": "toolRow=true target=true orbNamedTool=true persistedRows=1 orbsAfter=0 orbLabels=[\"Principal is working\",\"Principal is running terminal: echo E2ETOOL092485\"]"
     }
   ]
 }

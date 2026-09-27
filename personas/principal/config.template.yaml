@@ -100,3 +100,8 @@ terminal:
   # Must be a path that exists INSIDE the image (the persona's own workspace),
   # never a host path.
   cwd: /opt/data/workspace/principal
+
+# Model reasoning is NOT shown to the user by default (chat UI renders it
+# separately when the user opts in). Upstream default is true; we ship false.
+display:
+  show_reasoning: false

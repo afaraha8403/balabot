@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useState} from 'react';
-import {HStack} from '@astryxdesign/core/Stack';
+import {HStack, StackItem} from '@astryxdesign/core/Stack';
 import {VStack} from '@astryxdesign/core/VStack';
 import {Text} from '@astryxdesign/core/Text';
 import {Button} from '@astryxdesign/core/Button';
@@ -124,12 +124,16 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
   return (
     <Dialog isOpen onOpenChange={open => !open && onClose()} purpose="info">
       <DialogHeader title="Skill library" onOpenChange={onClose} />
-      <VStack gap={3} padding={4}>
+      <VStack gap={3} padding={4} height="fill">
         <TabList value={group} onChange={v => setGroup(v as Group)}>
           <Tab value="learned" label="Learned" />
           <Tab value="brought" label="Brought" />
         </TabList>
 
+        {/* Scroll region: StackItem with size="fill" + isScrollable is a
+            complete bounded scroll region (flex min-height reset + overflow:
+            auto), so the header/tabs stay usable and the list scrolls. */}
+        <StackItem size="fill" isScrollable>
         {error ? (
           <HStack gap={2} vAlign="center">
             <IconError color="red" />
@@ -262,6 +266,7 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
             </HStack>
           </VStack>
         ) : null}
+        </StackItem>
       </VStack>
     </Dialog>
   );

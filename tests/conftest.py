@@ -73,9 +73,17 @@ def fake_repo(tmp_path):
         (pdir / "config.template.yaml").write_text(TEMPLATE, encoding="utf-8")
         (pdir / "AGENTS.md").write_text("# rules\n", encoding="utf-8")
         (pdir / "SOUL.md").write_text("# soul\n", encoding="utf-8")
-    skill = root / "skills" / "demo-skill"
-    (skill / "references").mkdir(parents=True)
-    (skill / "SKILL.md").write_text("---\nname: demo-skill\n---\nbody\n", encoding="utf-8")
+    # Skills for every name in the persona/worker scoping maps, plus demo-skill
+    # (which scoping never installs but which the placement tests assert on).
+    skills_root = root / "skills"
+    names = {"demo-skill", *bootstrap_mod.DEFAULT_WORKER_SKILLS}
+    for per in bootstrap_mod.PERSONA_SKILLS.values():
+        names.update(per)
+    for skill_name in sorted(names):
+        skill = skills_root / skill_name
+        (skill / "references").mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            f"---\nname: {skill_name}\n---\nbody\n", encoding="utf-8")
     return root
 
 

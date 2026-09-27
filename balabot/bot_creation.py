@@ -222,7 +222,12 @@ def create_approved_bot(pid: str, *, fleet_bots: dict | None = None) -> dict:
     template_persona = bootstrap_mod.PERSONAS[0] if bootstrap_mod.PERSONAS else None
     actions.extend(bootstrap_mod.provision_persona(
         bot_id, template_persona=template_persona)["actions"])
-    actions.extend(bootstrap_mod.install_skills(bot_id))
+    # Deliverable 2: a created worker gets the SCOPED worker set, not the
+    # skills/ dump. Worker bots must not carry operator/ledger tooling
+    # (owner-onboarding, contradiction-audit, agent-liveness-recovery,
+    # agent-growth-review). Scout's original creation wrongly installed all
+    # four of those; DEFAULT_WORKER_SKILLS is the corrected scope.
+    actions.extend(bootstrap_mod.install_skills(bot_id, skills=bootstrap_mod.DEFAULT_WORKER_SKILLS))
     actions.extend(bootstrap_mod.init_ledger(bot_id))
 
     from . import orgs

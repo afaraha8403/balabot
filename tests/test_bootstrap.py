@@ -62,14 +62,14 @@ def test_skills_landed_under_category_dir(hermes_env, fake_repo):
     install_skills("principal", repo_root=fake_repo)
     dest = hermes_env["hermes_home"] / "profiles" / "principal" / "skills" / "balabot"
     # Required shape: <profile>/skills/balabot/<skill>/SKILL.md
-    assert (dest / "demo-skill" / "SKILL.md").is_file()
+    assert (dest / "workspace-law" / "SKILL.md").is_file()
     # Not flat: no skills/<skill>/ directly under skills/.
-    assert not (hermes_env["hermes_home"] / "profiles" / "principal" / "skills" / "demo-skill").exists()
+    assert not (hermes_env["hermes_home"] / "profiles" / "principal" / "skills" / "workspace-law").exists()
 
 
 def test_install_skills_idempotent(hermes_env, fake_repo):
     install_skills("principal", repo_root=fake_repo)
-    dest = hermes_env["hermes_home"] / "profiles" / "principal" / "skills" / "balabot" / "demo-skill"
+    dest = hermes_env["hermes_home"] / "profiles" / "principal" / "skills" / "balabot" / "workspace-law"
     before = (dest / "SKILL.md").read_text()
     install_skills("principal", repo_root=fake_repo)
     assert (dest / "SKILL.md").read_text() == before
@@ -157,6 +157,58 @@ def test_bootstrap_report_includes_ledger_actions(hermes_env, fake_repo, monkeyp
     reports = run_bootstrap()
     for report in reports:
         assert any("ledger" in a for a in report["actions"])
+
+
+# ---------------------------------------------------------------------------
+# Skill scoping contracts (persona-scoped installs, not the whole skills/ dump).
+# ---------------------------------------------------------------------------
+
+def _installed(hermes_env, name):
+    dest = hermes_env["hermes_home"] / "profiles" / name / "skills" / "balabot"
+    return sorted(p.name for p in dest.iterdir() if p.is_dir()) if dest.is_dir() else []
+
+
+def test_principal_scope_has_operator_skills(hermes_env, fake_repo):
+    install_skills("principal", repo_root=fake_repo)
+    installed = _installed(hermes_env, "principal")
+    for required in ("platform-awareness", "owner-onboarding",
+                     "agent-liveness-recovery", "agent-growth-review",
+                     "delegation-discipline", "okf-decision-ledger"):
+        assert required in installed, f"principal missing {required}"
+    assert set(installed) == set(bootstrap_mod.PERSONA_SKILLS["principal"])
+
+
+def test_governor_scope_excludes_operator_skills(hermes_env, fake_repo):
+    install_skills("governor", repo_root=fake_repo)
+    installed = _installed(hermes_env, "governor")
+    for forbidden in ("owner-onboarding", "agent-liveness-recovery",
+                      "agent-growth-review"):
+        assert forbidden not in installed, f"governor must NOT get {forbidden}"
+    assert "contradiction-audit" in installed
+    assert "platform-awareness" in installed
+    assert set(installed) == set(bootstrap_mod.PERSONA_SKILLS["governor"])
+
+
+def test_worker_scope_excludes_operator_skills(hermes_env, fake_repo):
+    install_skills("scout", repo_root=fake_repo)  # unknown persona -> worker default
+    installed = _installed(hermes_env, "scout")
+    for forbidden in ("agent-growth-review", "agent-liveness-recovery",
+                      "owner-onboarding", "contradiction-audit"):
+        assert forbidden not in installed, f"worker must NOT get {forbidden}"
+    assert "platform-awareness" in installed
+    assert set(installed) == set(bootstrap_mod.DEFAULT_WORKER_SKILLS)
+
+
+def test_explicit_skill_list_is_respected(hermes_env, fake_repo):
+    install_skills("principal", repo_root=fake_repo, skills=("workspace-law",))
+    assert _installed(hermes_env, "principal") == ["workspace-law"]
+
+
+def test_unknown_skill_reported_not_fatal(hermes_env, fake_repo):
+    actions = install_skills("principal", repo_root=fake_repo,
+                             skills=("no-such-skill",))
+    assert any("no such skill" in a for a in actions)
+    assert _installed(hermes_env, "principal") == []
 
 
 def test_no_secret_value_ever_printed(hermes_env, fake_repo, monkeypatch):
