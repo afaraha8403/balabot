@@ -90,10 +90,11 @@ def _data_root() -> Path:
     return Path(os.environ.get("BALABOT_DATA_ROOT", "/data"))
 
 
-def _force_deltas(cfg: dict[str, Any], workspace: Path) -> None:
+def _force_deltas(cfg: dict[str, Any], workspace: Path, name: str) -> None:
     """Apply the non-negotiable config deltas. These exist because two
-    gateways sharing one Telegram token race on every message, and because
-    the rules-file lookup walks up from terminal.cwd."""
+    gateways sharing one Telegram token race on every message, because
+    the rules-file lookup walks up from terminal.cwd, and because secret
+    delivery must be grant-filtered per bot rather than global."""
     cfg.setdefault("model", {})
     cfg["model"]["default"] = FORCED_MODEL_DEFAULT
     cfg["model"]["provider"] = FORCED_MODEL_PROVIDER
@@ -107,6 +108,22 @@ def _force_deltas(cfg: dict[str, Any], workspace: Path) -> None:
     cfg.setdefault("telegram", {})
     # Empty, always. Never clone a sibling token into a profile.
     cfg["telegram"]["bot_token"] = ""
+
+    # Secret delivery — reuse Hermes' own extension point rather than inventing
+    # a parallel path. The helper reads the org registry, filters by THIS bot's
+    # live grants (cross-org included), and prints KEY=VALUE to stdout, which
+    # Hermes injects as environment variables. The bot can use a secret and can
+    # never read it. The profile name is written in literally so delivery does
+    # not depend on whatever env Hermes happens to export.
+    # `profile_alias` lets a secret named FOO_<PROFILE> hydrate canonical FOO
+    # for this bot only — which is exactly "an org secret granted to one bot".
+    cfg.setdefault("secrets", {})
+    cfg["secrets"]["sources"] = ["command"]
+    cfg["secrets"]["profile_alias"] = True
+    cfg["secrets"]["command"] = {
+        "command": f"python3 -m balabot.secret_helper --profile {name}",
+        "timeout": 10,
+    }
 
 
 def provision_persona(name: str, *, repo_root: Path | None = None) -> dict[str, Any]:
@@ -152,7 +169,7 @@ def provision_persona(name: str, *, repo_root: Path | None = None) -> dict[str, 
         cfg = yaml.safe_load(fh) or {}
     if not isinstance(cfg, dict):
         raise BootstrapError(f"Template {template} did not parse to a mapping.")
-    _force_deltas(cfg, workspace)
+    _force_deltas(cfg, workspace, name)
     cfg_path = profile_dir / "config.yaml"
     with cfg_path.open("w", encoding="utf-8") as fh:
         yaml.safe_dump(cfg, fh, sort_keys=False)
