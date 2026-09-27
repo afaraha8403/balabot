@@ -118,6 +118,11 @@ CHECKPOINT_PROVIDER_READY = True
 #: The provider directory seeded into $HERMES_HOME/plugins/ at every boot.
 MEMORY_PLUGIN_DIRNAME = "balabot-jev"
 
+#: The unprivileged user the agents run as inside the shipped container. The
+#: checkpoint store is written by the AGENT, so anything provisioning creates as
+#: root must be handed to this user or the agent cannot checkpoint at all.
+RUNTIME_USER = "hermes"
+
 
 class BootstrapError(RuntimeError):
     """Raised when provisioning cannot proceed. Fail loud, never degrade."""
@@ -533,6 +538,55 @@ def install_memory_plugin(hermes_home: Path | None = None) -> list[str]:
     return actions
 
 
+def _normalize_store_ownership() -> list[str]:
+    """Best-effort chown of the durable paths to the user the agents run as.
+
+    Why this exists: the checkpoint store is written by the AGENT process, which in
+    the shipped container runs as an unprivileged user, while provisioning (and any
+    `hermes ... chat` a human runs via `docker exec`) runs as root. A store created by
+    root is NOT writable by the agent, so every checkpoint write dies with
+    ``attempt to write a readonly database`` — and with
+    ``compression.checkpoint_required`` the agent then REFUSES to compact, i.e. the
+    session is wedged, with nothing in the log until a session needs to compact.
+    Observed live 2026-09-27: the store at ``<home>/sessions/continuity.db`` was
+    ``root:root`` and the runtime user could not write it.
+
+    Chowning is best-effort by design: on a host without that user, or when not
+    running as root, it reports and continues rather than failing provisioning.
+    """
+    import os
+
+    try:
+        import pwd
+    except ImportError:  # non-POSIX dev host (Windows): nothing to chown here
+        return [f"store ownership not normalised: no pwd module on this host"]
+
+    home = _hermes_home()
+    targets = [home / "sessions", home / "memory" / MEMORY_PLUGIN_DIRNAME]
+    profiles = home / "profiles"
+    if profiles.is_dir():
+        targets += [
+            child / "memory" / MEMORY_PLUGIN_DIRNAME
+            for child in sorted(profiles.iterdir())
+            if child.is_dir()
+        ]
+    try:
+        record = pwd.getpwnam(RUNTIME_USER)
+    except (KeyError, ImportError):
+        return [f"store ownership not normalised: user '{RUNTIME_USER}' not found"]
+    actions: list[str] = []
+    for target in targets:
+        if not target.exists():
+            continue
+        for path in [target, *target.rglob("*")]:
+            try:
+                os.chown(path, record.pw_uid, record.pw_gid)
+            except OSError as exc:
+                actions.append(f"could not chown {path}: {exc}")
+        actions.append(f"store ownership -> {RUNTIME_USER}: {target}")
+    return actions
+
+
 def _run_jev_boot_health(name: str) -> None:
     """Boot-time Jev reachability check, recorded as an incident.
 
@@ -569,6 +623,7 @@ def run_bootstrap() -> list[dict[str, Any]]:
     # memory.provider names a directory, and an absent provider is a hard
     # activation failure at agent start.
     plugin_actions = install_memory_plugin()
+    plugin_actions += _normalize_store_ownership()
     # The default org exists BEFORE personas are provisioned: a persona is a
     # member of it, and the org layer 404s on every secret route without it.
     org_actions = init_org("balacode")
