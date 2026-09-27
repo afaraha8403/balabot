@@ -1,0 +1,25 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+#
+# Companion to ./run — same dormant-slot pattern as ./../cloudflared.
+#
+# Why this exists: without it, s6-supervise would treat the run script's
+# intentional exit-0 (driver missing → stay dormant) as a crash and restart it
+# in a tight loop. Exiting 125 tells s6-supervise "permanently failed, do not
+# restart", so the slot reports DOWN — the honest state when the image lacks
+# the driver.
+#
+# When the driver IS present and the displays later die, exit 0 so s6-supervise
+# brings them back: that is the whole point of supervising them.
+#
+# Finish-script arguments: $1=run exit code, $2=signal, $3=service name, $4=pgid.
+
+set -eu
+
+if [ ! -x /usr/local/bin/cua-driver ]; then
+    # Missing driver → permanent-failure marker, no restart loop.
+    exit 125
+fi
+
+# Everything present → allow s6-supervise to restart us.
+exit 0

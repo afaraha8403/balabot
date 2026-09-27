@@ -27,6 +27,7 @@ from typing import Any
 import yaml
 
 from . import __version__
+from .jev import JevHealth
 
 # Environment keys each profile .env may carry, if present in the process env.
 # Never values -- the bootstrap copies what exists and says nothing about it.
@@ -236,6 +237,101 @@ def init_ledger(name: str, *, repo_root: Path | None = None) -> list[str]:
     )
     actions.append(f"initialised shared decision ledger at {index}")
     return actions
+
+
+# ---------------------------------------------------------------------------
+# Jev incident surfacing. Jev (TypeSafe AI) is a HARD dependency: there is no
+# fallback provider, so an unreachable Jev is an incident the Principal must
+# see. The incident record lives in a dedicated JSONL file under the data root
+# — durable across restarts, append-only, and secret-free (statuses and
+# timestamps only, never key values, never exception text that could echo a
+# header). "If it is not in the ledger, it did not happen" applies equally to
+# incidents: the Principal's ops loop reads them via list_jev_incidents().
+# ---------------------------------------------------------------------------
+
+INCIDENTS_DIRNAME = "incidents"
+INCIDENTS_FILENAME = "jev.jsonl"
+JEV_INCIDENT_SEVERITY = "critical"
+
+
+def _incidents_path(name: str) -> Path:
+    return _data_root() / "profiles" / name / INCIDENTS_DIRNAME / INCIDENTS_FILENAME
+
+
+def record_jev_incident(name: str, health: dict[str, Any] | JevHealth, *, now: datetime | None = None) -> dict[str, Any]:
+    """Append one durable, secret-free Jev incident record for persona `name`.
+
+    Accepts a JevHealth or its to_dict(). Never prints a secret; the record
+    carries only status, detail (already secret-free), and a UTC timestamp.
+    Returns the record as written. Fail-loud contract: the incident channel
+    itself must never swallow the problem — if writing fails, the error
+    propagates as BootstrapError so the caller cannot mistake it for health.
+    """
+    payload = health.to_dict() if isinstance(health, JevHealth) else dict(health)
+    record = {
+        "type": "jev-incident",
+        "severity": JEV_INCIDENT_SEVERITY,
+        "persona": name,
+        "status": payload.get("status"),
+        "detail": payload.get("detail"),
+        "timestamp": (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    path = _incidents_path(name)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(yaml.safe_dump(record, sort_keys=False))
+    except OSError as exc:
+        raise BootstrapError(f"could not record Jev incident for '{name}': {exc}") from exc
+    return record
+
+
+def list_jev_incidents(name: str) -> list[dict[str, Any]]:
+    """Return every recorded Jev incident for persona `name`, oldest first.
+
+    This is the read side of the incident channel: the ops loop (and the
+    Principal over HTTP) serves exactly this list. Missing file means no
+    incidents — an empty list is an honest answer, not a degradation.
+    """
+    path = _incidents_path(name)
+    if not path.is_file():
+        return []
+    records: list[dict[str, Any]] = []
+    for chunk in path.read_text(encoding="utf-8").split("---\n"):
+        if not chunk.strip():
+            continue
+        try:
+            rec = yaml.safe_load(chunk)
+        except yaml.YAMLError:
+            continue
+        if isinstance(rec, dict):
+            records.append(rec)
+    return records
+
+
+def enforce_jev_dependency(name: str = "principal", *, client: Jev | None = None) -> JevHealth:
+    """Health-check Jev and fail LOUD on anything but ok.
+
+    Hard dependency contract: 'unreachable' or 'unauthorized' is recorded as
+    a durable incident the Principal can read AND raises BootstrapError —
+    there is no catch-and-continue, no silent degradation. 'no-key' raises
+    without recording (bootstrap already fails on missing config upstream).
+    """
+    from .jev import check_jev_health
+
+    health = check_jev_health(client) if client is not None else check_jev_health()
+    if health.status == "ok":
+        return health
+    if health.status == "no-key":
+        raise BootstrapError(
+            "TYPESAFE_API_KEY is not set. Jev is a hard dependency; "
+            "there is no fallback provider."
+        )
+    record_jev_incident(name, health)
+    raise BootstrapError(
+        f"Jev is {health.status}: {health.detail} "
+        "Jev is a hard dependency — incident recorded for the Principal."
+    )
 
 
 def install_skills(name: str, *, repo_root: Path | None = None) -> list[str]:

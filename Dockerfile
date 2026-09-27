@@ -39,6 +39,37 @@ RUN chmod +x /usr/local/bin/balabot-entrypoint.sh \
     && python3 -m compileall -q /opt/balabot/balabot \
     && python3 -c "import balabot, balabot.bootstrap, balabot.jev, balabot.memory_relevance"
 
+# --- Agent Computer: a real screen per persona ------------------------------
+# Core product surface, not optional: a bot with its own display the user can
+# watch and drive. The driver is pinned by VERSION **and** SHA256 for the same
+# reason cloudflared is — it is an execution path into the container (it can
+# click and type), so an implicit upgrade must never happen underneath a user.
+#
+# The sha256 below is not a guess: it was verified against the GitHub release's
+# own checksums.txt AND matched the binary running in the separate GrokBot
+# stack (grokbot-computer) byte for byte. The permission manifest (/etc/cua/
+# policy.json) is the SAME artefact that stack runs, copied verbatim, so the
+# bounded capability set is identical rather than re-invented.
+RUN DEBIAN_FRONTEND=noninteractive apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        xterm openbox dbus-x11 \
+ && rm -rf /var/lib/apt/lists/*
+
+ARG CUA_DRIVER_VERSION=0.29.1
+ARG CUA_DRIVER_SHA256=a9c3262817103cdff6c09e351f6a3410206624a6f40eea5bd14b4abb3ddf9362
+RUN set -eux; \
+    curl -fsSL -o /tmp/cua.tar.gz \
+      "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_DRIVER_VERSION}/cua-driver-rs-${CUA_DRIVER_VERSION}-linux-x86_64.tar.gz"; \
+    echo "${CUA_DRIVER_SHA256}  /tmp/cua.tar.gz" | sha256sum -c -; \
+    tar xzf /tmp/cua.tar.gz -C /tmp; \
+    install -m 0755 "/tmp/cua-driver-rs-${CUA_DRIVER_VERSION}-linux-x86_64/cua-driver" \
+                    /usr/local/bin/cua-driver; \
+    rm -rf /tmp/cua.tar.gz /tmp/cua-driver-rs-*; \
+    /usr/local/bin/cua-driver --version
+
+# Bounded capability manifest for cua-driver (never run unbounded).
+COPY docker/cua/ /etc/cua/
+
 # --- Cloudflare tunnel: baked in, DORMANT by default -------------------------
 # Every install ships the tunnel pre-wired so the operator only has to add a
 # token; nothing runs until they do. The s6 slot is declared but reports DOWN
@@ -69,7 +100,9 @@ COPY docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 # with 0644 while a Linux clone builds with 0755 — the tunnel would then start
 # for one developer and silently fail for another. Set it explicitly.
 RUN chmod +x /etc/s6-overlay/s6-rc.d/cloudflared/run \
-             /etc/s6-overlay/s6-rc.d/cloudflared/finish
+             /etc/s6-overlay/s6-rc.d/cloudflared/finish \
+             /etc/s6-overlay/s6-rc.d/agent-computer/run \
+             /etc/s6-overlay/s6-rc.d/agent-computer/finish
 
 # Inherits the official ENTRYPOINT's job: validate the hard dependency, then
 # exec /opt/hermes/docker/entrypoint-dispatch.sh so s6-overlay still owns PID 1.

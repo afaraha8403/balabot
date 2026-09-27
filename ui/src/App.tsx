@@ -51,7 +51,7 @@ import {DecisionsScreen} from './screens/DecisionsScreen';
 import {GovernanceScreen} from './screens/GovernanceScreen';
 import {OpsScreen} from './screens/OpsScreen';
 import {CostScreen} from './screens/CostScreen';
-import {api, streamChat, checkHealth, getFleet, type Bot, type ChatMessage, type Handoff, type Session, type SecretCard, type ToolProgress} from './api';
+import {api, streamChat, checkHealth, getFleet, getSubAgents, type Bot, type ChatMessage, type Handoff, type Session, type SecretCard, type SubAgent, type ToolProgress} from './api';
 import {
   IconAgentComputer,
   IconAgents,
@@ -110,6 +110,9 @@ export default function App() {
   const [showComputer, setShowComputer] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
   const [excluded, setExcluded] = useState<string[]>([]);
+  // Live sub-agent rows (real spawn ledger). Polled so the roster reflects
+  // spawns as they start and stop; never invented client-side.
+  const [subagents, setSubagents] = useState<SubAgent[]>([]);
   const [banner, setBanner] = useState('');
   const [secretCards, setSecretCards] = useState<SecretCard[]>([]);
   // Tool activity for the turn in flight. Mirrored into a ref because send()
@@ -165,6 +168,25 @@ export default function App() {
         setBanner('Could not load bots from the API.');
       }
     })();
+  }, []);
+
+  // Poll the real spawn ledger via /api/subagents. An empty list is a real
+  // answer (nothing spawned); a failed fetch just leaves the last state.
+  useEffect(() => {
+    let live = true;
+    const tick = () => {
+      getSubAgents()
+        .then(r => {
+          if (live && r.available !== false) setSubagents(r.subagents ?? []);
+        })
+        .catch(() => {/* transient — keep last honest state */});
+    };
+    tick();
+    const iv = window.setInterval(tick, 15_000);
+    return () => {
+      live = false;
+      window.clearInterval(iv);
+    };
   }, []);
 
   // Health polling
@@ -466,6 +488,7 @@ export default function App() {
                   activeBotId={activeBotId}
                   sessions={sessions}
                   isStreaming={isStreaming}
+                  subagents={subagents}
                   onSelect={id => {
                     setActiveBotId(id);
                     setActiveSessionId(null);

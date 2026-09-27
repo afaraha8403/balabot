@@ -5,8 +5,9 @@ import {List} from '@astryxdesign/core/List';
 import {ListItem} from '@astryxdesign/core/List';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
+import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {ThinkingOrb} from 'thinking-orbs';
-import type {Bot, Session} from '../api';
+import type {Bot, Session, SubAgent} from '../api';
 
 // Messenger-style roster rows: avatar · bold name · one-line preview · timestamp.
 //
@@ -65,6 +66,7 @@ export function BotRoster({
   activeBotId,
   sessions,
   isStreaming,
+  subagents,
   onSelect,
 }: {
   bots: Bot[];
@@ -72,6 +74,12 @@ export function BotRoster({
   sessions: Session[];
   /** True while the active bot is streaming — the only honest source of "typing". */
   isStreaming: boolean;
+  /**
+   * Live sub-agent rows read from the container's real spawn ledger
+   * (undefined while loading). Nested under their parent bot; only genuinely
+   * running spawns appear — the ledger + /proc liveness is the sole source.
+   */
+  subagents?: SubAgent[];
   onSelect: (id: string) => void;
 }) {
   const entries: RosterEntry[] = bots.map(bot => {
@@ -99,13 +107,36 @@ export function BotRoster({
           isSelected={e.bot.id === activeBotId}
           onClick={() => onSelect(e.bot.id)}
           description={
-            <Text
-              type="supporting"
-              maxLines={1}
-              color={e.isTyping ? 'accent' : 'secondary'}
-            >
-              {e.preview}
-            </Text>
+            <VStack gap={1} align="start">
+              <Text
+                type="supporting"
+                maxLines={1}
+                color={e.isTyping ? 'accent' : 'secondary'}
+              >
+                {e.preview}
+              </Text>
+              {/* Live sub-agents, nested under their parent. `subagents` comes
+                  from /api/subagents (the container's spawn ledger + /proc
+                  liveness), so a row here means a process genuinely running.
+                  The parent's own spawn (e.g. a bot running the dashboard)
+                  is attributed by profile; others nest under main-hermes. */}
+              {(subagents ?? [])
+                .filter(s => s.parent === e.bot.id)
+                .map(s => (
+                  <HStack key={s.id} gap={2} vAlign="center">
+                    <ThinkingOrb
+                      state="working"
+                      size={20}
+                      theme="dark"
+                      aria-label={`${s.title} is working`}
+                    />
+                    <Text type="supporting" size="xsm" color="accent">
+                      sub-agent · {s.title}
+                      {s.age ? ` · up ${s.age}` : ''}
+                    </Text>
+                  </HStack>
+                ))}
+            </VStack>
           }
           startContent={
             <Avatar name={e.bot.name} size="md" tooltip={false} />

@@ -476,3 +476,22 @@ export async function getDecisions(): Promise<DecisionsResponse> {
 export async function getGovernance(): Promise<GovernanceResponse> {
   return api<GovernanceResponse>('/api/governance');
 }
+
+// ── sub-agents: live spawn rows nested under their parent bot ───────────────
+// Backed by the container's real /opt/data/spawn-ledger.json with /proc
+// liveness checks. When nothing is spawned, `available` is true and
+// `subagents` is EMPTY with a reason — the roster must never invent rows.
+export type SubAgent = {
+  parent: string;
+  id: string;
+  title: string;
+  status: 'live' | string;
+  startedAt: string;
+  age?: string;
+  pid?: number | null;
+};
+export type SubAgentsResponse = Available & {subagents?: SubAgent[]};
+
+export async function getSubAgents(): Promise<SubAgentsResponse> {
+  return api<SubAgentsResponse>('/api/subagents');
+}

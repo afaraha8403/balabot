@@ -159,6 +159,93 @@ def _env_key() -> str | None:
     return value or None
 
 
+# ---------------------------------------------------------------------------
+# Health check: bounded, non-raising, typed. Jev is a hard dependency, so an
+# UNREACHABLE Jev is an incident — but the health check itself must never be
+# the thing that crashes the caller: it reports, the caller decides.
+# ---------------------------------------------------------------------------
+
+HEALTH_TIMEOUT_S = 2.0  # single attempt, no transient retries: bounded by design
+
+HEALTH_PROBE_QUESTIONS: dict[str, Any] = {
+    "alive": {"type": "noul", "instructions": "Health probe. Always answer true."}
+}
+
+
+class JevHealth:
+    """Typed result of a Jev reachability check. status is one of:
+    'ok' | 'unreachable' | 'unauthorized' | 'no-key'. Never raised — returned."""
+
+    __slots__ = ("status", "detail", "latency_ms")
+
+    def __init__(self, status: str, detail: str, latency_ms: float | None = None) -> None:
+        self.status = status
+        self.detail = detail
+        self.latency_ms = latency_ms
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"status": self.status, "detail": self.detail}
+        if self.latency_ms is not None:
+            d["latency_ms"] = round(self.latency_ms, 1)
+        return d
+
+    def __repr__(self) -> str:  # secret-free by construction
+        return f"JevHealth(status={self.status!r}, detail={self.detail!r})"
+
+
+def check_jev_health(
+    client: Jev | None = None,
+    *,
+    api_key: str | None = None,
+    timeout_s: float = HEALTH_TIMEOUT_S,
+    session: requests.Session | None = None,
+) -> JevHealth:
+    """One bounded, single-attempt probe of the Jev API. NEVER raises.
+
+    Returns 'no-key' when no key is configured, 'unauthorized' on 401/403,
+    'unreachable' on transport errors / any other non-200, 'ok' on 200.
+    No retries (a health check must be bounded, not patient) and no
+    default/optimistic status — an unknown failure reports as unreachable.
+    """
+    key = api_key
+    if client is not None:
+        key = client.api_key
+        session = session or client._session
+    if not key:
+        return JevHealth("no-key", "TYPESAFE_API_KEY is not set; Jev cannot be checked.")
+    http = session or requests.Session()
+    payload = {
+        "model": client.model if client is not None else DEFAULT_MODEL,
+        "state": "jev health probe",
+        "questions": HEALTH_PROBE_QUESTIONS,
+    }
+    start = time.monotonic()
+    try:
+        resp = http.post(
+            SYSTEM_ONE_URL,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            timeout=timeout_s,
+        )
+    except (requests.RequestException, TimeoutError, OSError) as exc:
+        # Secret-free: exceptions can echo URLs/headers in their text; only
+        # the exception TYPE is reported, never its message.
+        return JevHealth("unreachable", f"transport error: {type(exc).__name__}")
+    latency_ms = (time.monotonic() - start) * 1000.0
+    if resp.status_code == 200:
+        return JevHealth("ok", "Jev answered the health probe.", latency_ms)
+    if resp.status_code in (401, 403):
+        return JevHealth("unauthorized", f"Jev rejected the key (HTTP {resp.status_code}).")
+    return JevHealth("unreachable", f"Jev API returned HTTP {resp.status_code}.")
+
+
 if __name__ == "__main__":  # pragma: no cover
     # --shadow demo; requires TYPESAFE_API_KEY in the environment.
     import argparse

@@ -1,0 +1,81 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+#
+# BalaBot — Agent Computer service.
+#
+# Brings up one X display per persona plus a cua-driver daemon per persona, so
+# a bot has a real screen the user can watch and drive. This is core product,
+# not optional infrastructure: the Agent Computer pane is a first-class surface.
+#
+# Layout mirrors the separate GrokBot stack that proved the design
+# (grokbot-computer): per-agent Xvfb display, per-agent cua-driver socket under
+# /run/cua-driver, a shared session dbus, and a window manager so windows are
+# actually managed rather than stacking unmanaged on the root.
+#
+# DORMANT-SLOT PATTERN (same as ./../cloudflared): if the driver is not present
+# the slot exits 0 and the companion finish script returns 125 ("permanent
+# failure, do not restart"), so s6-svstat reports DOWN instead of the slot
+# flapping in a restart loop. A missing driver is a build problem, not a crash
+# to retry — the honest state is DOWN.
+#
+# Permissions: cua-driver runs in BOUNDED mode against a capability manifest
+# (/etc/cua/policy.json) and must be told to accept it non-interactively. The
+# daemon is never started in an unbounded mode.
+
+set -eu
+
+DRIVER=/usr/local/bin/cua-driver
+
+if [ ! -x "$DRIVER" ]; then
+    echo "[agent-computer] DORMANT — cua-driver is not installed at $DRIVER."
+    echo "[agent-computer] The Agent Computer pane will report no-driver."
+    echo "[agent-computer] This is a build problem: the image must install it."
+    exit 0
+fi
+
+# Xvfb ships in the base Hermes image; the session stack is added by the
+# Dockerfile. Report plainly rather than half-starting if a piece is missing.
+for bin in Xvfb openbox dbus-daemon; do
+    if ! command -v "$bin" >/dev/null 2>&1; then
+        echo "[agent-computer] DORMANT — required binary '$bin' is missing from the image."
+        exit 0
+    fi
+done
+
+# One session bus shared by every agent's desktop session.
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/session-bus"
+mkdir -p /run/cua-driver /run/dbus
+dbus-daemon --session --fork --address="$DBUS_SESSION_BUS_ADDRESS" 2>/dev/null || true
+
+# Screens are 1920x1080 to match the capture contract the driver reports.
+SCREEN_W=1920
+SCREEN_H=1080
+
+# Personas are read from the same source of truth the app uses where possible;
+# this list must stay in step with balabot.bootstrap.PERSONAS.
+i=1
+for agent in principal governor; do
+    display=":$i"
+    echo "[agent-computer] starting $agent on display $display"
+
+    Xvfb "$display" -screen 0 "${SCREEN_W}x${SCREEN_H}x24" -nolisten tcp \
+        >"/tmp/xvfb-$agent.log" 2>&1 &
+    sleep 0.5
+
+    # A window manager is not cosmetic here: without one, windows open unmanaged
+    # and never receive focus, so typing has nowhere to land.
+    DISPLAY="$display" openbox --sm-disable >"/tmp/openbox-$agent.log" 2>&1 &
+
+    DISPLAY="$display" "$DRIVER" serve \
+        --socket "/run/cua-driver/$agent.sock" \
+        --permission-mode bounded \
+        --capability-manifest /etc/cua/policy.json \
+        --approve-capability-manifest \
+        >"/tmp/cua-driver-$agent.log" 2>&1 &
+
+    i=$((i + 1))
+done
+
+# Supervise the displays for the lifetime of the container. If this returns,
+# s6 restarts the whole set, which is the correct recovery.
+wait

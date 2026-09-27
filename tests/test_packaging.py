@@ -24,8 +24,19 @@ def _third_party_imports() -> set[str]:
                 elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
                     mods.add(node.module.split(".")[0])
     # Import name -> distribution name (e.g. `import yaml` comes from PyYAML).
-    ALIAS = {"yaml": "pyyaml"}
-    return {ALIAS.get(m, m) for m in mods if m not in sys.stdlib_module_names}
+    ALIAS = {"yaml": "pyyaml", "PIL": "Pillow"}
+    # Drop anything LOCAL to this repo — a sibling module (subagents.py sits
+    # beside server.py), a local package (balabot/), or the ui/ tree itself.
+    # A hand-kept exclusion list goes stale the moment someone adds a module
+    # (this test correctly caught 'subagents' and 'ui' the moment server.py
+    # imported them), so resolve against the filesystem instead.
+    local = {m for m in mods
+             if (REPO / m).is_dir()
+             or (REPO / f"{m}.py").exists()
+             or any((REPO / d / f"{m}.py").exists() for d in SCAN_DIRS)}
+    local |= {"balabot", "ui", "subagents"}
+    return {ALIAS.get(m, m).lower() for m in mods - local
+            if m not in sys.stdlib_module_names}
 
 
 def _declared() -> set[str]:

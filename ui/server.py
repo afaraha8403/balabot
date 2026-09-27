@@ -9,7 +9,7 @@
     GET  /api/cost                      real: session_model_usage per profile
     GET  /api/governance                OKF ledger — available:false until one exists
     GET  /api/decisions                 Jev decision log — available:false until one exists
-    GET/POST /api/computer/{bot}/frame|action   available:false (no driver wired here)
+    GET/POST /api/computer/{bot}/frame|action   real: cua-driver screens
     /api/orgs, /api/org/secrets, /api/org/grants,
     /api/org/skills/library|pin|promote, /api/org/requests   available:false / empty
     POST /api/chat                      SSE passthrough to /p/<profile>/v1/chat/completions
@@ -412,16 +412,104 @@ def decisions():
                        "classified in-session and nothing is persisted to disk")
 
 
-# ── computer use: not wired on this surface ──────────────────────────────────
+# ── Jev: hard dependency, so its health is first-class ───────────────────────
+# Jev (TypeSafe AI) is a HARD dependency — no fallback provider. An unreachable
+# Jev is an incident the Principal must see, so these routes are the live read
+# side of balabot.bootstrap's incident store. Local imports keep the import
+# order independent of the sys.path setup further down this module.
+@app.get("/api/jev/health")
+def jev_health():
+    """Bounded, non-raising Jev reachability probe."""
+    # check_jev_health lives in balabot.jev, NOT re-exported by bootstrap —
+    # importing it from bootstrap raises ImportError (the route 500'd on it).
+    from balabot.jev import check_jev_health  # noqa: E402
+    return check_jev_health().to_dict()
+
+
+@app.get("/api/jev/incidents")
+def jev_incidents():
+    """Recorded Jev incidents, oldest first — the Principal's incident feed."""
+    from balabot.bootstrap import list_jev_incidents  # noqa: E402
+    rows = list_jev_incidents("principal")
+    return {"incidents": rows, "count": len(rows)}
+
+
+# ── sub-agents: live rows from the container's real spawn ledger ─────────────
+@app.get("/api/subagents")
+def subagents_route():
+    """Live sub-agent rows. An empty list is a real answer, never invented rows."""
+    try:
+        from subagents import read_subagents  # noqa: E402  (sits beside server.py)
+    except ImportError:  # launched from the repo root rather than ui/
+        from ui.subagents import read_subagents  # noqa: E402
+    return read_subagents()
+
+
+# ── computer use: real agent screens via the cua-driver bridge ───────────────
+# balabot/computer.py runs `cua-driver call` INSIDE the container (host: docker
+# exec wrapper below) against the per-agent Xvfb displays. Every response is
+# real driver output or a structured unavailable/error — never a placeholder.
+import sys as _sys
+
+_sys.path.insert(0, str(ROOT.parent))
+from balabot import computer as _computer  # noqa: E402
+
+
+def _computer_run(snippet: str, timeout: float = 30.0) -> dict:
+    """Run the computer bridge inside the container; return parsed JSON."""
+    out = _docker_exec(f"python3 - <<'PY'\n{snippet}\nPY", timeout=timeout)
+    if out is None:
+        return {"ok": False, "state": "error",
+                "reason": "could not exec in the balabot container "
+                          "(is it running?)"}
+    try:
+        return json.loads(out.strip())
+    except json.JSONDecodeError:
+        return {"ok": False, "state": "error",
+                "reason": f"container bridge returned non-JSON: {out[:300]}"}
+
+
 @app.get("/api/computer/{bot_id}/frame")
 def computer_frame(bot_id: str):
-    return unavailable("no computer-use driver is wired to this adapter — "
-                       "agent screens are not available here")
+    if bot_id not in PROFILES:
+        return unavailable(f"no bot named {bot_id!r} in this fleet")
+    res = _computer_run(
+        "import json\n"
+        "from balabot import computer\n"
+        f"print(json.dumps(computer.frame({bot_id!r})))")
+    if not res.get("ok"):
+        return {"available": False,
+                "state": res.get("state", "error"),
+                "reason": res.get("reason", "frame capture failed")}
+    return {
+        "available": True, "ok": True, "state": "ready",
+        "b64": res["b64"], "width": res["width"], "height": res["height"],
+        "captureId": res.get("capture_id"), "capturedAt": res["capturedAt"],
+        "mime": res["mime"],
+    }
 
 
 @app.post("/api/computer/{bot_id}/action")
 async def computer_action(bot_id: str, request: Request):
-    return unavailable("no computer-use driver is wired to this adapter")
+    if bot_id not in PROFILES:
+        return unavailable(f"no bot named {bot_id!r} in this fleet")
+    try:
+        payload = await request.json()
+    except Exception:
+        return unavailable("request body is not valid JSON")
+    spec = json.dumps(payload)  # compact, safe to embed in the heredoc
+    res = _computer_run(
+        "import json\n"
+        "from balabot import computer\n"
+        f"print(json.dumps(computer.act({bot_id!r}, json.loads({spec!r}))))",
+        timeout=60.0)
+    if not res.get("ok"):
+        return {"available": False,
+                "state": res.get("state", "error"),
+                "reason": res.get("reason", "action failed")}
+    return {"available": True, "ok": True, "state": res.get("state", "ready"),
+            "applied": res.get("applied"), "tool": res.get("tool"),
+            "frame": res.get("frame"), "note": res.get("note")}
 
 
 # ── org surfaces: A-era concept, no B backing ────────────────────────────────
