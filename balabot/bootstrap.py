@@ -149,19 +149,26 @@ def init_org(name: str, *, repo_root: Path | None = None) -> list[str]:
     return actions
 
 
-def provision_persona(name: str, *, repo_root: Path | None = None) -> dict[str, Any]:
+def provision_persona(name: str, *, repo_root: Path | None = None,
+                      template_persona: str | None = None) -> dict[str, Any]:
     """Provision one persona profile + workspace. Idempotent.
 
     Returns a plain-English summary dict (no secret values).
+
+    `template_persona` reuses ANOTHER persona's template/rules files for a
+    new bot id (Wave 6 P4 bot creation): a freshly approved bot has no
+    personas/<bot_id>/ directory, so it is provisioned from a shipped
+    persona's files with the NEW identity. Defaults to `name` itself.
     """
     root = repo_root if repo_root is not None else _repo_root()
+    template_name = template_persona or name
     hermes_home = _hermes_home()
     data_root = _data_root()
 
     workspace = data_root / "workspace" / name
     profile_dir = hermes_home / "profiles" / name
 
-    template = root / "personas" / name / "config.template.yaml"
+    template = root / "personas" / template_name / "config.template.yaml"
     if not template.is_file():
         raise BootstrapError(
             f"Config template not found: {template}. "
@@ -178,7 +185,7 @@ def provision_persona(name: str, *, repo_root: Path | None = None) -> dict[str, 
         actions.append(f"workspace exists: {workspace}")
 
     # 2. AGENTS.md -> workspace (found via cwd walk-up; profile placement is ignored).
-    src_agents = root / "personas" / name / "AGENTS.md"
+    src_agents = root / "personas" / template_name / "AGENTS.md"
     if src_agents.is_file():
         dst_agents = workspace / "AGENTS.md"
         shutil.copyfile(src_agents, dst_agents)
@@ -199,7 +206,7 @@ def provision_persona(name: str, *, repo_root: Path | None = None) -> dict[str, 
     actions.append(f"wrote {cfg_path}")
 
     # 4. SOUL.md -> profile dir (read unconditionally from HERMES_HOME).
-    src_soul = root / "personas" / name / "SOUL.md"
+    src_soul = root / "personas" / template_name / "SOUL.md"
     if src_soul.is_file():
         shutil.copyfile(src_soul, profile_dir / "SOUL.md")
         actions.append(f"installed SOUL.md in profile dir")

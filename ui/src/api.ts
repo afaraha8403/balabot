@@ -515,3 +515,117 @@ export type SubAgentsResponse = Available & {subagents?: SubAgent[]};
 export async function getSubAgents(): Promise<SubAgentsResponse> {
   return api<SubAgentsResponse>('/api/subagents');
 }
+
+// ── Wave 6 P3: multi-agent groups ────────────────────────────────────────────
+export type GroupTranscriptEntry = {
+  at: string;
+  round: number;
+  from: string;
+  kind: 'message' | 'error';
+  text: string;
+  detail?: string;
+};
+
+export type Group = {
+  id: string;
+  name: string;
+  members: string[];
+  computerAgent: string;
+  round: number;
+  transcript: GroupTranscriptEntry[];
+  sessionLens: Record<string, number>;
+  createdAt: string;
+};
+
+export type GroupTurnResult = {
+  bot: string;
+  text?: string;
+  error?: boolean;
+  detail?: string;
+};
+
+export async function getGroups(): Promise<GroupsResponse> {
+  return api<GroupsResponse>('/api/groups');
+}
+export type GroupsResponse = Available & {groups?: Group[]};
+
+export async function createGroup(body: {
+  name: string;
+  members: string[];
+  computer_agent?: string;
+}): Promise<{created: boolean; group: Group}> {
+  return api('/api/groups', {method: 'POST', body: JSON.stringify(body)});
+}
+
+export async function getGroup(gid: string): Promise<Available & {group?: Group}> {
+  return api<Available & {group?: Group}>(`/api/groups/${gid}`);
+}
+
+export async function deleteGroup(gid: string): Promise<{deleted: boolean}> {
+  return api(`/api/groups/${gid}`, {method: 'DELETE'});
+}
+
+export async function postGroupTurn(
+  gid: string,
+  text: string,
+): Promise<{ok: boolean; results: GroupTurnResult[]; group: Group}> {
+  return api(`/api/groups/${gid}/turn`, {
+    method: 'POST',
+    body: JSON.stringify({text}),
+  });
+}
+
+// ── Wave 6 P4: bot creation with consent ─────────────────────────────────────
+export type BotProposal = {
+  id: string;
+  bot_id: string;
+  name: string;
+  role: string;
+  proposed_by: string;
+  status: 'proposed' | 'approved' | 'rejected' | 'registered';
+  created_at: string;
+  approved_by: string | null;
+  created_result?: {bot_id: string; actions: string[]} | null;
+};
+
+export type BotProposalsResponse = Available & {proposals?: BotProposal[]};
+
+export async function getBotProposals(): Promise<BotProposalsResponse> {
+  return api<BotProposalsResponse>('/api/bot-proposals');
+}
+
+export async function createBotProposal(body: {
+  name: string;
+  role: string;
+  proposed_by?: string;
+}): Promise<{proposed: boolean; proposal: BotProposal}> {
+  return api('/api/bot-proposals', {method: 'POST', body: JSON.stringify(body)});
+}
+
+export async function approveBotProposal(pid: string): Promise<{
+  approved: boolean;
+  proposal: BotProposal;
+}> {
+  return api(`/api/bot-proposals/${pid}/approve`, {method: 'POST'});
+}
+
+export async function rejectBotProposal(pid: string): Promise<{
+  rejected: boolean;
+  proposal: BotProposal;
+}> {
+  return api(`/api/bot-proposals/${pid}/reject`, {method: 'POST'});
+}
+
+export async function createApprovedBot(pid: string): Promise<{
+  created: boolean;
+  bot: Bot;
+  proposal: BotProposal;
+  org_members: string[];
+}> {
+  return api(`/api/bot-proposals/${pid}/create`, {method: 'POST'});
+}
+
+export async function deleteBotProposal(pid: string): Promise<{deleted: boolean}> {
+  return api(`/api/bot-proposals/${pid}`, {method: 'DELETE'});
+}
+

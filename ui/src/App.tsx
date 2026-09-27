@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {AppShell} from '@astryxdesign/core/AppShell';
 import {TopNav, TopNavHeading} from '@astryxdesign/core/TopNav';
 import {SideNav, SideNavSection, SideNavItem, SideNavHeading} from '@astryxdesign/core/SideNav';
@@ -42,6 +42,8 @@ import {SessionsDialog} from './SessionsDialog';
 import {AgentComputerDialog} from './AgentComputerDialog';
 import {SecretRequestCard} from './SecretRequestCard';
 import {SkillLibraryDialog} from './SkillLibraryDialog';
+import {GroupChatDialog} from './GroupChatDialog';
+import {BotCreationDialog} from './BotCreationDialog';
 import {useMediaQuery} from '@astryxdesign/core/hooks';
 import {useResizable, ResizeHandle} from '@astryxdesign/core/Resizable';
 import {BotRoster} from './screens/BotRoster';
@@ -61,8 +63,10 @@ import {
   IconConversations,
   IconExpandPanel,
   IconCost,
+  IconCreateBot,
   IconDecisions,
   IconGovernance,
+  IconGroupChat,
   IconMemory,
   IconMessages,
   IconOps,
@@ -109,6 +113,8 @@ export default function App() {
   const [showPanel, setShowPanel] = useState(false);
   const [showComputer, setShowComputer] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
+  const [showGroups, setShowGroups] = useState(false);
+  const [showBotCreation, setShowBotCreation] = useState(false);
   const [excluded, setExcluded] = useState<string[]>([]);
   // Live sub-agent rows (real spawn ledger). Polled so the roster reflects
   // spawns as they start and stop; never invented client-side.
@@ -140,35 +146,37 @@ export default function App() {
   });
 
   // Load bots + fleet + health
-  useEffect(() => {
-    void (async () => {
+  const reloadBots = useCallback(async () => {
+    try {
+      // Fleet discipline: never render or request excluded profiles.
+      // Nothing alarming is shown for them — they are simply absent.
       try {
-        // Fleet discipline: never render or request excluded profiles.
-        // Nothing alarming is shown for them — they are simply absent.
-        try {
-          const fleet = await getFleet();
-          setExcluded(fleet.excluded ?? []);
-          const excludedSet = new Set(fleet.excluded ?? []);
-          const raw = await api<{bots: Bot[]}>('/api/bots');
-          const sorted = [...(raw.bots ?? [])]
-            .filter(b => !excludedSet.has(b.id))
-            .sort((a, b) => a.order - b.order);
-          setBots(sorted);
-          const last = loadLastBot();
-          setActiveBotId(last && sorted.some(b => b.id === last) ? last : sorted[0]?.id ?? null);
-        } catch {
-          // /api/fleet missing — fall back to plain bot list.
-          const r = await api<{bots: Bot[]}>('/api/bots');
-          const sorted = [...(r.bots ?? [])].sort((a, b) => a.order - b.order);
-          setBots(sorted);
-          const last = loadLastBot();
-          setActiveBotId(last && sorted.some(b => b.id === last) ? last : sorted[0]?.id ?? null);
-        }
+        const fleet = await getFleet();
+        setExcluded(fleet.excluded ?? []);
+        const excludedSet = new Set(fleet.excluded ?? []);
+        const raw = await api<{bots: Bot[]}>('/api/bots');
+        const sorted = [...(raw.bots ?? [])]
+          .filter(b => !excludedSet.has(b.id))
+          .sort((a, b) => a.order - b.order);
+        setBots(sorted);
+        const last = loadLastBot();
+        setActiveBotId(last && sorted.some(b => b.id === last) ? last : sorted[0]?.id ?? null);
       } catch {
-        setBanner('Could not load bots from the API.');
+        // /api/fleet missing — fall back to plain bot list.
+        const r = await api<{bots: Bot[]}>('/api/bots');
+        const sorted = [...(r.bots ?? [])].sort((a, b) => a.order - b.order);
+        setBots(sorted);
+        const last = loadLastBot();
+        setActiveBotId(last && sorted.some(b => b.id === last) ? last : sorted[0]?.id ?? null);
       }
-    })();
+    } catch {
+      setBanner('Could not load bots from the API.');
+    }
   }, []);
+
+  useEffect(() => {
+    void reloadBots();
+  }, [reloadBots]);
 
   // Poll the real spawn ledger via /api/subagents. An empty list is a real
   // answer (nothing spawned); a failed fetch just leaves the last state.
@@ -332,6 +340,11 @@ export default function App() {
           icon={<IconMessages />}
           onClick={() => setScreen('chat')}
         />
+        <SideNavItem
+          label="Group chat"
+          icon={<IconGroupChat />}
+          onClick={() => setShowGroups(true)}
+        />
       </SideNavSection>
       <SideNavSection title="Control">
         <SideNavItem
@@ -417,6 +430,20 @@ export default function App() {
             variant="ghost"
             icon={<IconSkills />}
             onClick={() => setShowSkills(true)}
+          />
+          <IconButton
+            label="Group chat"
+            size="sm"
+            variant="ghost"
+            icon={<IconGroupChat />}
+            onClick={() => setShowGroups(true)}
+          />
+          <IconButton
+            label="Create a bot (with consent)"
+            size="sm"
+            variant="ghost"
+            icon={<IconCreateBot />}
+            onClick={() => setShowBotCreation(true)}
           />
           {activeBot ? (
             <IconButton
@@ -806,6 +833,20 @@ export default function App() {
           bots={bots}
           activeBotId={activeBotId}
           onClose={() => setShowSkills(false)}
+        />
+      ) : null}
+      {showGroups ? (
+        <GroupChatDialog
+          bots={bots}
+          onClose={() => setShowGroups(false)}
+          onFleetsChanged={() => void reloadBots()}
+        />
+      ) : null}
+      {showBotCreation ? (
+        <BotCreationDialog
+          bots={bots}
+          onClose={() => setShowBotCreation(false)}
+          onFleetChanged={() => void reloadBots()}
         />
       ) : null}
     </AppShell>

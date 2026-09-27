@@ -36,11 +36,13 @@ import {
   MagnifyingGlassIcon,
   PaperClipIcon,
   PlusIcon,
+  PlusCircleIcon,
   PowerIcon,
   ScaleIcon,
   ServerStackIcon,
   ShieldCheckIcon,
   SparklesIcon,
+  UserGroupIcon,
   UsersIcon,
   WrenchScrewdriverIcon,
   XCircleIcon,
@@ -71,6 +73,10 @@ export const IconOps = wrap(ServerStackIcon);
 export const IconCost = wrap(CurrencyDollarIcon);
 /** Past sessions. */
 export const IconConversations = wrap(ClockIcon);
+/** Multi-agent group chat. */
+export const IconGroupChat = wrap(UserGroupIcon);
+/** Propose / create a bot (consent flow). */
+export const IconCreateBot = wrap(PlusCircleIcon);
 
 // ── Top-bar actions ──────────────────────────────────────────────────────────
 /** The skill library — a separate concept from a bot's own memory. */

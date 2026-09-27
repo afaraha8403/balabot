@@ -160,6 +160,143 @@ def s1_secret_never_leaks() -> None:
         check(f"S1 no leak via {p}", sentinel not in b, "leaked!" if sentinel in b else "clean")
 
 
+# ── Wave 6 P3: group chat against the live product ───────────────────────────
+def s6_group_chat() -> None:
+    status, body = post("/api/groups", {
+        "name": "e2e wave6 room", "members": ["principal", "governor"],
+        "computer_agent": "governor"})
+    if status != 200:
+        unproven("S6 create group", f"HTTP {status}: {body[:90]}")
+        return
+    d = json.loads(body)
+    if not d.get("created"):
+        unproven("S6 create group", "not created: " + body[:90])
+        return
+    gid = d["group"]["id"]
+    check("S6 group shape", d["group"]["members"] == ["principal", "governor"]
+          and d["group"]["computerAgent"] == "governor",
+          json.dumps(d["group"])[:110])
+
+    # 2–6 bounds are enforced by the real product
+    s, _ = post("/api/groups", {"name": "solo", "members": ["principal"]})
+    check("S6 solo group refused", s == 400, f"HTTP {s}")
+    s, _ = post("/api/groups", {"name": "ghost", "members": ["principal", "nope"]})
+    check("S6 unknown bot refused", s == 400, f"HTTP {s}")
+
+    # @mention routes to ONE member; the transcript row is real upstream text
+    status, body = post(f"/api/groups/{gid}/turn",
+                        {"text": "one short line for @governor only"}, timeout=300)
+    if status != 200:
+        unproven("S6 mention turn", f"HTTP {status}: {body[:90]}")
+        return
+    d = json.loads(body)
+    bots = [r["bot"] for r in d.get("results", [])]
+    check("S6 @mention routes to governor", bots == ["governor"], str(bots))
+    transcript = d["group"]["transcript"]
+    check("S6 mention transcript row", any(
+        e["kind"] == "message" and e["from"] == "governor" and e["text"]
+        for e in transcript), f"{len(transcript)} rows")
+    check("S6 round counter advanced", d["group"]["round"] == 1,
+          str(d["group"]["round"]))
+
+    # no mention -> every member speaks, in member order (serial)
+    status, body = post(f"/api/groups/{gid}/turn",
+                        {"text": "say hi in exactly three words"}, timeout=300)
+    if status != 200:
+        unproven("S6 full round", f"HTTP {status}: {body[:90]}")
+        return
+    d = json.loads(body)
+    bots = [r["bot"] for r in d.get("results", [])]
+    check("S6 full round order", bots == ["principal", "governor"], str(bots))
+    check("S6 full round answers", all(
+        (not r.get("error")) and r.get("text") for r in d.get("results", [])),
+        json.dumps(d.get("results", []))[:110])
+    check("S6 round 2 recorded", d["group"]["round"] == 2,
+          str(d["group"]["round"]))
+
+    # per-member sessions really grew, independently
+    status, body = get(f"/api/groups/{gid}")
+    d = json.loads(body) if status == 200 else {}
+    lens = d.get("group", {}).get("sessionLens", {})
+    check("S6 per-member sessions grew", lens.get("principal", 0) >= 3
+          and lens.get("governor", 0) >= 3, json.dumps(lens))
+
+    st, body_del = post_delete(f"/api/groups/{gid}")
+    check("S6 group deleted", st == 200 and json.loads(body_del).get("deleted") is True,
+          gid)
+
+
+def post_delete(path: str, *, timeout: int = 45) -> tuple[int, str]:
+    import urllib.request
+    req = urllib.request.Request(BASE + path, method="DELETE",
+                                 headers={"Authorization": _auth_header()})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+    except Exception as e:  # network/timeout
+        return 0, f"__error__ {e}"
+
+
+# ── Wave 6 P4: bot creation with consent against the live product ────────────
+def s7_bot_consent() -> None:
+    # A previous run may have left the proposal row (the bot it created stays).
+    # Clear only OUR proposal id so the run is idempotent.
+    _, body = get("/api/bot-proposals")
+    try:
+        for row in json.loads(body).get("proposals", []):
+            if row.get("bot_id") == "e2e-wave6-bot" and row.get("status") in (
+                    "proposed", "rejected"):
+                post_delete(f"/api/bot-proposals/{row['id']}")
+    except Exception:
+        pass
+
+    # the consent gate BEFORE approval: nothing may be created
+    status, body = post("/api/bot-proposals", {
+        "name": "E2E Wave6 Bot", "role": "proven by the live acceptance run",
+        "proposed_by": "principal"})
+    if status != 200:
+        unproven("S7 propose", f"HTTP {status}: {body[:90]}")
+        return
+    pid = json.loads(body)["proposal"]["id"]
+    check("S7 proposal filed", json.loads(body)["proposal"]["status"] == "proposed",
+          pid)
+
+    status, _ = post(f"/api/bot-proposals/{pid}/create", {})
+    check("S7 create-before-approval refused", status == 400, f"HTTP {status}")
+
+    status, body = post(f"/api/bot-proposals/{pid}/approve", {})
+    d = json.loads(body) if status == 200 else {}
+    check("S7 human approval recorded", status == 200
+          and d.get("proposal", {}).get("status") == "approved"
+          and d.get("proposal", {}).get("approved_by") == "user",
+          body[:110])
+
+    status, body = post(f"/api/bot-proposals/{pid}/create", {}, timeout=180)
+    d = json.loads(body) if status == 200 else {}
+    check("S7 bot created", status == 200 and d.get("created") is True
+          and d.get("bot", {}).get("id"), body[:110])
+    check("S7 registered in the org", "e2e-wave6-bot" in d.get("org_members", []),
+          str(d.get("org_members")))
+
+    # the new bot is a first-class fleet member and answers chat
+    status, body = get("/api/bots")
+    ids = [b["id"] for b in json.loads(body).get("bots", [])] if status == 200 else []
+    check("S7 created bot in the roster", "e2e-wave6-bot" in ids, str(ids))
+
+    status, body = post("/api/chat", {
+        "bot_id": "e2e-wave6-bot",
+        "messages": [{"role": "user", "content": "Reply with one word: ready"}]},
+        timeout=180)
+    streamed = status == 200 and ("chat.completion" in body or "data:" in body)
+    check("S7 created bot answers chat", streamed, f"HTTP {status} {body[:80]}")
+
+    st, body_del = post_delete(f"/api/bot-proposals/{pid}")
+    check("S7 proposal row deleted (bot kept)",
+          st == 200 and json.loads(body_del).get("deleted") is True, pid)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -173,6 +310,8 @@ def main() -> int:
     s10_honesty_sweep()
     s5_agent_computer()
     s1_secret_never_leaks()
+    s6_group_chat()
+    s7_bot_consent()
 
     width = max(len(n) for n, _, _ in results)
     n_pass = sum(1 for _, s, _ in results if s == PASS)

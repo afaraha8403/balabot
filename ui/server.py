@@ -211,10 +211,18 @@ def healthz():
     return {"ok": True, "ts": int(time.time())}
 
 
+def _bot_row(p: str, meta: dict) -> dict:
+    # A created bot's meta row already carries its own 'id' (it IS the dict key);
+    # normalize so the key always wins instead of a duplicate-kwarg TypeError.
+    row = {k: v for k, v in meta.items() if k != "id"}
+    row["id"] = p
+    return row
+
+
 @app.get("/api/bots")
 def bots():
-    return {"bots": [dict(id=p, templateId="tmpl_generic", **BOT_META[p])
-                     for p in PROFILES]}
+    rows = sorted(_all_bot_meta().items(), key=lambda kv: kv[1].get("order", 999))
+    return {"bots": [_bot_row(p, meta) for p, meta in rows]}
 
 
 @app.get("/api/fleet")
@@ -246,7 +254,9 @@ def fleet():
     # /api/bots only if the call THROWS). Returning a fleet shape without `bots`
     # succeeds with an undefined list, so the roster renders empty -- "No bots in
     # the roster yet." -- and the fallback never runs. Serve the full bot objects here.
-    bots = [dict(id=p, templateId="tmpl_generic", **BOT_META[p]) for p in PROFILES]
+    bots = [_bot_row(p, meta)
+            for p, meta in sorted(_all_bot_meta().items(),
+                                  key=lambda kv: kv[1].get("order", 999))]
 
     return {"fleet": "balabot",
             "bots": bots,
@@ -1010,12 +1020,468 @@ def skills_library(bot: str = ""):
     return {"available": True, "bots": library}
 
 
+# ── Wave 6 P3: multi-agent groups (serial rounds, @mentions, per-member
+#    sessions, one shared Agent Computer pane) ────────────────────────────────
+# State: <BALABOT_DATA_ROOT>/groups/ inside the container, via _org_run — the
+# same container-registry pattern as the org routes. A group's turn is run
+# HERE (this process), member by member, against the same upstream the single
+# chat uses; the serial order is enforced by a plain for-loop, not by hope.
+
+
+_GROUPS_LIST_SNIPPET = '''\
+from balabot import groups
+print(json.dumps({'groups': groups.list_groups()}))
+'''
+
+_GROUPS_CREATE_SNIPPET = '''\
+from balabot import groups
+try:
+    g = groups.create_group(
+        payload['name'], payload['members'],
+        computer_agent=payload.get('computer_agent'),
+        known_bots=payload.get('known_bots'))
+    print(json.dumps({'group': {
+        'id': g['id'], 'name': g['name'], 'members': g['members'],
+        'computer_agent': g['computer_agent'], 'round': g['round'],
+        'created_at': g['created_at']}}))
+except groups.GroupsError as exc:
+    print(json.dumps({'ok': False, 'error': 'bad_request',
+                      'detail': str(exc), 'status': 400}))
+'''
+
+_GROUPS_GET_SNIPPET = '''\
+from balabot import groups
+try:
+    g = groups.get_group(payload['gid'])
+except groups.GroupsError as exc:
+    print(json.dumps({'ok': False, 'error': 'not_found',
+                      'detail': str(exc), 'status': 404}))
+    raise SystemExit(0)
+print(json.dumps({'group': g}))
+'''
+
+_GROUPS_DELETE_SNIPPET = '''\
+from balabot import groups
+gid = payload['gid']
+if not groups.delete_group(gid):
+    print(json.dumps({'ok': False, 'error': 'not_found',
+                      'detail': f'no group {gid!r}', 'status': 404}))
+else:
+    print(json.dumps({'deleted': True}))
+'''
+
+_GROUPS_APPLY_SNIPPET = '''\
+from balabot import groups
+try:
+    g = groups.apply_turn_results(payload['gid'], payload['text'],
+                                  payload['results'])
+except groups.GroupsError as exc:
+    print(json.dumps({'ok': False, 'error': 'not_found',
+                      'detail': str(exc), 'status': 404}))
+    raise SystemExit(0)
+print(json.dumps({'group': {
+    'id': g['id'], 'round': g['round'],
+    'transcript': g['transcript'][-40:],
+    'sessions': {m: {'len': len(g['sessions'][m]['messages'])}
+                 for m in g['members']}}}))
+'''
+
+
+def _fleet_bot_ids() -> list[str]:
+    return list(PROFILES)
+
+
+def _group_public(g: dict) -> dict:
+    """Whitelist a group row for the UI. Sessions carry message counts, not
+    the other member's raw history (the create snippet returns a summary
+    without sessions — treat them as empty)."""
+    sessions = g.get("sessions") or {}
+    return {
+        "id": g["id"], "name": g["name"], "members": g["members"],
+        "computerAgent": g["computer_agent"], "round": g["round"],
+        "transcript": g.get("transcript", []),
+        "sessionLens": {m: len(sessions[m]["messages"])
+                        for m in g["members"] if m in sessions},
+        "createdAt": g["created_at"],
+    }
+
+
+@app.get("/api/groups")
+def groups_list():
+    if not container_ok():
+        return unavailable("balabot container is not running — no group data")
+    res = _org_run(_wrap(_GROUPS_LIST_SNIPPET, False))
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "could not read the group store"))
+    return {"available": True, "groups": res.get("groups", [])}
+
+
+@app.post("/api/groups")
+async def groups_create(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    name = body.get("name") or ""
+    members = body.get("members") or []
+    if not name or not isinstance(members, list):
+        raise HTTPException(status_code=400, detail="name and members are required")
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot create groups")
+    res = _org_run(_wrap(_GROUPS_CREATE_SNIPPET, True), payload={
+        "name": name, "members": members,
+        "computer_agent": body.get("computer_agent"),
+        "known_bots": _fleet_bot_ids(),
+    })
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not create the group"))
+    return {"created": True, "group": _group_public(res["group"])}
+
+
+@app.get("/api/groups/{gid}")
+def groups_get(gid: str):
+    if not container_ok():
+        return unavailable("balabot container is not running — no group data")
+    res = _org_run(_wrap(_GROUPS_GET_SNIPPET, True), payload={"gid": gid})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not read the group"))
+    return {"available": True, "group": _group_public(res["group"])}
+
+
+@app.delete("/api/groups/{gid}")
+def groups_delete(gid: str):
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot delete groups")
+    res = _org_run(_wrap(_GROUPS_DELETE_SNIPPET, True), payload={"gid": gid})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not delete the group"))
+    return {"deleted": True}
+
+
+@app.post("/api/groups/{gid}/turn")
+async def groups_turn(gid: str, request: Request):
+    """One SERIAL group round.
+
+    The orchestrator: plan (@mentions -> ordered targets), run each member's
+    turn against the upstream ONE AT A TIME, persist results. Serial is
+    structural: the loop awaits each member before starting the next. No
+    member's raw session history is sent to another member — group context
+    is the short shared transcript the plan builds.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    if not container_ok():
+        return unavailable("balabot container is not running — no group turns")
+
+    res = _org_run(_wrap(_GROUPS_GET_SNIPPET, True), payload={"gid": gid})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not read the group"))
+    g = res["group"]
+    from balabot.groups import mention_targets  # noqa: E402
+    targets = mention_targets(text, g["members"]) or list(g["members"])
+    tail = g["transcript"][-6:]
+    context = "\n".join(f"{e['from']}: {e['text']}"
+                        for e in tail if e.get("kind") != "error")
+
+    results = []
+    for bot in targets:
+        history = [
+            {"role": m["role"], "content": m["content"]}
+            for m in g["sessions"][bot]["messages"]
+        ]
+        content = ((f"[Group chat '{g['name']}' — recent transcript]\n"
+                    f"{context}\n\n") if context else "") + text
+        try:
+            answer = await _upstream_turn(bot, history + [{"role": "user",
+                                                           "content": content}])
+            results.append({"bot": bot, "text": answer})
+        except Exception as exc:  # noqa: BLE001 — honest per-member error row
+            results.append({"bot": bot, "error": True,
+                            "detail": f"{type(exc).__name__}: {exc}"})
+
+    apply_res = _org_run(_wrap(_GROUPS_APPLY_SNIPPET, True), payload={
+        "gid": gid, "text": text, "results": results})
+    if not apply_res.get("ok"):
+        if apply_res.get("status"):
+            _org_status_error(apply_res)
+        return unavailable(apply_res.get("reason", "could not record the round"))
+    return {"ok": True, "results": results, "group": apply_res["group"]}
+
+
+async def _upstream_turn(profile: str, messages: list[dict]) -> str:
+    """Non-streaming single turn against the profile's OpenAI-compatible API."""
+    url = f"{UPSTREAM}/p/{profile}/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {API_KEY}",
+               "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=15.0)) as client:
+        r = await client.post(url, json={"model": profile, "messages": messages,
+                                         "stream": False},
+                              headers=headers)
+        if r.status_code != 200:
+            raise RuntimeError(f"backend {r.status_code}: {r.text[:200]}")
+        data = r.json()
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError("backend returned no choices")
+    return str(choices[0].get("message", {}).get("content", ""))
+
+
+# ── Wave 6 P4: bot creation with consent (propose -> human approval ->
+#    create -> fleet registration) ────────────────────────────────────────────
+# State: <BALABOT_DATA_ROOT>/bot_creation/proposals.json in the container,
+# via _org_run. The create step runs INSIDE the container (that is where the
+# persona templates, skills and registry live) and appends to the fleet meta
+# file (/opt/data/fleet/bots.json) the adapter reads, so a created bot
+# appears in /api/fleet + /api/bots with no host-side state.
+
+_PROPOSALS_LIST_SNIPPET = '''\
+from balabot import bot_creation
+print(json.dumps({'proposals': bot_creation.list_proposals()}))
+'''
+
+_PROPOSE_SNIPPET = '''\
+from balabot import bot_creation
+try:
+    p = bot_creation.propose_bot(
+        name=payload['name'], role=payload['role'],
+        proposed_by=payload.get('proposed_by') or 'user',
+        model=payload.get('model') or None)
+except bot_creation.CreationError as exc:
+    print(json.dumps({'ok': False, 'error': 'bad_request',
+                      'detail': str(exc), 'status': 400}))
+    raise SystemExit(0)
+print(json.dumps({'proposal': p}))
+'''
+
+_APPROVE_SNIPPET = '''\
+from balabot import bot_creation
+try:
+    p = bot_creation.approve_proposal(payload['pid'], approved_by='user')
+except bot_creation.CreationError as exc:
+    print(json.dumps({'ok': False, 'error': 'bad_request',
+                      'detail': str(exc), 'status': 400}))
+    raise SystemExit(0)
+print(json.dumps({'proposal': p}))
+'''
+
+_REJECT_SNIPPET = '''\
+from balabot import bot_creation
+try:
+    p = bot_creation.reject_proposal(payload['pid'])
+except bot_creation.CreationError as exc:
+    print(json.dumps({'ok': False, 'error': 'bad_request',
+                      'detail': str(exc), 'status': 400}))
+    raise SystemExit(0)
+print(json.dumps({'proposal': p}))
+'''
+
+_CREATE_BOT_SNIPPET = '''\
+import json, os, pathlib
+from balabot import bot_creation, orgs
+fleet_path = pathlib.Path('/opt/data/fleet/bots.json')
+fleet = {}
+if fleet_path.exists():
+    try:
+        fleet = json.loads(fleet_path.read_text(encoding='utf-8'))
+    except Exception:
+        fleet = {}
+try:
+    row = bot_creation.create_approved_bot(payload['pid'], fleet_bots=fleet)
+except bot_creation.CreationError as exc:
+    print(json.dumps({'ok': False, 'error': 'bad_request',
+                      'detail': str(exc), 'status': 400}))
+    raise SystemExit(0)
+# The snippet may run as root while the Hermes gateway runs as the 'hermes'
+# user. A profile it cannot read is a silently broken bot (cron/logs init
+# die with EACCES), so hand the new artifacts to the gateway's uid. No pwd
+# module (Windows) or no hermes user -> nothing to hand over; skip.
+try:
+    import pwd as _pwd
+    uid = _pwd.getpwnam('hermes').pw_uid
+except Exception:
+    uid = None
+if uid is not None:
+    hermes_home = os.environ.get('HERMES_HOME', '/opt/data')
+    for sub in ('profiles/' + row['bot_id'], 'workspace/' + row['bot_id']):
+        target = pathlib.Path(hermes_home) / sub
+        if target.exists():
+            for p in [target, *target.rglob('*')]:
+                try:
+                    os.chown(str(p), uid, uid)
+                except OSError:
+                    pass
+fleet_path.parent.mkdir(parents=True, exist_ok=True)
+fd = os.open(str(fleet_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+    json.dump(fleet, fh, indent=2, sort_keys=True)
+members = orgs.show_org(orgs.list_orgs()[0]['id'])['members'] \\
+    if orgs.list_orgs() else []
+print(json.dumps({'proposal': {k: row[k] for k in
+                  ('id', 'bot_id', 'name', 'role', 'proposed_by',
+                   'approved_by', 'status', 'created_result')},
+                  'bot': row['bot'],
+                  'org_members': members}))
+'''
+
+_CREATED_BOTS_SNIPPET = """python3 - <<'PY'
+import json, pathlib
+p = pathlib.Path('/opt/data/fleet/bots.json')
+print(json.dumps(json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}))
+PY"""
+
+
+def _created_bots() -> dict[str, dict]:
+    """Created-bot meta from the container's fleet/bots.json ({} on any failure)."""
+    out = _docker_exec(_CREATED_BOTS_SNIPPET)
+    if out is None:
+        return {}
+    try:
+        data = json.loads(out.strip().splitlines()[-1])
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _all_bot_meta() -> dict[str, dict]:
+    """Shipped + created bots. Created bots come from the container's own
+    registry file — the single source of truth, so nothing is invented here."""
+    meta = {p: dict(templateId="tmpl_generic", **BOT_META[p]) for p in PROFILES}
+    for bot_id, row in _created_bots().items():
+        if isinstance(row, dict) and row.get("name"):
+            meta[bot_id] = dict(row, templateId="tmpl_generic")
+    return meta
+
+
+@app.get("/api/bot-proposals")
+def bot_proposals_list():
+    if not container_ok():
+        return unavailable("balabot container is not running — no proposals")
+    res = _org_run(_wrap(_PROPOSALS_LIST_SNIPPET, False))
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "could not read the proposal store"))
+    return {"available": True, "proposals": res.get("proposals", [])}
+
+
+@app.post("/api/bot-proposals")
+async def bot_proposals_create(request: Request):
+    """File a proposal. `proposed_by` may be a bot (peer creation) or 'user'."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    name = body.get("name") or ""
+    role = body.get("role") or ""
+    if not name or not role:
+        raise HTTPException(status_code=400, detail="name and role are required")
+    proposed_by = body.get("proposed_by") or "user"
+    if proposed_by != "user" and proposed_by not in _all_bot_meta():
+        raise HTTPException(status_code=404,
+                            detail=f"unknown proposing bot {proposed_by!r}")
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot file proposals")
+    res = _org_run(_wrap(_PROPOSE_SNIPPET, True), payload={
+        "name": name, "role": role, "proposed_by": proposed_by,
+        "model": body.get("model")})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not file the proposal"))
+    return {"proposed": True, "proposal": res["proposal"]}
+
+
+@app.post("/api/bot-proposals/{pid}/approve")
+def bot_proposals_approve(pid: str):
+    """THE HUMAN CONSENT STEP. The human operator approves by name."""
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot approve")
+    res = _org_run(_wrap(_APPROVE_SNIPPET, True), payload={"pid": pid})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not record the approval"))
+    return {"approved": True, "proposal": res["proposal"]}
+
+
+@app.post("/api/bot-proposals/{pid}/reject")
+def bot_proposals_reject(pid: str):
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot reject")
+    res = _org_run(_wrap(_REJECT_SNIPPET, True), payload={"pid": pid})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not record the rejection"))
+    return {"rejected": True, "proposal": res["proposal"]}
+
+
+@app.post("/api/bot-proposals/{pid}/create")
+def bot_proposals_create_bot(pid: str):
+    """Create + register the approved bot. The container-side snippet refuses
+    any proposal that is not in the 'approved' state — consent is checked at
+    the point of creation, not just assumed from the route."""
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot create bots")
+    res = _org_run(_wrap(_CREATE_BOT_SNIPPET, True), payload={"pid": pid},
+                   timeout=120.0)
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not create the bot"))
+    return {"created": True, "bot": res["bot"], "proposal": res["proposal"],
+            "org_members": res.get("org_members", [])}
+
+
+_PROPOSAL_DELETE_SNIPPET = '''\
+from balabot import bot_creation
+data = bot_creation._load()
+before = len(data['proposals'])
+data['proposals'] = [p for p in data['proposals'] if p['id'] != payload['pid']]
+if len(data['proposals']) == before:
+    print(json.dumps({'ok': False, 'error': 'not_found',
+                      'detail': f"no proposal {payload['pid']!r}", 'status': 404}))
+else:
+    bot_creation._save(data)
+    print(json.dumps({'deleted': True}))
+'''
+
+
+@app.delete("/api/bot-proposals/{pid}")
+def bot_proposals_delete(pid: str):
+    """Remove a proposal row (operator cleanup). A registered bot is NOT
+    touched — deleting the proposal never deletes the bot."""
+    if not container_ok():
+        return unavailable("balabot container is not running")
+    res = _org_run(_wrap(_PROPOSAL_DELETE_SNIPPET, True), payload={"pid": pid})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not delete the proposal"))
+    return {"deleted": True}
+
+
 # ── the chat turn: SSE passthrough to the profile's OpenAI-compatible API ────
 @app.post("/api/chat")
 async def chat(request: Request):
     body = await request.json()
     profile = body.get("bot_id") or ""
-    if profile not in PROFILES:
+    # Shipped profiles plus bots created through the consent flow. A created
+    # bot's Hermes profile exists in the container, so its listener answers
+    # the same way the shipped ones do; the upstream 404s (honestly, below)
+    # if the gateway has not raised a listener for it yet.
+    if profile not in _all_bot_meta():
         raise HTTPException(status_code=404, detail=f"unknown bot {profile}")
     messages = body.get("messages") or []
     url = f"{UPSTREAM}/p/{profile}/v1/chat/completions"
