@@ -1,6 +1,6 @@
 {
   "base": "http://127.0.0.1:9119",
-  "when": "2026-09-27T18:18:17.178Z",
+  "when": "2026-09-27T20:27:30.575Z",
   "passed": 8,
   "total": 8,
   "results": [
@@ -12,12 +12,12 @@
     {
       "name": "s02 app shell boots with no JS errors",
       "ok": true,
-      "detail": "bodyLen=460 errs=[]"
+      "detail": "bodyLen=458 errs=[]"
     },
     {
       "name": "s03 roster lists principal and governor",
       "ok": true,
-      "detail": "principal=true governor=true bodyLen=460"
+      "detail": "principal=true governor=true bodyLen=458"
     },
     {
       "name": "s04 a message gets a streamed reply",
@@ -32,7 +32,7 @@
     {
       "name": "s06 phone viewport renders without horizontal overflow",
       "ok": true,
-      "detail": "bodyLen=177 overflow=false"
+      "detail": "bodyLen=153 overflow=false"
     },
     {
       "name": "s07 every UI endpoint returns honest JSON (data or available:false)",
@@ -42,7 +42,7 @@
     {
       "name": "s08 a real tool call is surfaced (ChatToolCalls + orb)",
       "ok": true,
-      "detail": "toolRow=true target=true orbNamedTool=true persistedRows=1 orbsAfter=0 orbLabels=[\"Principal is working\",\"Principal is running terminal: echo E2ETOOL054192\"]"
+      "detail": "toolRow=true target=true orbNamedTool=true persistedRows=1 orbsAfter=0 orbLabels=[\"Principal is working\",\"Principal is running terminal: echo E2ETOOL805106\"]"
     }
   ]
 }
