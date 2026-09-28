@@ -552,6 +552,48 @@ async def computer_action(bot_id: str, request: Request):
             "frame": res.get("frame"), "note": res.get("note")}
 
 
+# ── agent intervention flow ──────────────────────────────────────────────────
+# Implements kb/plans/agent-intervention-flow.md:
+# Bot pauses turn and requests help -> owner resolves via POST -> turn resumes.
+@app.get("/api/interventions")
+def list_interventions():
+    from balabot.intervention import _records, state as iv_state
+    out = []
+    for token in list(_records):
+        try:
+            out.append(iv_state(token))
+        except Exception:
+            pass
+    return {"ok": True, "interventions": out}
+
+
+@app.get("/api/intervention/{resume_token}")
+def get_intervention(resume_token: str):
+    from balabot.intervention import state as iv_state, InterventionError
+    try:
+        rec = iv_state(resume_token)
+        return {"ok": True, "record": rec}
+    except InterventionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/api/intervention/{resume_token}/resolve")
+async def resolve_intervention_endpoint(resume_token: str, request: Request):
+    from balabot.intervention import resolve_intervention, InterventionError
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    action = body.get("action", "approve")
+    note = body.get("note", "")
+    by = body.get("by", "owner")
+    try:
+        rec = resolve_intervention(resume_token, action=action, note=note, by=by)
+        return {"ok": True, "record": rec}
+    except InterventionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 # ── org surfaces: the real registry-backed HTTP layer ────────────────────────
 # Backing store: balabot/orgs.py INSIDE the container (registry + 0600 secret
 # store). The container's /opt/data is a NAMED DOCKER VOLUME (balabot_
@@ -2031,6 +2073,9 @@ async def chat(request: Request):
             # renderer being dead code.
             from balabot.handoffs import drain_handoff_frames
             for frame in drain_handoff_frames(profile):
+                yield frame
+            from balabot.intervention import drain_intervention_frames
+            for frame in drain_intervention_frames(profile):
                 yield frame
             async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=15.0)) as client:
                 async with client.stream("POST", url, json=payload, headers=headers) as r:

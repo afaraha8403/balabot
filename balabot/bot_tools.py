@@ -37,6 +37,7 @@ __all__ = [
     "request_secret_access",
     "list_org_skills",
     "message_agent",
+    "request_intervention",
     "list_pending_requests",
     "enqueue_org_request",
     "main",
@@ -357,6 +358,24 @@ def message_agent(from_bot: str, to_bot: str, message: str, **kwargs) -> dict:
     }
 
 
+def request_intervention(bot_id: str, reason: str, hint: str = "",
+                         url: str = "", timeout: float = 120.0) -> dict:
+    """A bot asks for human intervention (captcha, login, 2FA) and pauses its turn."""
+    _require_str(bot_id, "bot_id")
+    _require_str(reason, "reason")
+    from balabot.intervention import enqueue_intervention, request_intervention as _req_iv
+    rec = _req_iv(bot_id=bot_id, reason=reason, hint=hint, url=url, timeout=timeout)
+    enqueue_intervention(rec)
+    return {
+        "requested": True,
+        "resume_token": rec["resume_token"],
+        "bot": rec["bot"],
+        "reason": rec["reason"],
+        "state": rec["state"],
+        "expires_at": rec["expires_at"],
+    }
+
+
 def list_pending_requests(bot_id: str | None = None) -> list[dict]:
     """Pending requests the UI/backend can serve (optionally per bot)."""
     rows = _load_pending()
@@ -383,6 +402,7 @@ def main(argv: list[str] | None = None) -> int:
         "request_secret_access": ["--bot", "--name", "--reason"],
         "list_org_skills": ["--bot"],
         "message_agent": ["--from", "--to", "--message"],
+        "request_intervention": ["--bot", "--reason", "--hint", "--url"],
         "list_pending_requests": ["--bot"],
     }
     allowed = known_flags.get(tool)
@@ -432,6 +452,12 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("message_agent needs --from, --to, --message")
             _json_out(message_agent(src, dst, msg))
             return 0
+        if tool == "request_intervention":
+            bot, reason = _opt("--bot"), _opt("--reason")
+            if not (bot and reason):
+                raise ValueError("request_intervention needs --bot, --reason")
+            _json_out(request_intervention(bot, reason, hint=_opt("--hint", ""), url=_opt("--url", "")))
+            return 0
         if tool == "list_pending_requests":
             _json_out(list_pending_requests(_opt("--bot")))
             return 0
@@ -444,6 +470,7 @@ def main(argv: list[str] | None = None) -> int:
           "request_secret_access --bot B --name N --reason R | "
           "list_org_skills --bot B | "
           "message_agent --from B --to B --message M | "
+          "request_intervention --bot B --reason R [--hint H] [--url U] | "
           "list_pending_requests [--bot B]",
           file=sys.stderr)
     return 2
