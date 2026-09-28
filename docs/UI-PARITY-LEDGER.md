@@ -114,3 +114,32 @@ This document tracks UI parity between BalaBot and xAI's GrokBot interface, as s
 | 8.2 | **Responsive Shell & Mobile Drawer** | **PRESENT** | `ui/src/App.tsx` | Astryx responsive contract collapses side regions under 1024px; mobile navigation drawer at md breakpoint. |
 | 8.3 | **Mobile Dictation Button** | **PRESENT** | `ui/src/Composer.tsx` | Accessible on mobile touch targets. |
 | 8.4 | **Mobile Share Sheet Intake** | **PARTIAL** | `ui/src/App.tsx`, `ui/src/Composer.tsx` | File drag-and-drop and upload works; Web Share Target API optional. |
+
+---
+
+## Live verification (by the steward, against `bot.balacode.xyz`)
+
+Method: stealth browser, real key events and CDP accessibility-tree interrogation — not a code read.
+Script: `workspace/susan/scripts/verify_ui_parity.mjs` + `probe_ui_controls.mjs`.
+
+| Probe | Result |
+|---|---|
+| Surface loads; roster renders (Principal, Governor) | **PASS** |
+| `Ctrl+K` opens the command palette (also a visible `Jump (Ctrl+K)` button) | **PASS** |
+| `@` opens the mention picker | **PASS** |
+| `/` opens the slash menu in the composer | **PASS** |
+| Roster row menu ("Manage \<Bot\>") exposes Pin / Hide / Duplicate | **PASS** |
+| Routines surface, group chats in the sidebar, "Start voice chat", Plugins | **PASS** |
+| Accessibility tree is clean of JS errors across every probe | **PASS** |
+| Chat-level **pause / "Hold everything"** control | **FAIL — not present** |
+
+**One confirmed gap, and it is the one that matters most:** there is no pause control on the
+transcript. The intervention *backend* shipped in Phase 1 (`balabot/intervention.py`,
+`event: intervention`), but the control the owner reaches for to halt a running turn was never added —
+`Hold everything` (#1 of the four elements in `docs/UI-PARITY-REFERENCE.md`) is absent from the
+accessibility tree entirely.
+
+Two earlier negative readings were **probe error, not product defect**, and are recorded so nobody
+re-litigates them: the composer is a `combobox` over a contenteditable `div` (placeholder
+`Message <Bot>`) rather than a `<textarea>`, and the row menu is reached via `Manage <Bot>`. Both work.
+
