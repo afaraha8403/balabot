@@ -280,7 +280,7 @@ export default function App() {
         });
         setBanner(`Hiring approved — proposal created for "${role}" (${name}).`);
       } catch (e) {
-        setBanner(`Proposal created: ${(e as Error).message}`);
+        setBanner(`Hiring failed: ${(e as Error).message}`);
       }
     } else if (actionType === 'dismiss_hire') {
       setBanner('Hiring proposal dismissed.');
