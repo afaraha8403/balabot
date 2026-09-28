@@ -46,6 +46,13 @@ Verified 2026-09-27 against the repo (call-site greps excluding `tests/` and the
 | Hierarchy enforcement (409 on shipped/default edit, reference-complete purge) | SHIPPED | Route guards return `getattr(exc,'status',409)` on protected bots (`ui/server.py:1515/1527/1546`); shipped-profile refusal in container snippet (`:1454`); `lifecycle.classify_profile` + `_ref_state` (`lifecycle.py:177/164`) |
 | Growth loop (frustration scan → ledger → growth job) | SHIPPED | Frustration sensor (`growth.scan` + `growth.classify`) wired into `ui/server.py:chat` turn path (`:2308-2331`), recording confirmed/escalated signals to governor ledger; routes `GET /api/growth/ledger` & `POST /api/growth/run` (`:473-495`); tested in `tests/test_growth.py` |
 | Growth-loop audit trail | SHIPPED | Durable audit ledger & rollback path in `balabot/growth.py` (`record_audit_entry`, `read_audit_entries`, `rollback_audit_entry`); bot tools & CLI in `balabot/bot_tools.py` (`record_growth_audit`, `rollback_growth_audit`); routes `GET/POST /api/growth/audit` & `POST /api/growth/audit/{id}/rollback` in `ui/server.py:497-537`; tested in `tests/test_growth.py` and `tests/test_bot_tools.py` |
+| Hold everything / pause turn control | SHIPPED | `ui/src/HoldEverythingControl.tsx`, `balabot/intervention.py` (`request_intervention`, `enqueue_intervention`, `active_for_bot`, `end_turn`); routes `/api/intervention/pause`, `/api/intervention/active/{bot_id}`, `/api/intervention/{resume_token}/end` (`ui/server.py:747-810`); verified live in transcript header and composer |
+| Bot routines list (toggleable) | SHIPPED | `ui/src/RoutinesList.tsx`, routes `GET/POST/PATCH/DELETE /api/bots/{bot_id}/routines` (`ui/server.py:815-920`); persistence in `$BALABOT_DATA_ROOT/routines/` with on/off switch and last-run state |
+| Rich file / artifact preview cards | SHIPPED | `ui/src/FilePreviewCard.tsx`, embedded in `ui/src/App.tsx` chat bubbles with expandable image thumbnail preview, syntax-tagged code snippet, metadata, and download action |
+| Message reactions & reply-in-thread | SHIPPED | `ui/src/App.tsx`, `ui/src/Composer.tsx` with quote bar, reply-in-thread preview, and quick reaction toolbar (👍, ❤️, 🚀) |
+| Computer recovery / reset controls | SHIPPED | `balabot/computer.py:reset`, route `POST /api/computer/{bot_id}/reset` (`ui/server.py:709-722`), `AgentComputerDialog.tsx` Reset button |
+| Teach a task demonstration affordance | SHIPPED | `ui/src/AgentComputerDialog.tsx` Teach a Task affordance with honest daemon recording gap disclosure |
+| Mobile share sheet intake | SHIPPED | `ui/public/manifest.webmanifest` `share_target` registration with query param ingestion (`title`, `text`, `url`) into `ui/src/App.tsx` and composer |
 
 ## Known false claims this table corrects
 

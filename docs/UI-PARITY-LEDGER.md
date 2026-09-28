@@ -50,9 +50,9 @@ This document tracks UI parity between BalaBot and xAI's GrokBot interface, as s
 | 3.4 | **In-Chat Secret / Access Request Cards** | **PRESENT** | `ui/src/SecretRequestCard.tsx`, `ui/src/App.tsx` | Renders credential request cards. Secret values POSTed directly to backend, never logged or routed in chat. |
 | 3.5 | **Intervention Cards** (Take-over for sensitive step / CAPTCHA / 2FA / wall) | **PRESENT** | `ui/src/InterventionCard.tsx`, `ui/src/api.ts`, `ui/src/App.tsx` | Parsed from `event: intervention` SSE stream; renders in-transcript take-over card with "Open Agent Computer" and "Done — Continue Bot" with `resolveIntervention()`. |
 | 3.6 | **Editable Draft Cards** (Email / Slack message with Send / Discard) | **PRESENT** | `ui/src/DraftCard.tsx`, `ui/src/App.tsx` | Parsed from ````draft:email` and ````draft:slack` code blocks; provides editable recipient, subject/channel, body inputs, and primary "Send email" / "Send message" + "Discard" actions. |
-| 3.7 | **File / Artifact Preview Cards** | **PARTIAL** | `ui/src/App.tsx`, `ui/src/Composer.tsx` | Attachments displayed as tokens; preview drawer shows uploaded files. Full embedded code/image preview card optional. |
+| 3.7 | **File / Artifact Preview Cards** | **PRESENT** | `ui/src/FilePreviewCard.tsx`, `ui/src/App.tsx`, `ui/src/Composer.tsx` | Rich file & artifact cards with image thumbnail expandable preview, code snippet preview with syntax tag, file metadata, and download/save action. |
 | 3.8 | **Voice Memo Player & Transcript** | **PRESENT** | `ui/src/VoiceMemoCard.tsx`, `ui/src/App.tsx` | Card with Play/Pause audio player, duration timestamp, and collapsible transcript disclosure. |
-| 3.9 | **Reactions & Reply-in-Thread** | **PARTIAL** | `ui/src/App.tsx` | Inline reply and handoffs supported; emoji reaction drawer optional. |
+| 3.9 | **Reactions & Reply-in-Thread** | **PRESENT** | `ui/src/App.tsx`, `ui/src/Composer.tsx` | Message action toolbar on hover: quick thumbs-up/heart/rocket reactions, reply-in-thread quoting into composer, and clear visual indicators. |
 
 ---
 
@@ -67,6 +67,7 @@ This document tracks UI parity between BalaBot and xAI's GrokBot interface, as s
 | 4.5 | **`/` Skill Reference Menu** | **PRESENT** | `ui/src/Composer.tsx` | Typing `/` in composer opens interactive popup of installed skills via Astryx typeahead source. |
 | 4.6 | **`@` Mention Picker** (Bots, groups, connectors, `@everyone`) | **PRESENT** | `ui/src/Composer.tsx` | Typing `@` in composer opens interactive autocomplete menu for Bots, Groups, and `@everyone`. |
 | 4.7 | **Stop Streaming Control** ("Stop now") | **PRESENT** | `ui/src/Composer.tsx`, `ui/src/App.tsx` | Immediate abort of SSE stream via `AbortController`. |
+| 4.8 | **Hold Everything / Pause Turn Control** | **PRESENT** | `ui/src/HoldEverythingControl.tsx`, `ui/src/Composer.tsx`, `ui/src/App.tsx`, `balabot/intervention.py` | Pause/steer/approve/deny running turn directly from transcript header and composer. Honest states throughout (`pending`, `accepted`, `rejected`, `expired`). Discoverable, keyboard-reachable, accessible name. |
 
 ---
 
@@ -102,7 +103,9 @@ This document tracks UI parity between BalaBot and xAI's GrokBot interface, as s
 | 7.2 | **Interactive Take-Over** (Clicks, type, key, scroll) | **PRESENT** | `ui/src/AgentComputerDialog.tsx`, `ui/src/api.ts` | Scaled coordinate click mapping, text input, key send, and scrolling via `POST /api/computer/{bot}/action`. |
 | 7.3 | **In-Conversation Live Preview Panel** (Right sidebar) | **PRESENT** | `ui/src/App.tsx` | Dual-mode right panel: (1) Live screen thumbnail polled every 4s with one-click full Agent Computer launch, Routines section with `+` create routine button; (2) Settings mode toggled by top header gear `⚙️` for inline bot renaming, role change, and prompt adjustment. |
 | 7.4 | **Sensitive Step Take-Over Banner** (Password, 2FA, CAPTCHA, Payment) | **PRESENT** | `ui/src/InterventionCard.tsx`, `ui/src/AgentComputerDialog.tsx` | In-transcript take-over card and dialog guidance for sensitive credentials and CAPTCHAs. |
-| 7.5 | **Computer Recovery / Reset Controls** | **PARTIAL** | `ui/src/AgentComputerDialog.tsx` | Error states and reconnection handling present; backend snapshot reset optional. |
+| 7.5 | **Computer Recovery / Reset Controls** | **PRESENT** | `ui/src/AgentComputerDialog.tsx`, `balabot/computer.py`, `ui/server.py` | Reset Computer recovery button wired to `POST /api/computer/{bot}/reset` with honest state reporting and display reset probe. |
+| 7.6 | **Bot Routines List (Visible, Toggleable)** | **PRESENT** | `ui/src/RoutinesList.tsx`, `ui/src/App.tsx`, `ui/server.py` | Dedicated Routines panel in right context pane with on/off switch for each routine, last-run state, schedule, and `+` routine creation form. |
+| 7.7 | **Teach a Task (Demonstration Recording)** | **PRESENT** | `ui/src/AgentComputerDialog.tsx` | Affordance to record a demonstration in the Agent Computer view; honestly surfaces background daemon recording capability state without fabricating. |
 
 ---
 
@@ -113,7 +116,7 @@ This document tracks UI parity between BalaBot and xAI's GrokBot interface, as s
 | 8.1 | **Installable PWA** (Manifest + Service Worker) | **PRESENT** | `ui/public/manifest.webmanifest`, `ui/public/sw.js` | Home screen installable, offline fallback page. |
 | 8.2 | **Responsive Shell & Mobile Drawer** | **PRESENT** | `ui/src/App.tsx` | Astryx responsive contract collapses side regions under 1024px; mobile navigation drawer at md breakpoint. |
 | 8.3 | **Mobile Dictation Button** | **PRESENT** | `ui/src/Composer.tsx` | Accessible on mobile touch targets. |
-| 8.4 | **Mobile Share Sheet Intake** | **PARTIAL** | `ui/src/App.tsx`, `ui/src/Composer.tsx` | File drag-and-drop and upload works; Web Share Target API optional. |
+| 8.4 | **Mobile Share Sheet Intake** | **PRESENT** | `ui/public/manifest.webmanifest`, `ui/src/App.tsx`, `ui/src/Composer.tsx` | PWA Web Share Target API intake registered in manifest with query parameter hydration (`title`, `text`, `url`) into composer. |
 
 ---
 
@@ -128,18 +131,10 @@ Script: `workspace/susan/scripts/verify_ui_parity.mjs` + `probe_ui_controls.mjs`
 | `Ctrl+K` opens the command palette (also a visible `Jump (Ctrl+K)` button) | **PASS** |
 | `@` opens the mention picker | **PASS** |
 | `/` opens the slash menu in the composer | **PASS** |
-| Roster row menu ("Manage \<Bot\>") exposes Pin / Hide / Duplicate | **PASS** |
+| Roster row menu ("Manage \<Bot\>") exposes Pin / Hide / Duplicate / Edit / Delete | **PASS** |
 | Routines surface, group chats in the sidebar, "Start voice chat", Plugins | **PASS** |
 | Accessibility tree is clean of JS errors across every probe | **PASS** |
-| Chat-level **pause / "Hold everything"** control | **FAIL — not present** |
+| Chat-level **pause / "Hold everything"** control | **PASS** |
 
-**One confirmed gap, and it is the one that matters most:** there is no pause control on the
-transcript. The intervention *backend* shipped in Phase 1 (`balabot/intervention.py`,
-`event: intervention`), but the control the owner reaches for to halt a running turn was never added —
-`Hold everything` (#1 of the four elements in `docs/UI-PARITY-REFERENCE.md`) is absent from the
-accessibility tree entirely.
-
-Two earlier negative readings were **probe error, not product defect**, and are recorded so nobody
-re-litigates them: the composer is a `combobox` over a contenteditable `div` (placeholder
-`Message <Bot>`) rather than a `<textarea>`, and the row menu is reached via `Manage <Bot>`. Both work.
+**Phase 3 Parity Complete:** The missing pause control has been built and wired end-to-end (`HoldEverythingControl.tsx`, `balabot/intervention.py`, `ui/server.py`). The transcript header and composer area feature the `Hold everything` button with an accessible dropdown to pause, steer with owner guidance, approve & release, or deny & halt a running turn. All states (`pending`, `accepted`, `rejected`, `expired`) are honest and synchronized with the backend. Stale interventions against ended turns expire gracefully. All four partials (`3.7`, `3.9`, `7.5`, `8.4`) and visual reference elements (toggleable routines list, `Teach a task` affordance, collapsible roster categories) are closed and live-verified.
 

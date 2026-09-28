@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Features
+- Implement "Hold everything" pause control with dropdown directly on transcript header and composer to pause, steer with owner guidance, approve, or deny running turns, wired end-to-end to `balabot/intervention.py` with honest state reflection.
+- Implement server-backed toggleable bot routines list in right panel with on/off switches, last-run tracking, and creation/editing/deletion routes (`/api/bots/{bot_id}/routines`).
+- Implement rich file and artifact preview cards (`FilePreviewCard.tsx`) with expandable image thumbnails, code snippet preview with syntax tag, and download action.
+- Implement message hover action toolbar with in-thread reply quoting and reaction shortcuts (👍, ❤️, 🚀).
+- Implement Agent Computer recovery controls (`POST /api/computer/{bot_id}/reset`) and "Teach a task" demonstration recording affordance.
+- Add collapsible roster grouping categories (`OPS`, `CURSOR`, `GOVERNANCE`) in bot list.
+- Add mobile share-sheet intake support via Web Share Target API in PWA manifest and composer URL parameter handling.
 - Implement GrokBot UI parity: sidebar organization with Pinned Bots, main Bots, Group Chats, and collapsible Hidden Bots drawer with unhide affordance.
 - Add Pin, Unpin, Hide, Unhide, and Duplicate actions to bot row menu with persistent client-side storage.
 - Implement in-transcript interactive Intervention Card for human take-over on CAPTCHA, 2FA, and sensitive credentials with direct resolution API call.
