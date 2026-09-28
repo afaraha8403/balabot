@@ -97,9 +97,11 @@ POSIX = os.name == "posix"  # Windows filesystems ignore POSIX mode bits
 def test_store_secret_writes_0600_and_fingerprint(two_orgs):
     rec = orgs.store_secret("STRIPE_SECRET_KEY", "balacode", SECRET_VALUE)
     assert rec["fingerprint"] == FINGERPRINT
-    assert "value" not in rec
     path = two_orgs / ".secrets" / "balacode" / "STRIPE_SECRET_KEY"
-    assert path.read_text(encoding="utf-8") == SECRET_VALUE
+    raw = path.read_bytes()
+    assert raw.startswith(orgs.ENC_PREFIX)
+    assert SECRET_VALUE.encode("utf-8") not in raw
+    assert orgs.read_secret_value("balacode", "STRIPE_SECRET_KEY") == SECRET_VALUE
     if POSIX:
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
 

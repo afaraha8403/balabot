@@ -18,6 +18,7 @@ Hard rules:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -25,6 +26,7 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 __all__ = [
     "ORG_ROOT",
@@ -39,6 +41,8 @@ __all__ = [
     "add_bot",
     "register_secret",
     "store_secret",
+    "read_secret_value",
+    "migrate_secrets",
     "grant",
     "revoke",
     "grants_for",
@@ -199,14 +203,64 @@ def register_secret(name: str, org: str, *, description: str = "") -> dict:
         existing["description"] = description
     value_path = _secrets_root() / org / name
     if value_path.exists():
-        existing["fingerprint"] = fingerprint(value_path.read_text(encoding="utf-8"))
+        val = read_secret_value(org, name)
+        if val is not None:
+            existing["fingerprint"] = fingerprint(val)
     save(reg)
     return dict(existing)
 
 
-def store_secret(name: str, org: str, value: str) -> dict:
-    """Write the value to SECRETS_ROOT/<org>/<NAME> (0600), update the
-    registry metadata, and return the record WITH fingerprint. NEVER the value."""
+ENC_PREFIX = b"BALABOT_ENC_V1:"
+
+
+def _get_master_key() -> bytes:
+    """Resolve or generate the AES-256 master key for secrets-at-rest encryption.
+
+    Checks BALABOT_SECRETS_KEY (hex or raw string) or BALABOT_SECRETS_KEY_PATH
+    (file path, default: <BALABOT_DATA_ROOT>/.secrets/master.key).
+    If the key file does not exist, generates a fresh 32-byte key with 0600 mode.
+    """
+    env_key = os.environ.get("BALABOT_SECRETS_KEY")
+    if env_key:
+        if len(env_key) == 64:
+            try:
+                return bytes.fromhex(env_key)
+            except ValueError:
+                pass
+        return hashlib.sha256(env_key.encode("utf-8")).digest()
+
+    key_path_str = os.environ.get("BALABOT_SECRETS_KEY_PATH")
+    if key_path_str:
+        key_path = Path(key_path_str)
+    else:
+        key_path = _secrets_root() / "master.key"
+
+    if key_path.exists():
+        try:
+            data = key_path.read_bytes()
+            if len(data) >= 32:
+                return data[:32]
+        except OSError:
+            pass
+
+    key = os.urandom(32)
+    try:
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(key_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(key)
+        try:
+            os.chmod(key_path, 0o600)
+        except OSError:
+            pass
+    except OSError:
+        pass
+    return key
+
+
+def store_secret(name: str, org: str, value: str, *, allowed_origins: list[str] | None = None) -> dict:
+    """Encrypt the value with AES-256-GCM, write to SECRETS_ROOT/<org>/<NAME> (0600),
+    update registry metadata, and return the record WITH fingerprint. NEVER the value."""
     if not isinstance(value, str) or value == "":
         raise ValueError("secret value must be a non-empty string")
     reg = load()
@@ -214,9 +268,18 @@ def store_secret(name: str, org: str, value: str) -> dict:
     d = _secrets_root() / org
     d.mkdir(parents=True, exist_ok=True)
     value_path = d / name
+
+    # Authenticated encryption (AES-256-GCM) with record binding in AAD
+    key = _get_master_key()
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)
+    aad = f"{org}:{name}".encode("utf-8")
+    ciphertext = aesgcm.encrypt(nonce, value.encode("utf-8"), aad)
+    payload = ENC_PREFIX + nonce + ciphertext
+
     fd = os.open(str(value_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(value)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(payload)
     try:
         os.chmod(value_path, 0o600)
     except OSError:
@@ -233,8 +296,82 @@ def store_secret(name: str, org: str, value: str) -> dict:
         }
         reg["secrets"].append(record)
     record["fingerprint"] = fingerprint(value)
+    if allowed_origins is not None:
+        record["allowed_origins"] = list(allowed_origins)
     save(reg)
     return {k: v for k, v in record.items() if k != "value"}
+
+
+def read_secret_value(org: str, name: str) -> str | None:
+    """Read and decrypt the secret value from disk.
+
+    If the secret file on disk is legacy plaintext (unencrypted), it is
+    automatically migrated and encrypted in place on read.
+    Returns the decrypted plaintext string, or None if not found or corrupted.
+    NEVER leaks secret values in exceptions or logs.
+    """
+    path = _secrets_root() / org / name
+    if not path.is_file():
+        return None
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+
+    if data.startswith(ENC_PREFIX):
+        enc_body = data[len(ENC_PREFIX):]
+        if len(enc_body) < 28:
+            return None
+        nonce = enc_body[:12]
+        ciphertext = enc_body[12:]
+        key = _get_master_key()
+        aesgcm = AESGCM(key)
+        aad = f"{org}:{name}".encode("utf-8")
+        try:
+            plaintext_bytes = aesgcm.decrypt(nonce, ciphertext, aad)
+            return plaintext_bytes.decode("utf-8")
+        except Exception:
+            return None
+
+    # Legacy plaintext file — transparent in-place migration
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+    # Encrypt in place to complete the migration
+    try:
+        store_secret(name, org, text)
+    except Exception:
+        pass
+    return text
+
+
+def migrate_secrets() -> list[dict]:
+    """Scan SECRETS_ROOT for legacy unencrypted secrets and encrypt them in place.
+
+    Returns a list of migrated records: [{'org': ..., 'name': ...}].
+    """
+    migrated = []
+    root = _secrets_root()
+    if not root.is_dir():
+        return migrated
+    for org_dir in root.iterdir():
+        if not org_dir.is_dir():
+            continue
+        org = org_dir.name
+        for sec_file in org_dir.iterdir():
+            if not sec_file.is_file() or sec_file.name == "master.key":
+                continue
+            try:
+                data = sec_file.read_bytes()
+                if not data.startswith(ENC_PREFIX):
+                    val = data.decode("utf-8")
+                    store_secret(sec_file.name, org, val)
+                    migrated.append({"org": org, "name": sec_file.name})
+            except Exception:
+                pass
+    return migrated
 
 
 def grant(subject_bot: str, resource: dict, *, subject_org: str, scope: str = "bot",

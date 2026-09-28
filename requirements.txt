@@ -7,6 +7,7 @@
 # requirements.txt`) can resolve the imports. Nothing here conflicts with the
 # base image: it merely guarantees at least these minimums.
 
+cryptography>=42.0
 fastapi>=0.110
 httpx>=0.27
 Pillow>=10.0

@@ -266,9 +266,8 @@ def test_value_not_in_error_detail(client):
 
 
 def test_secret_helper_delivery_grant_scoping(client):
-    """The grant created by the HTTP layer actually scopes the delivery."""
+    """Raw delivery to shell environment is discontinued (P0-4); secret_lines_for returns []."""
     from balabot import secret_helper
     _save_secret(client)
-    assert secret_helper.secret_lines_for("principal") == \
-        [f"STRIPE_SECRET_KEY={SENTINEL}"]
+    assert secret_helper.secret_lines_for("principal") == []
     assert secret_helper.secret_lines_for("governor") == []

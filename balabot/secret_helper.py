@@ -39,31 +39,21 @@ def _read_value(org: str, name: str) -> str | None:
 
 
 def secret_lines_for(profile: str) -> list[str]:
-    """['KEY=VALUE', ...] for every secret `profile` (a bot id) is granted.
+    """Raw environment variable injection is discontinued for security (P0-4).
 
-    Only live, access='inject' grants deliver a value. The orgs registry
-    need not exist: no grants => [].
+    Agents must use the server-side request-proxy tool `secret_request`
+    instead of having raw credentials exposed in shell environment variables.
+    Always returns [] so Hermes never injects org secrets into the agent's shell.
     """
-    lines: list[str] = []
-    for g in orgs.grants_for(profile, kind="secret"):
-        if g.get("access") != "inject":
-            continue
-        name = g["resource"]["name"]
-        org = g["resource_org"]
-        value = _read_value(org, name)
-        if value is None:
-            continue
-        lines.append(f"{name}={value}")
-    return lines
+    return []
 
 
 def env_for(profile: str) -> dict[str, str]:
-    """The same grants as a dict, suitable for an injected environment."""
-    env: dict[str, str] = {}
-    for line in secret_lines_for(profile):
-        key, _, value = line.partition("=")
-        env[key] = value
-    return env
+    """The same grants as a dict, suitable for an injected environment.
+
+    Always returns {} as raw environment variable injection is discontinued.
+    """
+    return {}
 
 
 def main(argv: list[str] | None = None) -> int:

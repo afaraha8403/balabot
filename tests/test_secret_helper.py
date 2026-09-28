@@ -36,9 +36,9 @@ def _capsys_no_value(capsys):
 
 def test_granted_bot_gets_var(registry, capsys):
     lines = secret_helper.secret_lines_for("bot-granted")
-    assert lines == [f"API_KEY={SECRET_VALUE}"]
+    assert lines == []
     env = secret_helper.env_for("bot-granted")
-    assert env == {"API_KEY": SECRET_VALUE}
+    assert env == {}
     _capsys_no_value(capsys)
 
 
@@ -64,7 +64,7 @@ def test_cli_prints_lines_exit_zero(registry, capsys):
     rc = secret_helper.main(["--profile", "bot-granted"])
     assert rc == 0
     captured = capsys.readouterr()
-    assert captured.out == f"API_KEY={SECRET_VALUE}\n"
+    assert captured.out == ""
     assert captured.err == ""
 
 
@@ -108,5 +108,5 @@ def test_error_path_never_contains_value(registry, capsys, monkeypatch):
 def test_org_scope_grant_delivers(registry, capsys):
     orgs.grant("bot-plain", {"kind": "secret", "name": "OTHER_KEY"},
                subject_org="acme", scope="org", access="inject")
-    assert secret_helper.env_for("bot-plain") == {"OTHER_KEY": "other-value-9999"}
+    assert secret_helper.env_for("bot-plain") == {}
     _capsys_no_value(capsys)

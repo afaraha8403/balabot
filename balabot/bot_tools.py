@@ -21,13 +21,18 @@ CLI: python -m balabot.bot_tools <tool> --bot <id> [args]   (JSON on stdout)
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
+import socket
 import sys
 import time
+import urllib.parse
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+import httpx
 
 from balabot import orgs
 from balabot.handoffs import HandoffError, enqueue_handoff
@@ -44,8 +49,15 @@ __all__ = [
     "rollback_growth_audit",
     "enqueue_org_request",
     "propose_bot",
+    "secret_request",
     "main",
 ]
+
+_HTTP_TRANSPORT: httpx.BaseTransport | None = None
+
+
+def _get_http_transport() -> httpx.BaseTransport | None:
+    return _HTTP_TRANSPORT
 
 PENDING_KINDS = {"secret_request", "secret_access_request"}
 
@@ -520,6 +532,206 @@ def propose_bot(
     }
 
 
+def _secret_audit_path() -> Path:
+    return _data_root() / "orgs" / "secret_audit.json"
+
+
+def _record_secret_audit(
+    bot: str,
+    secret_name: str,
+    url: str,
+    origin: str,
+    method: str,
+    status: str,
+    reason: str | None = None,
+    response_status: int | None = None,
+) -> None:
+    """Record an audit trail entry for every secret_request invocation.
+
+    Hard rule: The audit trail must NEVER record the secret value.
+    """
+    entry = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "bot": bot,
+        "secret_name": secret_name,
+        "url": url,
+        "origin": origin,
+        "method": method.upper(),
+        "status": status,
+        "reason": reason,
+        "response_status": response_status,
+    }
+    p = _secret_audit_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        audits = []
+        if p.exists():
+            try:
+                audits = json.loads(p.read_text(encoding="utf-8"))
+                if not isinstance(audits, list):
+                    audits = []
+            except Exception:
+                audits = []
+        audits.append(entry)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(audits, indent=2), encoding="utf-8")
+        tmp.replace(p)
+    except Exception:
+        pass
+
+
+def secret_request(
+    bot_id: str,
+    name: str,
+    url: str,
+    *,
+    method: str = "GET",
+    headers: dict | None = None,
+    body: str | dict | None = None,
+    auth_header: str = "Authorization",
+    auth_scheme: str = "Bearer",
+) -> dict:
+    """Execute a server-side proxied HTTP request using a granted secret.
+
+    Decrypts the secret on the backend, enforces origin allowlists and SSRF
+    protections, executes the request without exposing the secret to the agent,
+    redacts the credential from response body and headers, and records an audit log.
+    """
+    _require_str(bot_id, "bot")
+    _require_str(name, "name")
+    _require_str(url, "url")
+    method = (method or "GET").upper()
+
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("http", "https"):
+        _record_secret_audit(bot_id, name, url, parsed.netloc or "", method, "refused", "invalid URL scheme")
+        return {
+            "ok": False,
+            "error": f"invalid scheme {parsed.scheme!r}; only http/https allowed",
+            "status_code": 400,
+        }
+
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    hostname = parsed.hostname or ""
+
+    # Verify active grant for bot
+    grants = orgs.grants_for(bot_id, kind="secret")
+    grant = next((g for g in grants if g.get("resource", {}).get("name") == name), None)
+    if grant is None:
+        _record_secret_audit(bot_id, name, url, origin, method, "refused", f"bot {bot_id!r} has no grant for secret {name!r}")
+        return {
+            "ok": False,
+            "error": f"bot {bot_id!r} has no grant for secret {name!r}",
+            "status_code": 403,
+        }
+
+    resource_org = grant.get("resource_org") or "balacode"
+
+    # Per-secret origin allowlist enforcement
+    reg = orgs.load()
+    sec_meta = next((s for s in reg.get("secrets", [])
+                     if s.get("name") == name and s.get("org") == resource_org), None)
+    allowed_origins = (sec_meta or {}).get("allowed_origins")
+    if allowed_origins:
+        if origin not in allowed_origins and hostname not in allowed_origins:
+            _record_secret_audit(bot_id, name, url, origin, method, "refused", "origin not in allowed_origins")
+            return {
+                "ok": False,
+                "error": f"origin {origin!r} not in allowed origins for secret {name!r}",
+                "status_code": 403,
+            }
+
+    # SSRF protection: reject loopback, link-local, private networks
+    if hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        _record_secret_audit(bot_id, name, url, origin, method, "refused", "SSRF blocked: loopback address")
+        return {
+            "ok": False,
+            "error": f"SSRF blocked: destination {hostname} is a loopback address",
+            "status_code": 400,
+        }
+
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
+            _record_secret_audit(bot_id, name, url, origin, method, "refused", f"SSRF blocked: {ip}")
+            return {
+                "ok": False,
+                "error": f"SSRF blocked: destination {hostname} is a prohibited address",
+                "status_code": 400,
+            }
+    except ValueError:
+        # Hostname, not IP literal -> resolve DNS
+        try:
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            addr_infos = socket.getaddrinfo(hostname, port)
+            for family, socktype, proto, canonname, sockaddr in addr_infos:
+                resolved_ip = ipaddress.ip_address(sockaddr[0])
+                if resolved_ip.is_loopback or resolved_ip.is_private or resolved_ip.is_link_local or resolved_ip.is_reserved or resolved_ip.is_unspecified:
+                    _record_secret_audit(bot_id, name, url, origin, method, "refused", f"SSRF blocked: {resolved_ip}")
+                    return {
+                        "ok": False,
+                        "error": f"SSRF blocked: destination {hostname} resolves to prohibited address {resolved_ip}",
+                        "status_code": 400,
+                    }
+        except socket.gaierror:
+            pass
+
+    # Retrieve and decrypt secret
+    secret_val = orgs.read_secret_value(resource_org, name)
+    if secret_val is None:
+        _record_secret_audit(bot_id, name, url, origin, method, "refused", "secret decryption failed or missing")
+        return {
+            "ok": False,
+            "error": f"secret {name!r} could not be retrieved or decrypted",
+            "status_code": 404,
+        }
+
+    # Inject credential into headers
+    req_headers = dict(headers or {})
+    if auth_scheme:
+        req_headers[auth_header] = f"{auth_scheme} {secret_val}".strip()
+    else:
+        req_headers[auth_header] = secret_val
+
+    # Execute request
+    transport = _get_http_transport()
+    try:
+        with httpx.Client(transport=transport, follow_redirects=False, timeout=30.0) as client:
+            if isinstance(body, dict):
+                resp = client.request(method=method, url=url, headers=req_headers, json=body)
+            elif isinstance(body, str):
+                resp = client.request(method=method, url=url, headers=req_headers, content=body.encode("utf-8"))
+            else:
+                resp = client.request(method=method, url=url, headers=req_headers)
+    except Exception as exc:
+        _record_secret_audit(bot_id, name, url, origin, method, "error", f"request failed: {type(exc).__name__}")
+        return {
+            "ok": False,
+            "error": f"request failed: {type(exc).__name__}",
+            "status_code": 502,
+        }
+
+    # Redact secret value from response body and headers
+    resp_text = resp.text
+    if secret_val and secret_val in resp_text:
+        resp_text = resp_text.replace(secret_val, "[REDACTED_SECRET]")
+
+    scrubbed_headers = {}
+    for k, v in resp.headers.items():
+        if secret_val and secret_val in v:
+            v = v.replace(secret_val, "[REDACTED_SECRET]")
+        scrubbed_headers[k] = v
+
+    _record_secret_audit(bot_id, name, url, origin, method, "allowed", response_status=resp.status_code)
+
+    return {
+        "ok": resp.is_success,
+        "status_code": resp.status_code,
+        "headers": scrubbed_headers,
+        "body": resp_text,
+    }
+
+
 # ---- CLI -------------------------------------------------------------------
 
 
@@ -543,6 +755,7 @@ def main(argv: list[str] | None = None) -> int:
         "record_growth_audit": ["--action", "--target", "--description", "--author", "--patch", "--bot"],
         "rollback_growth_audit": ["--change-id", "--reason", "--bot"],
         "propose_bot": ["--bot", "--name", "--role", "--reason", "--model"],
+        "secret_request": ["--bot", "--name", "--url", "--method", "--headers", "--body", "--auth-header", "--auth-scheme"],
     }
     allowed = known_flags.get(tool)
     if allowed is not None:
@@ -643,6 +856,29 @@ def main(argv: list[str] | None = None) -> int:
                 model=_opt("--model"),
             ))
             return 0
+        if tool == "secret_request":
+            bot, name, url = _opt("--bot"), _opt("--name"), _opt("--url")
+            if not (bot and name and url):
+                raise ValueError("secret_request needs --bot, --name, --url")
+            headers_raw = _opt("--headers")
+            headers = json.loads(headers_raw) if headers_raw else None
+            body_raw = _opt("--body")
+            if body_raw:
+                try:
+                    body = json.loads(body_raw)
+                except Exception:
+                    body = body_raw
+            else:
+                body = None
+            _json_out(secret_request(
+                bot, name, url,
+                method=_opt("--method", "GET"),
+                headers=headers,
+                body=body,
+                auth_header=_opt("--auth-header", "Authorization"),
+                auth_scheme=_opt("--auth-scheme", "Bearer"),
+            ))
+            return 0
     except (ValueError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -656,7 +892,8 @@ def main(argv: list[str] | None = None) -> int:
           "list_pending_requests [--bot B] | "
           "record_growth_audit --action A --target T --description D [--author AU] [--patch P] [--bot B] | "
           "rollback_growth_audit --change-id ID [--reason R] [--bot B] | "
-          "propose_bot --bot B --name N --role R [--reason REASON] [--model M]",
+          "propose_bot --bot B --name N --role R [--reason REASON] [--model M] | "
+          "secret_request --bot B --name N --url U [--method M] [--headers H] [--body BD] [--auth-header AH] [--auth-scheme AS]",
           file=sys.stderr)
     return 2
 

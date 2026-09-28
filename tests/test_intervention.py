@@ -270,10 +270,12 @@ def test_bot_tools_request_intervention_waits_and_resolves():
     from balabot import bot_tools, intervention
 
     def resolve_later():
-        time.sleep(0.1)
-        active = intervention.active_for_bot("worker_wait")
-        if active:
-            intervention.resolve_intervention(active["resume_token"], "approve", note="unblocked", by="owner")
+        for _ in range(50):
+            time.sleep(0.05)
+            active = intervention.active_for_bot("worker_wait")
+            if active:
+                intervention.resolve_intervention(active["resume_token"], "approve", note="unblocked", by="owner")
+                break
 
     t = threading.Thread(target=resolve_later)
     t.start()
