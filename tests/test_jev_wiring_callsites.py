@@ -73,7 +73,18 @@ def test_chat_route_calls_the_session_store_bridge():
                    and n.name == "_jev_prepare")
     prep_names = {n.func.id for n in ast.walk(prep_fn)
                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-    assert "_chat_append_session_state" in prep_names
+    # The append is reached from _jev_prepare either directly or through the
+    # _persist_turn_state helper (extracted so persistence does NOT depend on
+    # Jev availability) - and that helper must itself make the direct call.
+    assert ("_chat_append_session_state" in prep_names
+            or "_persist_turn_state" in prep_names),         "_jev_prepare no longer reaches the durable store append"
+    persist_fn = next((n for n in ast.walk(tree)
+                       if isinstance(n, ast.FunctionDef)
+                       and n.name == "_persist_turn_state"), None)
+    assert persist_fn is not None,         "the turn-persistence helper is gone from ui/server.py"
+    persist_names = {n.func.id for n in ast.walk(persist_fn)
+                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert "_chat_append_session_state" in persist_names,         "_persist_turn_state no longer calls the store append"
     assert "select_and_render" in prep_names
     assert "is_decision_worthy" in prep_names
     assert "context_signals" in prep_names

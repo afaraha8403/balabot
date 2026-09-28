@@ -2339,8 +2339,11 @@ def _jev_prepare(profile: str, turn_text: str, session_id: str,
     if jev is None:
         out["jev_event"] = {"degraded": True,
                             "reason": _JEV_CHAT_REASON or "Jev client unavailable"}
-        # Without Jev there is no gate, no selection, no routing: state it and
-        # return. The turn proceeds with the plain user text.
+        # Without Jev there is no gate, no selection, no routing: state it.
+        # THE TRANSCRIPT IS NOT JEV'S: the user's message still belongs in the
+        # durable store, so persistence runs here too and the turn proceeds
+        # with the plain user text.
+        _persist_turn_state(session_id, turn_text, out)
         return out
 
     from balabot.jev_depth import is_decision_worthy  # noqa: E402
@@ -2407,13 +2410,29 @@ def _jev_prepare(profile: str, turn_text: str, session_id: str,
     #    purpose is the coarse span key until per-turn topics exist), the
     #    resume state, and any gate-admitted decisions. Store failure degrades
     #    to a stated event; it never breaks the turn.
+    topic = purpose if (signal is not None and signal.drifted and purpose) else None
+    _persist_turn_state(session_id, turn_text, out,
+                        topic=topic, decisions=decisions)
+    return out
+
+
+def _persist_turn_state(session_id: str, turn_text: str, out: dict, *,
+                        topic: str | None = None,
+                        decisions: list | None = None) -> dict:
+    """Record this turn (user message, topic span, resume state, admitted
+    decisions) in the durable session store - INDEPENDENTLY of Jev.
+
+    Transcript persistence must never be coupled to the Jev gate: when the
+    gate is down, the user's message still belongs in the transcript. Store
+    failure degrades to a stated event; it never breaks the turn.
+    """
     store_payload: dict = {"session_id": session_id}
-    if signal is not None and signal.drifted and purpose:
-        store_payload["topic"] = purpose
-    # Resume state is recorded on EVERY turn — "where the work currently
+    if topic:
+        store_payload["topic"] = topic
+    # Resume state is recorded on EVERY turn - "where the work currently
     # stands" must survive a compaction that can hit right after this one.
     store_payload["resume_state"] = {"last_turn": turn_text[:400]}
-    if out["session"] is not None:
+    if out.get("session") is not None:
         store_payload["resume_state"]["last_seq"] = out["session"].get("next_seq")
     if decisions:
         store_payload["decisions"] = decisions
@@ -2426,7 +2445,7 @@ def _jev_prepare(profile: str, turn_text: str, session_id: str,
         out["store"] = {"appended": False,
                         "error": res.get("error", "container_unreachable"),
                         "reason": res.get("reason", res.get("detail", ""))}
-        if not out["jev_event"]:
+        if not out.get("jev_event"):
             out["jev_event"] = {"degraded": True,
                                 "reason": "session store unreachable - "
                                           "topic/resume/decisions not recorded"}
