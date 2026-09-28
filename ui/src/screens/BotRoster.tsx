@@ -1,3 +1,4 @@
+import {useMemo} from 'react';
 import {Avatar} from '@astryxdesign/core/Avatar';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Collapsible} from '@astryxdesign/core/Collapsible';
@@ -117,6 +118,28 @@ export function BotRoster({
   const mainEntries = bots.filter(b => !pinnedSet.has(b.id) && !hiddenSet.has(b.id)).map(makeEntry);
   const hiddenEntries = bots.filter(b => hiddenSet.has(b.id)).map(makeEntry);
 
+  const getCategory = (b: Bot): string => {
+    if (b.category && b.category.trim()) return b.category.trim();
+    const txt = `${b.name} ${b.title || ''} ${b.id}`.toLowerCase();
+    if (txt.includes('cursor') || txt.includes('coder') || txt.includes('code') || txt.includes('dev')) {
+      return 'Cursor';
+    }
+    if (txt.includes('governor') || txt.includes('policy') || txt.includes('safety') || txt.includes('audit')) {
+      return 'Governance';
+    }
+    return 'Ops';
+  };
+
+  const categories = useMemo(() => {
+    const map = new Map<string, RosterEntry[]>();
+    for (const e of mainEntries) {
+      const cat = getCategory(e.bot);
+      if (!map.has(cat)) map.set(cat, []);
+      map.get(cat)!.push(e);
+    }
+    return Array.from(map.entries());
+  }, [mainEntries]);
+
   const renderBotItem = (e: RosterEntry) => (
     <ListItem
       key={e.bot.id}
@@ -202,20 +225,35 @@ export function BotRoster({
           </VStack>
         ) : null}
 
-        {/* Main Bots */}
-        {mainEntries.length > 0 ? (
-          <VStack gap={1}>
-            {pinnedEntries.length > 0 ? (
-              <HStack paddingInline={2} paddingBlock={1}>
-                <Text type="supporting" size="xsm" weight="semibold" color="secondary">
-                  BOTS
-                </Text>
-              </HStack>
-            ) : null}
-            <List density="compact">
-              {mainEntries.map(renderBotItem)}
-            </List>
-          </VStack>
+        {/* Collapsible Category Headings */}
+        {categories.length > 0 ? (
+          categories.map(([catName, catEntries]) => (
+            <VStack key={catName} gap={1}>
+              <Collapsible
+                defaultIsOpen={true}
+                trigger={
+                  <HStack
+                    gap={2}
+                    vAlign="center"
+                    justify="between"
+                    width="100%"
+                    paddingInline={2}
+                    paddingBlock={1}
+                    style={{cursor: 'pointer'}}
+                  >
+                    <Text type="supporting" size="xsm" weight="semibold" color="secondary">
+                      {catName.toUpperCase()}
+                    </Text>
+                    <Badge label={`${catEntries.length}`} variant="neutral" />
+                  </HStack>
+                }
+              >
+                <List density="compact">
+                  {catEntries.map(renderBotItem)}
+                </List>
+              </Collapsible>
+            </VStack>
+          ))
         ) : pinnedEntries.length === 0 ? (
           <HStack gap={2} padding={2}>
             <Text type="supporting">
@@ -271,39 +309,43 @@ export function BotRoster({
       </VStack>
 
       {/* Hidden Bots Drawer */}
-      {hiddenEntries.length > 0 ? (
-        <VStack gap={1} paddingBlock={2}>
-          <Divider />
-          <Collapsible
-            defaultIsOpen={false}
-            trigger={
-              <HStack
-                gap={2}
-                vAlign="center"
-                justify="between"
-                width="100%"
-                paddingBlock={1}
-                paddingInline={2}
-                style={{cursor: 'pointer'}}
-              >
-                <HStack gap={1} vAlign="center">
-                  <IconConceal size="sm" color="secondary" />
-                  <Text type="supporting" size="sm" weight="medium">
-                    {mainEntries.length === 0 && pinnedEntries.length === 0
-                      ? 'Show Hidden Bots'
-                      : 'Hidden Bots'}
-                  </Text>
-                </HStack>
-                <Badge label={`${hiddenEntries.length}`} variant="neutral" />
+      <VStack gap={1} paddingBlock={2}>
+        <Divider />
+        <Collapsible
+          defaultIsOpen={false}
+          trigger={
+            <HStack
+              gap={2}
+              vAlign="center"
+              justify="between"
+              width="100%"
+              paddingBlock={1}
+              paddingInline={2}
+              style={{cursor: 'pointer'}}
+            >
+              <HStack gap={1} vAlign="center">
+                <IconConceal size="sm" color="secondary" />
+                <Text type="supporting" size="sm" weight="medium">
+                  Hidden Bots
+                </Text>
               </HStack>
-            }
-          >
-            <List density="compact">
-              {hiddenEntries.map(renderBotItem)}
-            </List>
-          </Collapsible>
-        </VStack>
-      ) : null}
+              <Badge label={`${hiddenEntries.length}`} variant="neutral" />
+            </HStack>
+          }
+        >
+          <List density="compact">
+            {hiddenEntries.length > 0 ? (
+              hiddenEntries.map(renderBotItem)
+            ) : (
+              <HStack padding={2}>
+                <Text type="supporting" size="xsm" color="secondary">
+                  No hidden bots. Use &quot;Manage &lt;Bot&gt;&quot; &rarr; &quot;Hide from sidebar&quot; to hide a bot.
+                </Text>
+              </HStack>
+            )}
+          </List>
+        </Collapsible>
+      </VStack>
     </VStack>
   );
 }

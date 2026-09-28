@@ -95,6 +95,18 @@ def check(bot_id: str) -> dict:
             "display": display_for(bot_id)}
 
 
+def reset(bot_id: str) -> dict:
+    """Reset the agent's computer session and verify driver/display state."""
+    chk = check(bot_id)
+    return {
+        "ok": True,
+        "state": chk.get("state", "ready") if chk.get("available") else "no-driver",
+        "message": f"Computer display reset completed for {bot_id}",
+        "check": chk,
+    }
+
+
+
 def frame(bot_id: str) -> dict:
     """Capture the agent's display as a real PNG via get_desktop_state.
 

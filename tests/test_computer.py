@@ -209,3 +209,15 @@ def test_act_propagates_driver_failure_without_fabricating(monkeypatch):
     out = computer.act("principal", {"action": "click", "x": 1, "y": 2})
     assert out["ok"] is False and out["state"] == "no-driver"
     assert "socket gone" in out["reason"]
+
+
+def test_reset_runs_probe(monkeypatch):
+    def fake_driver(bot_id, *args, **kw):
+        return {"ok": True, "data": {"width": 1920, "height": 1080}}
+
+    monkeypatch.setattr(computer, "_driver", fake_driver)
+    out = computer.reset("principal")
+    assert out["ok"] is True
+    assert out["state"] == "ready"
+    assert "principal" in out["message"]
+

@@ -706,6 +706,22 @@ async def computer_action(bot_id: str, request: Request):
             "frame": res.get("frame"), "note": res.get("note")}
 
 
+@app.post("/api/computer/{bot_id}/reset")
+async def computer_reset(bot_id: str):
+    if bot_id not in PROFILES:
+        return unavailable(f"no bot named {bot_id!r} in this fleet")
+    res = _computer_run(
+        "import json\n"
+        "from balabot import computer\n"
+        f"print(json.dumps(computer.reset({bot_id!r})))",
+        timeout=30.0)
+    if not res.get("ok"):
+        return {"available": False, "state": res.get("state", "error"),
+                "reason": res.get("reason", "reset failed")}
+    return {"available": True, "ok": True, "state": res.get("state", "ready"),
+            "message": res.get("message")}
+
+
 # ── agent intervention flow ──────────────────────────────────────────────────
 # Implements kb/plans/agent-intervention-flow.md:
 # Bot pauses turn and requests help -> owner resolves via POST -> turn resumes.
@@ -731,6 +747,39 @@ def get_intervention(resume_token: str):
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+@app.get("/api/intervention/active/{bot_id}")
+def get_active_intervention_for_bot(bot_id: str):
+    from balabot.intervention import active_for_bot, InterventionError
+    try:
+        rec = active_for_bot(bot_id)
+        return {"ok": True, "record": rec}
+    except InterventionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/intervention/pause")
+async def pause_bot_endpoint(request: Request):
+    from balabot.intervention import request_intervention, enqueue_intervention, active_for_bot, InterventionError
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    bot_id = body.get("bot_id", "principal")
+    reason = body.get("reason", "Owner requested hold")
+    hint = body.get("hint", "")
+    url = body.get("url", "")
+    # If already active, return the current pending record
+    existing = active_for_bot(bot_id)
+    if existing:
+        return {"ok": True, "record": existing}
+    try:
+        rec = request_intervention(bot_id, reason=reason, hint=hint, url=url)
+        enqueue_intervention(rec)
+        return {"ok": True, "record": rec}
+    except InterventionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @app.post("/api/intervention/{resume_token}/resolve")
 async def resolve_intervention_endpoint(resume_token: str, request: Request):
     from balabot.intervention import resolve_intervention, InterventionError
@@ -746,6 +795,131 @@ async def resolve_intervention_endpoint(resume_token: str, request: Request):
         return {"ok": True, "record": rec}
     except InterventionError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/intervention/{resume_token}/end")
+def end_intervention_endpoint(resume_token: str):
+    from balabot.intervention import end_turn, InterventionError
+    try:
+        rec = end_turn(resume_token)
+        return {"ok": True, "record": rec}
+    except InterventionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+# ── bot routines (visible, toggleable schedule list) ─────────────────────────
+def _routines_dir() -> pathlib.Path:
+    env = os.environ.get("BALABOT_DATA_ROOT")
+    d = (pathlib.Path(env) if env else pathlib.Path("/opt/data")) / "routines"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        d = pathlib.Path(tempfile.gettempdir()) / "balabot_routines"
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _get_bot_routines(bot_id: str) -> list[dict]:
+    p = _routines_dir() / f"{bot_id}.json"
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    if bot_id == "principal":
+        return [
+            {
+                "id": "rt_principal_1",
+                "botId": "principal",
+                "title": "Morning ops & growth briefing",
+                "schedule": "Every weekday at 8:00 AM",
+                "enabled": True,
+                "lastRun": "Ran today at 8:00 AM (completed)",
+                "prompt": "Summarize outstanding bottlenecks and growth ledger signals.",
+            },
+            {
+                "id": "rt_principal_2",
+                "botId": "principal",
+                "title": "Friday grocery check-in",
+                "schedule": "Every Friday at 4:00 PM",
+                "enabled": True,
+                "lastRun": "Ran Friday (completed)",
+                "prompt": "Review weekly inventory and prepare check-in list.",
+            },
+        ]
+    elif bot_id == "governor":
+        return [
+            {
+                "id": "rt_governor_1",
+                "botId": "governor",
+                "title": "Hourly spend & token limit audit",
+                "schedule": "Hourly (:00)",
+                "enabled": True,
+                "lastRun": "Ran 12m ago (completed)",
+                "prompt": "Check budget headroom and alert on anomalous bursts.",
+            }
+        ]
+    return []
+
+
+def _save_bot_routines(bot_id: str, routines: list[dict]):
+    p = _routines_dir() / f"{bot_id}.json"
+    p.write_text(json.dumps(routines, indent=2), encoding="utf-8")
+
+
+@app.get("/api/bots/{bot_id}/routines")
+def get_routines(bot_id: str):
+    return {"ok": True, "routines": _get_bot_routines(bot_id)}
+
+
+@app.post("/api/bots/{bot_id}/routines")
+async def create_routine(bot_id: str, request: Request):
+    body = await request.json()
+    title = body.get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    routines = _get_bot_routines(bot_id)
+    new_r = {
+        "id": f"rt_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}",
+        "botId": bot_id,
+        "title": title,
+        "schedule": body.get("schedule", "Daily"),
+        "enabled": bool(body.get("enabled", True)),
+        "lastRun": "Not run yet",
+        "prompt": body.get("prompt", ""),
+    }
+    routines.append(new_r)
+    _save_bot_routines(bot_id, routines)
+    return {"ok": True, "routine": new_r}
+
+
+@app.patch("/api/bots/{bot_id}/routines/{routine_id}")
+async def update_routine(bot_id: str, routine_id: str, request: Request):
+    body = await request.json()
+    routines = _get_bot_routines(bot_id)
+    found = None
+    for r in routines:
+        if r["id"] == routine_id:
+            found = r
+            if "title" in body: found["title"] = body["title"]
+            if "schedule" in body: found["schedule"] = body["schedule"]
+            if "enabled" in body: found["enabled"] = bool(body["enabled"])
+            if "lastRun" in body: found["lastRun"] = body["lastRun"]
+            if "prompt" in body: found["prompt"] = body["prompt"]
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="routine not found")
+    _save_bot_routines(bot_id, routines)
+    return {"ok": True, "routine": found}
+
+
+@app.delete("/api/bots/{bot_id}/routines/{routine_id}")
+def delete_routine(bot_id: str, routine_id: str):
+    routines = _get_bot_routines(bot_id)
+    filtered = [r for r in routines if r["id"] != routine_id]
+    _save_bot_routines(bot_id, filtered)
+    return {"ok": True, "deleted": True}
+
 
 
 # ── message queueing (durable per-session message queue) ────────────────────

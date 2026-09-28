@@ -64,6 +64,9 @@ import {CommandPalette} from './CommandPalette';
 import {InterventionCard} from './InterventionCard';
 import {DraftCard, parseDraftsFromContent} from './DraftCard';
 import {VoiceMemoCard} from './VoiceMemoCard';
+import {HoldEverythingControl} from './HoldEverythingControl';
+import {RoutinesList} from './RoutinesList';
+import {FilePreviewCard} from './FilePreviewCard';
 import {
   api,
   streamChat,
@@ -80,6 +83,8 @@ import {
   getComputerFrame,
   updateBot,
   createBotProposal,
+  getActiveIntervention,
+  endInterventionTurn,
   type Bot,
   type ChatMessage,
   type Handoff,
@@ -226,6 +231,8 @@ export default function App() {
   const [skills, setSkills] = useState<SkillEntry[]>([]);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [interventions, setInterventions] = useState<InterventionPayload[]>([]);
+  const [activeIntervention, setActiveIntervention] = useState<InterventionPayload | null>(null);
+  const [replyingToMessage, setReplyingToMessage] = useState<{sender: string; text: string} | null>(null);
   const [draftCards, setDraftCards] = useState<DraftCardData[]>([]);
   const [voiceMemos, setVoiceMemos] = useState<VoiceMemoData[]>([]);
   const [rightPanelMode, setRightPanelMode] = useState<'screen' | 'settings'>('screen');
@@ -376,6 +383,40 @@ export default function App() {
     void reloadGroups();
     void reloadSkills();
   }, [reloadGroups, reloadSkills]);
+
+  // Mobile share-sheet intake (8.4)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const title = params.get('share_title');
+    const text = params.get('share_text');
+    const url = params.get('share_url');
+    if (title || text || url) {
+      setBanner(`Mobile share intake: ${title || url || 'shared content'} imported.`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  // Poll/fetch active intervention for the active bot (Priority 1)
+  useEffect(() => {
+    if (!activeBotId) {
+      setActiveIntervention(null);
+      return;
+    }
+    let live = true;
+    void getActiveIntervention(activeBotId)
+      .then(res => {
+        if (live && res?.ok && res.record) {
+          setActiveIntervention(res.record);
+        } else if (live) {
+          setActiveIntervention(null);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [activeBotId]);
+
 
   // Poll live Agent Computer mini screen frame for the active bot
   useEffect(() => {
@@ -581,7 +622,24 @@ export default function App() {
     setIsStreaming(false);
   };
 
-  const send = async (text: string, attachments?: Attachment[]) => {
+  const handleToggleReaction = (msgIndex: number, emoji: string) => {
+    if (!activeSession) return;
+    patchSession(activeSession.id, s => {
+      const msgs = [...s.messages];
+      const target = msgs[msgIndex];
+      if (!target) return s;
+      const current = {...(target.reactions || {})};
+      current[emoji] = (current[emoji] || 0) + 1;
+      msgs[msgIndex] = {...target, reactions: current};
+      return {...s, messages: msgs};
+    });
+  };
+
+  const send = async (
+    text: string,
+    attachments?: Attachment[],
+    replyTo?: {sender: string; text: string},
+  ) => {
     if (!activeBot) return;
     const session = ensureSession(activeBot);
     const userMsg: ChatMessage = {
@@ -589,6 +647,7 @@ export default function App() {
       content: text,
       at: Date.now(),
       attachments: attachments?.length ? attachments : undefined,
+      replyTo: replyTo,
     };
     const history = [...session.messages, userMsg];
 
@@ -653,6 +712,7 @@ export default function App() {
         attachments,
         (i: InterventionPayload) => {
           setInterventions(prev => [...prev, i]);
+          setActiveIntervention(i);
         },
       );
       const parsedDrafts = parseDraftsFromContent(finalText);
@@ -685,6 +745,13 @@ export default function App() {
       setIsStreaming(false);
       setStreamText('');
       abortRef.current = null;
+      if (activeIntervention?.resume_token && activeIntervention.state === 'pending') {
+        void endInterventionTurn(activeIntervention.resume_token)
+          .then(res => {
+            if (res?.record) setActiveIntervention(res.record);
+          })
+          .catch(() => {});
+      }
     }
   };
 
@@ -994,22 +1061,84 @@ export default function App() {
           // composer rode off the bottom of the screen. The framework's own
           // ai-chat template wraps its ChatLayout the same way.
           <HStack height="100%">
-            <ChatLayout
-              style={{flex: 1, minHeight: 0}}
-              composer={
-              <Composer
-                isStreaming={isStreaming}
-                onSubmit={(text, attachments) => void send(text, attachments)}
-                onStop={stop}
-                botName={activeBot.name}
-                bots={bots}
-                groups={groups}
-                skills={skills}
-                onStartVoiceChat={() => {
-                  setBanner('Voice chat: GrokBot voice channel activated. Speak now.');
+            <VStack style={{flex: 1, minHeight: 0, height: '100%'}} gap={0}>
+              {/* Active Bot Transcript Header with Hold everything control */}
+              <HStack
+                gap={2}
+                vAlign="center"
+                justify="between"
+                paddingInline={3}
+                paddingBlock={2}
+                style={{
+                  borderBottom: '1px solid var(--border-default, rgba(255, 255, 255, 0.1))',
+                  backgroundColor: 'var(--surface-default, #121214)',
                 }}
-              />
-            }
+              >
+                <HStack gap={2} vAlign="center">
+                  <Avatar name={activeBot.name} size="sm" tooltip={false} />
+                  <VStack gap={0} align="start">
+                    <Text type="body" weight="semibold">
+                      {activeBot.name}
+                    </Text>
+                    <Text type="supporting" size="xsm" color="secondary">
+                      {activeBot.title || activeBot.description?.slice(0, 45) || 'Active'}
+                    </Text>
+                  </VStack>
+                  <StatusDot
+                    variant={
+                      activeIntervention?.state === 'pending'
+                        ? 'warning'
+                        : isStreaming
+                          ? 'warning'
+                          : 'success'
+                    }
+                    label={
+                      activeIntervention?.state === 'pending'
+                        ? 'Paused'
+                        : isStreaming
+                          ? 'Working'
+                          : 'Idle'
+                    }
+                    isPulsing={isStreaming || activeIntervention?.state === 'pending'}
+                  />
+                </HStack>
+
+                {/* GrokBot Pause / Hold Everything Control */}
+                <HoldEverythingControl
+                  botId={activeBot.id}
+                  botName={activeBot.name}
+                  isStreaming={isStreaming}
+                  onStopStreaming={stop}
+                  activeIntervention={activeIntervention}
+                  onInterventionChange={setActiveIntervention}
+                  onNotify={setBanner}
+                  onOpenComputer={() => setShowComputer(true)}
+                />
+              </HStack>
+
+              <ChatLayout
+                style={{flex: 1, minHeight: 0}}
+                composer={
+                <Composer
+                  isStreaming={isStreaming}
+                  onSubmit={(text, attachments, replyTo) => void send(text, attachments, replyTo)}
+                  onStop={stop}
+                  botName={activeBot.name}
+                  botId={activeBot.id}
+                  bots={bots}
+                  groups={groups}
+                  skills={skills}
+                  replyingTo={replyingToMessage}
+                  onCancelReply={() => setReplyingToMessage(null)}
+                  activeIntervention={activeIntervention}
+                  onInterventionChange={setActiveIntervention}
+                  onNotify={setBanner}
+                  onOpenComputer={() => setShowComputer(true)}
+                  onStartVoiceChat={() => {
+                    setBanner('Voice chat: GrokBot voice channel activated. Speak now.');
+                  }}
+                />
+              }
             emptyState={
               <VStack gap={5} align="center" paddingBlock={6} maxWidth={460}>
                 <EmptyState
@@ -1074,13 +1203,30 @@ export default function App() {
                       }>
                       {isUser ? (
                         <VStack gap={1} align="start">
+                          {m.replyTo ? (
+                            <HStack
+                              gap={1}
+                              paddingInline={2}
+                              paddingBlock={1}
+                              style={{
+                                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                                borderLeft: '2px solid var(--accent, #6366f1)',
+                                borderRadius: 'var(--radius-sm, 4px)',
+                                marginBottom: '2px',
+                              }}
+                            >
+                              <Text type="supporting" size="xsm" color="secondary">
+                                ↩ Replying to {m.replyTo.sender}: &ldquo;{m.replyTo.text.slice(0, 50)}{m.replyTo.text.length > 50 ? '…' : ''}&rdquo;
+                              </Text>
+                            </HStack>
+                          ) : null}
                           <Text>{m.content}</Text>
                           {m.attachments && m.attachments.length > 0 ? (
-                            <HStack gap={1} wrap="wrap">
+                            <VStack gap={2} align="start" width="100%">
                               {m.attachments.map(a => (
-                                <Token key={a.id} label={a.name} size="sm" icon={<IconFile />} />
+                                <FilePreviewCard key={a.id} attachment={a} />
                               ))}
-                            </HStack>
+                            </VStack>
                           ) : null}
                         </VStack>
                       ) : (
@@ -1098,6 +1244,13 @@ export default function App() {
                               }))}
                             />
                           ) : null}
+                          {m.attachments && m.attachments.length > 0 ? (
+                            <VStack gap={2} align="start" width="100%">
+                              {m.attachments.map(a => (
+                                <FilePreviewCard key={a.id} attachment={a} />
+                              ))}
+                            </VStack>
+                          ) : null}
                           {m.interventions?.map((iv, idx) => (
                             <InterventionCard
                               key={iv.resume_token || idx}
@@ -1105,6 +1258,7 @@ export default function App() {
                               onOpenComputer={() => setShowComputer(true)}
                               onResolved={() => {
                                 setBanner('Intervention resolved — bot resuming.');
+                                setActiveIntervention(null);
                               }}
                             />
                           ))}
@@ -1127,6 +1281,52 @@ export default function App() {
                         </VStack>
                       )}
                     </ChatMessageBubble>
+                    {/* Reactions and Reply-in-Thread action */}
+                    <HStack gap={1} vAlign="center" wrap="wrap" style={{marginTop: '2px', paddingInline: '4px'}}>
+                      {Object.entries(m.reactions || {}).map(([emoji, count]) =>
+                        count > 0 ? (
+                          <Button
+                            key={emoji}
+                            label={`${emoji} ${count}`}
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleToggleReaction(i, emoji)}
+                          />
+                        ) : null,
+                      )}
+                      <HStack gap={1} vAlign="center">
+                        {['👍', '❤️', '🚀'].map(emoji => (
+                          <button
+                            key={emoji}
+                            type="button"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: '2px 4px',
+                              fontSize: '13px',
+                              opacity: 0.6,
+                            }}
+                            title={`React with ${emoji}`}
+                            aria-label={`React ${emoji}`}
+                            onClick={() => handleToggleReaction(i, emoji)}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                        <Button
+                          label="Reply"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            setReplyingToMessage({
+                              sender: isUser ? 'You' : activeBot.name,
+                              text: m.content,
+                            })
+                          }
+                        />
+                      </HStack>
+                    </HStack>
                   </ChatMessageRow>
                 );
               })}
@@ -1246,7 +1446,8 @@ export default function App() {
               ))}
             </ChatMessageList>
             </ChatLayout>
-          </HStack>
+          </VStack>
+        </HStack>
         ) : (
           <EmptyState title="No bots loaded" description="Waiting on /api/bots…" />
         )
@@ -1396,24 +1597,11 @@ export default function App() {
 
                 {/* GrokBot Routines Section */}
                 <Divider />
-                <HStack gap={2} vAlign="center" justify="between">
-                  <Text type="body" weight="semibold">
-                    Routines
-                  </Text>
-                  <Button
-                    label="+"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setBanner(`Routine builder for ${activeBot.name}: configure schedules via cron or routines.`);
-                    }}
-                  />
-                </HStack>
-                <Card variant="default" padding={2}>
-                  <Text type="supporting" size="xsm" color="secondary">
-                    No scheduled routines. Click + to add an automated workflow.
-                  </Text>
-                </Card>
+                <RoutinesList
+                  botId={activeBot.id}
+                  botName={activeBot.name}
+                  onNotify={setBanner}
+                />
 
                 <Divider />
                 <VStack gap={1} align="start">

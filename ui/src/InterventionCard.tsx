@@ -26,9 +26,9 @@ export function InterventionCard({
   onResolved,
 }: Props) {
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<'pending' | 'approved' | 'denied'>(
-    intervention.status ?? 'pending',
-  );
+  const [status, setStatus] = useState<
+    'pending' | 'approved' | 'denied' | 'accepted' | 'rejected' | 'expired'
+  >(intervention.status ?? intervention.state ?? 'pending');
   const [error, setError] = useState('');
 
   const handleResolve = async (action: 'approve' | 'deny') => {
@@ -45,7 +45,7 @@ export function InterventionCard({
     }
   };
 
-  if (status === 'approved') {
+  if (status === 'approved' || status === 'accepted') {
     return (
       <Card variant="muted" padding={3}>
         <HStack gap={2} vAlign="center">
@@ -58,13 +58,26 @@ export function InterventionCard({
     );
   }
 
-  if (status === 'denied') {
+  if (status === 'denied' || status === 'rejected') {
     return (
       <Card variant="muted" padding={3}>
         <HStack gap={2} vAlign="center">
           <IconWarning size="sm" color="secondary" />
           <Text type="supporting" color="secondary">
             Take-over request for {intervention.bot} was declined.
+          </Text>
+        </HStack>
+      </Card>
+    );
+  }
+
+  if (status === 'expired') {
+    return (
+      <Card variant="muted" padding={3}>
+        <HStack gap={2} vAlign="center">
+          <IconWarning size="sm" color="secondary" />
+          <Text type="supporting" color="secondary">
+            Intervention for {intervention.bot} expired because the turn already completed.
           </Text>
         </HStack>
       </Card>

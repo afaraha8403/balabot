@@ -301,3 +301,27 @@ def test_intervention_http_routes(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["record"]["state"] == "accepted"
 
+    # 6. POST /api/intervention/pause (owner hold)
+    resp = client.post("/api/intervention/pause", json={"bot_id": "principal", "reason": "Hold everything triggered"})
+    assert resp.status_code == 200
+    hold_data = resp.json()
+    assert hold_data["ok"] is True
+    assert hold_data["record"]["state"] == "pending"
+    hold_token = hold_data["record"]["resume_token"]
+
+    # 7. GET /api/intervention/active/principal
+    resp = client.get("/api/intervention/active/principal")
+    assert resp.status_code == 200
+    assert resp.json()["record"]["resume_token"] == hold_token
+
+    # 8. POST /api/intervention/{token}/end (turn ended marks expired)
+    resp = client.post(f"/api/intervention/{hold_token}/end")
+    assert resp.status_code == 200
+    assert resp.json()["record"]["state"] == "expired"
+
+    # 9. Stale resolve after turn ended does NOT apply - returns expired
+    resp = client.post(f"/api/intervention/{hold_token}/resolve", json={"action": "approve"})
+    assert resp.status_code == 200
+    assert resp.json()["record"]["state"] == "expired"
+
+

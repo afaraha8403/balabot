@@ -15,6 +15,8 @@ import {IconWarning} from './icons';
 import {
   getComputerFrame,
   sendComputerAction,
+  resetComputer,
+  createRoutine,
   type Bot,
   type ComputerFrame,
 } from './api';
@@ -38,11 +40,17 @@ export function AgentComputerDialog({bot, onClose}: Props) {
   const [textValue, setTextValue] = useState('');
   const [keyValue, setKeyValue] = useState('');
   const [busy, setBusy] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetMessage, setResetMessage] = useState('');
+  const [showTeachTask, setShowTeachTask] = useState(false);
+  const [teachTitle, setTeachTitle] = useState('');
+  const [teachSchedule, setTeachSchedule] = useState('Daily');
+  const [teachSteps, setTeachSteps] = useState('');
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   const noDriver = frame?.state === 'no-driver';
   const isError = frame?.state === 'error';
-  const inputsEnabled = frame?.state === 'ready' && !busy;
+  const inputsEnabled = frame?.state === 'ready' && !busy && !isResetting;
 
   // Poll the frame endpoint only while open; clear on close.
   useEffect(() => {
@@ -89,6 +97,43 @@ export function AgentComputerDialog({bot, onClose}: Props) {
     [bot.id, inputsEnabled],
   );
 
+  const handleResetComputer = async () => {
+    setIsResetting(true);
+    setResetMessage('');
+    try {
+      const res = await resetComputer(bot.id);
+      if (res.ok) {
+        setResetMessage(res.message || 'Computer display session reset successfully.');
+        const fresh = await getComputerFrame(bot.id);
+        setFrame(fresh);
+      } else {
+        setError(res.message || 'Failed to reset computer session.');
+      }
+    } catch (err) {
+      setError(`Reset failed: ${(err as Error).message}`);
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const handleSaveTeachTask = async () => {
+    if (!teachTitle.trim()) return;
+    try {
+      await createRoutine(bot.id, {
+        title: teachTitle.trim(),
+        schedule: teachSchedule.trim(),
+        prompt: teachSteps.trim() || `Demonstrated workflow for ${teachTitle.trim()}`,
+        enabled: true,
+      });
+      setResetMessage(`Taught task saved as routine "${teachTitle.trim()}" for ${bot.name}.`);
+      setShowTeachTask(false);
+      setTeachTitle('');
+      setTeachSteps('');
+    } catch (err) {
+      setError(`Failed to save task: ${(err as Error).message}`);
+    }
+  };
+
   const onImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
     const img = imgRef.current;
     if (!img || !frame?.width || !frame.height) return;
@@ -114,6 +159,92 @@ export function AgentComputerDialog({bot, onClose}: Props) {
         onOpenChange={onClose}
       />
       <VStack gap={3} padding={4} height="fill">
+        {/* GrokBot Computer Actions Bar: Reset Controls & Teach a Task */}
+        <HStack gap={2} vAlign="center" justify="between" wrap="wrap">
+          <HStack gap={2} vAlign="center">
+            <Button
+              label={isResetting ? "Resetting…" : "Reset Computer"}
+              variant="secondary"
+              size="sm"
+              isLoading={isResetting}
+              onClick={() => void handleResetComputer()}
+            />
+            <Button
+              label="Refresh frame"
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                const f = await getComputerFrame(bot.id);
+                setFrame(f);
+              }}
+            />
+          </HStack>
+          <Button
+            label="Teach a task"
+            variant="primary"
+            size="sm"
+            aria-label="Teach a task"
+            onClick={() => setShowTeachTask(prev => !prev)}
+          />
+        </HStack>
+
+        {showTeachTask ? (
+          <Banner
+            status="info"
+            title={`Teach a task to ${bot.name} (Demonstration)`}
+            description="Notice: Real-time demonstration recording daemon (cua-driver record) is not active in this container runtime. Steps will be structured and saved as a routine until headless video recording is supported."
+            collapsible={false}
+          >
+            <VStack gap={2} paddingBlock={2}>
+              <TextInput
+                label="Task / Routine Name"
+                placeholder="e.g. Export weekly analytics report"
+                value={teachTitle}
+                onChange={setTeachTitle}
+                size="sm"
+              />
+              <TextInput
+                label="Schedule / Cadence"
+                placeholder="e.g. Weekly on Mondays at 9am"
+                value={teachSchedule}
+                onChange={setTeachSchedule}
+                size="sm"
+              />
+              <TextInput
+                label="Demonstrated Steps / Actions"
+                placeholder="1. Open browser 2. Navigate to dashboard 3. Click export"
+                value={teachSteps}
+                onChange={setTeachSteps}
+                size="sm"
+              />
+              <HStack gap={2}>
+                <Button
+                  label="Save as Routine"
+                  variant="primary"
+                  size="sm"
+                  isDisabled={!teachTitle.trim()}
+                  onClick={() => void handleSaveTeachTask()}
+                />
+                <Button
+                  label="Cancel"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowTeachTask(false)}
+                />
+              </HStack>
+            </VStack>
+          </Banner>
+        ) : null}
+
+        {resetMessage ? (
+          <Banner
+            status="success"
+            title="Computer Reset"
+            description={resetMessage}
+            collapsible={false}
+          />
+        ) : null}
+
         {noDriver ? (
           <Banner
             status="warning"

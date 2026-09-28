@@ -10,19 +10,35 @@ import {Token} from '@astryxdesign/core/Token';
 import {IconButton} from '@astryxdesign/core/IconButton';
 import {Button} from '@astryxdesign/core/Button';
 import {HStack} from '@astryxdesign/core/Stack';
-import {IconAttach, IconFile, IconMicrophone} from './icons';
-import {uploadAttachment, type Attachment, type Bot, type Group, type SkillEntry} from './api';
+import {Text} from '@astryxdesign/core/Text';
+import {IconAttach, IconClose, IconFile, IconMicrophone} from './icons';
+import {HoldEverythingControl} from './HoldEverythingControl';
+import {
+  uploadAttachment,
+  type Attachment,
+  type Bot,
+  type Group,
+  type SkillEntry,
+  type InterventionPayload,
+} from './api';
 
 type Props = {
   isStreaming: boolean;
-  onSubmit: (text: string, attachments: Attachment[]) => void;
+  onSubmit: (text: string, attachments: Attachment[], replyTo?: {sender: string; text: string}) => void;
   onStop: () => void;
   isDisabled?: boolean;
   botName?: string;
+  botId?: string;
   bots?: Bot[];
   groups?: Group[];
   skills?: SkillEntry[];
   onStartVoiceChat?: () => void;
+  replyingTo?: {sender: string; text: string} | null;
+  onCancelReply?: () => void;
+  activeIntervention?: InterventionPayload | null;
+  onInterventionChange?: (iv: InterventionPayload | null) => void;
+  onNotify?: (msg: string) => void;
+  onOpenComputer?: () => void;
 };
 
 export function Composer({
@@ -31,10 +47,17 @@ export function Composer({
   onStop,
   isDisabled,
   botName,
+  botId,
   bots = [],
   groups = [],
   skills = [],
   onStartVoiceChat,
+  replyingTo,
+  onCancelReply,
+  activeIntervention,
+  onInterventionChange,
+  onNotify,
+  onOpenComputer,
 }: Props) {
   const inputRef = useRef<ChatComposerInputHandle>(null);
   const [value, setValue] = useState('');
@@ -50,9 +73,10 @@ export function Composer({
   const submit = () => {
     const text = value.trim();
     if (!text || isDisabled) return;
-    onSubmit(text, attachments);
+    onSubmit(text, attachments, replyingTo ?? undefined);
     setValue('');
     setAttachments([]);
+    onCancelReply?.();
   };
 
   const addFiles = async (files: File[]) => {
@@ -118,6 +142,31 @@ export function Composer({
 
   return (
     <div onKeyDown={onKeyDown}>
+      {replyingTo ? (
+        <HStack
+          gap={2}
+          vAlign="center"
+          justify="between"
+          padding={2}
+          style={{
+            backgroundColor: 'var(--surface-sunken, rgba(255, 255, 255, 0.05))',
+            borderRadius: 'var(--radius-sm, 4px)',
+            marginBottom: '4px',
+            borderLeft: '3px solid var(--accent, #6366f1)',
+          }}
+        >
+          <Text type="supporting" size="xsm" color="accent">
+            Replying to {replyingTo.sender}: &ldquo;{replyingTo.text.slice(0, 60)}{replyingTo.text.length > 60 ? '…' : ''}&rdquo;
+          </Text>
+          <IconButton
+            label="Cancel reply"
+            size="sm"
+            variant="ghost"
+            icon={<IconClose />}
+            onClick={onCancelReply}
+          />
+        </HStack>
+      ) : null}
       <ChatComposer
         value={value}
         onChange={setValue}
@@ -149,29 +198,44 @@ export function Composer({
           ) : null
         }
         headerActions={
-          <HStack gap={1} vAlign="center">
-            <IconButton
-              label="Attach file"
-              size="sm"
-              variant="ghost"
-              icon={<IconAttach />}
-              onClick={() => {
-                const el = document.createElement('input');
-                el.type = 'file';
-                el.multiple = true;
-                el.onchange = () => {
-                  if (el.files) addFiles(Array.from(el.files));
-                };
-                el.click();
-              }}
-            />
-            {!value.trim() && onStartVoiceChat ? (
-              <Button
-                label="Start voice chat"
+          <HStack gap={1} vAlign="center" justify="between" width="100%">
+            <HStack gap={1} vAlign="center">
+              <IconButton
+                label="Attach file"
                 size="sm"
                 variant="ghost"
-                icon={<IconMicrophone />}
-                onClick={onStartVoiceChat}
+                icon={<IconAttach />}
+                onClick={() => {
+                  const el = document.createElement('input');
+                  el.type = 'file';
+                  el.multiple = true;
+                  el.onchange = () => {
+                    if (el.files) addFiles(Array.from(el.files));
+                  };
+                  el.click();
+                }}
+              />
+              {!value.trim() && onStartVoiceChat ? (
+                <Button
+                  label="Start voice chat"
+                  size="sm"
+                  variant="ghost"
+                  icon={<IconMicrophone />}
+                  onClick={onStartVoiceChat}
+                />
+              ) : null}
+            </HStack>
+
+            {botId && onInterventionChange && onNotify ? (
+              <HoldEverythingControl
+                botId={botId}
+                botName={botName || 'Bot'}
+                isStreaming={isStreaming}
+                onStopStreaming={onStop}
+                activeIntervention={activeIntervention ?? null}
+                onInterventionChange={onInterventionChange}
+                onNotify={onNotify}
+                onOpenComputer={onOpenComputer}
               />
             ) : null}
           </HStack>

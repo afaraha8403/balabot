@@ -9,6 +9,7 @@ export type Bot = {
   order: number;
   handle?: string;
   botId?: string;
+  category?: string;
 };
 
 /**
@@ -50,7 +51,24 @@ export type InterventionPayload = {
   hint?: string;
   url?: string;
   resume_token: string;
-  status?: 'pending' | 'approved' | 'denied';
+  status?: 'pending' | 'approved' | 'denied' | 'accepted' | 'rejected' | 'expired';
+  state?: 'pending' | 'accepted' | 'rejected' | 'expired';
+  requested_at?: string;
+  expires_at?: string;
+  resolved_at?: string;
+  resolved_by?: string;
+  owner_action?: string;
+  owner_note?: string;
+};
+
+export type Routine = {
+  id: string;
+  botId: string;
+  title: string;
+  schedule: string;
+  enabled: boolean;
+  lastRun: string;
+  prompt: string;
 };
 
 export type DraftCardData = {
@@ -88,6 +106,10 @@ export type ChatMessage = {
   drafts?: DraftCardData[];
   /** Voice memo replies sent by the bot. */
   voiceMemos?: VoiceMemoData[];
+  /** Emoji reactions on this message: emoji -> count. */
+  reactions?: Record<string, number>;
+  /** Reference to replied message if this message is a thread reply. */
+  replyTo?: {sender: string; text: string};
 };
 
 
@@ -576,11 +598,90 @@ export async function resolveIntervention(
   token: string,
   action: 'approve' | 'deny' = 'approve',
   note = '',
-): Promise<{ok: boolean; record: unknown}> {
+): Promise<{ok: boolean; record: InterventionPayload}> {
   return api(`/api/intervention/${encodeURIComponent(token)}/resolve`, {
     method: 'POST',
     body: JSON.stringify({action, note}),
   });
+}
+
+/** POST /api/intervention/pause — halt a running bot turn (GrokBot "Hold everything"). */
+export async function pauseBot(
+  botId: string,
+  reason = 'Owner requested hold',
+): Promise<{ok: boolean; record: InterventionPayload}> {
+  return api<{ok: boolean; record: InterventionPayload}>('/api/intervention/pause', {
+    method: 'POST',
+    body: JSON.stringify({bot_id: botId, reason}),
+  });
+}
+
+/** GET /api/intervention/active/{bot_id} — check if an intervention is pending for this bot. */
+export async function getActiveIntervention(
+  botId: string,
+): Promise<{ok: boolean; record: InterventionPayload | null}> {
+  return api<{ok: boolean; record: InterventionPayload | null}>(
+    `/api/intervention/active/${encodeURIComponent(botId)}`,
+  );
+}
+
+/** POST /api/intervention/{resume_token}/end — mark turn ended and expire intervention. */
+export async function endInterventionTurn(
+  token: string,
+): Promise<{ok: boolean; record: InterventionPayload}> {
+  return api<{ok: boolean; record: InterventionPayload}>(
+    `/api/intervention/${encodeURIComponent(token)}/end`,
+    {method: 'POST'},
+  );
+}
+
+/** POST /api/computer/{botId}/reset — reset agent computer display/session. */
+export async function resetComputer(
+  botId: string,
+): Promise<{available: boolean; ok: boolean; state: string; message?: string}> {
+  return api<{available: boolean; ok: boolean; state: string; message?: string}>(
+    `/api/computer/${encodeURIComponent(botId)}/reset`,
+    {method: 'POST'},
+  );
+}
+
+/** Routines API */
+export async function getRoutines(botId: string): Promise<{ok: boolean; routines: Routine[]}> {
+  return api<{ok: boolean; routines: Routine[]}>(`/api/bots/${encodeURIComponent(botId)}/routines`);
+}
+
+export async function createRoutine(
+  botId: string,
+  data: Partial<Routine>,
+): Promise<{ok: boolean; routine: Routine}> {
+  return api<{ok: boolean; routine: Routine}>(`/api/bots/${encodeURIComponent(botId)}/routines`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateRoutine(
+  botId: string,
+  routineId: string,
+  data: Partial<Routine>,
+): Promise<{ok: boolean; routine: Routine}> {
+  return api<{ok: boolean; routine: Routine}>(
+    `/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(routineId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    },
+  );
+}
+
+export async function deleteRoutine(
+  botId: string,
+  routineId: string,
+): Promise<{ok: boolean; deleted: boolean}> {
+  return api<{ok: boolean; deleted: boolean}>(
+    `/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(routineId)}`,
+    {method: 'DELETE'},
+  );
 }
 
 
