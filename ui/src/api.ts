@@ -24,6 +24,17 @@ export type ToolProgress = {
   status: 'pending' | 'running' | 'completed' | 'error';
 };
 
+/** Jev chat-path events (cache-safe carriers + stated degrades).
+ * A carrier is a USER-message ride ({carrier:'user_message', content, session_id})
+ * — the system prompt is never touched. `degraded` states WHY a signal is
+ * absent instead of shipping a silent empty success. */
+export type JevCarrier = {
+  carrier: 'user_message';
+  content: string;
+  session_id: string;
+};
+export type JevEvent = {degraded: boolean; reason: string};
+
 export type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -32,6 +43,9 @@ export type ChatMessage = {
   toolCalls?: ToolProgress[];
   /** The agent's private reasoning ("thinking") stream, kept separate from the answer. */
   thinking?: string;
+  /** Jev USER-message carriers (skill relevance / session resume) emitted while
+   * producing this message. Cache-safe: the system prompt is never touched. */
+  jevCarriers?: JevCarrier[];
 };
 
 export type Session = {
@@ -294,13 +308,20 @@ export async function streamChat(
   onToolEvent?: (t: ToolProgress) => void,
   /** Accumulated `delta.reasoning_content` ("thinking") text, if the model emits any. */
   onReasoning?: (accumulated: string) => void,
+  /** Jev skill-relevance / continuity resume carrier for this turn. */
+  onJevCarrier?: (c: JevCarrier) => void,
+  /** A stated Jev degrade: why no signal rode this turn. */
+  onJevEvent?: (e: JevEvent) => void,
+  /** The server-backed session id the turn runs under. */
+  sessionId?: string,
 ): Promise<string> {
   const res = await fetch('/api/chat', {
     method: 'POST',
     credentials: 'include',
     signal,
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({bot_id: botId, messages}),
+    body: JSON.stringify(sessionId ? {bot_id: botId, messages, session_id: sessionId}
+                                  : {bot_id: botId, messages}),
   });
   if (!res.ok || !res.body) throw new Error(`chat stream failed: ${res.status}`);
 

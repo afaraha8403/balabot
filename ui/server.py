@@ -490,6 +490,9 @@ import sys as _sys
 _sys.path.insert(0, str(ROOT))
 _sys.path.insert(0, str(ROOT.parent))
 from balabot import computer as _computer  # noqa: E402
+from balabot import skills_registry  # noqa: E402
+from balabot.jev import Jev  # noqa: E402
+from balabot.jev_prompt import SkillInjection  # noqa: E402
 
 
 def _computer_run(snippet: str, timeout: float = 30.0) -> dict:
@@ -1656,6 +1659,303 @@ async def bots_update(bot_id: str, request: Request):
 
 
 # ── the chat turn: SSE passthrough to the profile's OpenAI-compatible API ────
+# ── Jev chat-path wiring (cache-safe, honest degrade) ────────────────────────
+# HARD INVARIANT: the Hermes system prompt is BYTE-STABLE for the life of a
+# conversation. Skill-relevance + continuity signals therefore ride the LAST
+# USER MESSAGE as a <skill_relevance> carrier line (jev_prompt's carrier
+# shape, keys exactly {carrier, content, session_id}) — they NEVER touch the
+# system prompt. Every Jev failure DEGRADES HONESTLY: the turn proceeds with
+# an un-augmented message, and the degrade is STATED in the SSE stream as an
+# `event: jev` frame — never an empty success, never an exception into a turn.
+#
+# The Jev client is built once, lazily. A missing TYPESAFE_API_KEY is NOT an
+# error at chat time (the fail-open gates cover it) but it IS recorded so the
+# response can state why no signal was attached instead of silently shipping
+# none.
+_JEV_CHAT_CLIENT = None
+_JEV_CHAT_REASON = ""
+
+
+def _jev_chat_client() -> Any:
+    """Lazily constructed shared Jev client for the chat path. On any setup
+    failure returns None and names the reason (honest degrade, no raise)."""
+    global _JEV_CHAT_CLIENT, _JEV_CHAT_REASON
+    if _JEV_CHAT_CLIENT is not None:
+        return _JEV_CHAT_CLIENT
+    if _JEV_CHAT_REASON:
+        return None
+    try:
+        _JEV_CHAT_CLIENT = Jev()
+        return _JEV_CHAT_CLIENT
+    except Exception as exc:  # JevNotConfigured covers the missing-key case
+        _JEV_CHAT_REASON = (
+            f"Jev unavailable ({type(exc).__name__}: {exc}) - "
+            "turn proceeds without skill-relevance or routing signals"
+        )
+        return None
+
+
+def _session_store_blob(snippet: str, payload: dict) -> dict | None:
+    """One _org_run round-trip to the durable session store; None on failure.
+    The store is a REAL production dependency of the chat path now: purpose,
+    topic spans, resume state and decisions come from here — not decoration."""
+    res = _org_run(_wrap(snippet, True), payload=payload)
+    if not res.get("ok"):
+        return None
+    return res
+
+
+_SESSION_APPEND_SNIPPET = '''\
+from balabot.sessions import SessionStore, SessionError, UnknownSession
+out = {'session_id': payload['session_id']}
+try:
+    with SessionStore() as store:
+        if payload.get('topic'):
+            store.record_topic(payload['session_id'], payload['topic'])
+        resume = payload.get('resume_state')
+        if isinstance(resume, dict):
+            current = store.resume_state(payload['session_id'])
+            merged = dict(current)
+            merged.update(resume)
+            store.set_resume_state(payload['session_id'], merged)
+        for dec in payload.get('decisions') or []:
+            store.record_decision(payload['session_id'], dec['text'],
+                                  dec.get('provenance', 'jev-gate'),
+                                  at=dec.get('at') or '')
+except UnknownSession as exc:
+    out['ok'] = False
+    out['error'] = 'unknown_session'
+    out['detail'] = str(exc)
+    out['status'] = 404
+    raise SystemExit(0)
+except SessionError as exc:
+    out['ok'] = False
+    out['error'] = 'session_error'
+    out['detail'] = str(exc)
+    out['status'] = 503
+    raise SystemExit(0)
+print(json.dumps(out))
+'''
+
+
+def _chat_append_session_state(payload: dict) -> dict:
+    """Persist the turn's topic/resume/decisions into the durable store."""
+    return _org_run(_wrap(_SESSION_APPEND_SNIPPET, True), payload=payload)
+
+
+def _jev_prepare(profile: str, turn_text: str, session_id: str,
+                 messages: list, session_row: dict | None = None) -> dict:
+    """Everything the chat send path does with Jev + the session store,
+    synchronously, BEFORE the upstream stream opens. Returns:
+
+        {'carrier': {carrier, content, session_id} | None, 'jev_event': {...}|None,
+         'store': {...}|None, 'session': {...}|None}
+
+    Every failure degrades honestly: the carrier is dropped, a reason is
+    stated, and NO exception escapes into the turn. The system prompt is never
+    touched — the only output that reaches a message is a USER-message line.
+    """
+    out: dict = {"carrier": None, "jev_event": None, "store": None,
+                 "session": session_row}
+    jev = _jev_chat_client()
+    if jev is None:
+        out["jev_event"] = {"degraded": True,
+                            "reason": _JEV_CHAT_REASON or "Jev client unavailable"}
+        # Without Jev there is no gate, no selection, no routing: state it and
+        # return. The turn proceeds with the plain user text.
+        return out
+
+    from balabot.jev_depth import is_decision_worthy  # noqa: E402
+    from balabot.jev_prompt import inject, select_and_render  # noqa: E402
+
+    # 1. THE DECISION GATE over the user's turn. Fails OPEN with a stated
+    #    reason (a gate down never silently drops a decision).
+    decision = is_decision_worthy(turn_text, jev=jev)
+    if decision.failed_open and not out["jev_event"]:
+        # A gate that failed open is still a degrade: the decision is recorded
+        # (bloat is recoverable) but the stream must SAY the gate was down.
+        out["jev_event"] = {"degraded": True, "reason": decision.reason}
+    decisions: list[dict] = []
+    if decision.worthy:
+        decisions.append({
+            "text": turn_text,
+            "provenance": ("jev-gate-failed-open" if decision.failed_open
+                           else "jev-gate"),
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        })
+
+    # 2. SKILL SELECTION over the bot's real skills, rendered by
+    #    jev_depth.prompt_line via select_and_render, riding a USER message.
+    catalog: dict[str, str] = {}
+    catalog_error = ""
+    try:
+        rows = skills_registry.resolve(profile)
+        for row in rows or []:
+            name = str(row.get("name") or "")
+            if name:
+                catalog[name] = str(row.get("description") or "")
+    except Exception as exc:  # noqa: BLE001 - degrade honestly, never raise
+        catalog_error = f"skill catalog unavailable ({type(exc).__name__})"
+    injection = select_and_render(turn_text, catalog, jev=jev,
+                                  session_id=session_id)
+    if catalog_error and not injection.degraded:
+        injection = SkillInjection(selected=injection.selected,
+                                   line=injection.line,
+                                   requests_used=injection.requests_used,
+                                   degraded=True, reason=catalog_error)
+    out["carrier"] = inject(injection, session_id=session_id)
+
+    # 3. CONTEXT SIGNALS against the session's real purpose record (drift /
+    #    repetition judged by Jev; near-limit computed in code — never asked
+    #    of Jev). Near-limit is fed to the carrier line when it fires.
+    signal = None
+    if out["session"] is not None:
+        purpose = str(out["session"].get("purpose") or "")
+        past = [str(m.get("content") or "") for m in messages[:-1]
+                if isinstance(m, dict)]
+        try:
+            from balabot.jev_continuity import context_signals  # noqa: E402
+            signal = context_signals(
+                tokens_used=int(out["session"].get("next_seq") or 0) * 400,
+                token_limit=200_000, purpose_record=purpose,
+                current_turn=turn_text, past_turns=past, jev=jev)
+        except Exception as exc:  # noqa: BLE001
+            out["jev_event"] = {"degraded": True,
+                                "reason": f"context signals failed ({exc})"}
+        if signal is not None and signal.degraded and not out["jev_event"]:
+            out["jev_event"] = {"degraded": True, "reason": signal.reason}
+
+    # 4. PERSIST what this turn did to the session: topic span (the current
+    #    purpose is the coarse span key until per-turn topics exist), the
+    #    resume state, and any gate-admitted decisions. Store failure degrades
+    #    to a stated event; it never breaks the turn.
+    store_payload: dict = {"session_id": session_id}
+    if signal is not None and signal.drifted and purpose:
+        store_payload["topic"] = purpose
+    # Resume state is recorded on EVERY turn — "where the work currently
+    # stands" must survive a compaction that can hit right after this one.
+    store_payload["resume_state"] = {"last_turn": turn_text[:400]}
+    if out["session"] is not None:
+        store_payload["resume_state"]["last_seq"] = out["session"].get("next_seq")
+    if decisions:
+        store_payload["decisions"] = decisions
+    res = _chat_append_session_state(store_payload)
+    if res.get("ok"):
+        out["store"] = {"appended": True}
+    else:
+        out["store"] = {"appended": False,
+                        "error": res.get("error", "container_unreachable"),
+                        "reason": res.get("reason", res.get("detail", ""))}
+        if not out["jev_event"]:
+            out["jev_event"] = {"degraded": True,
+                                "reason": "session store unreachable - "
+                                          "topic/resume/decisions not recorded"}
+    return out
+
+
+def _prepare_chat_session(bot_id: str, turn_text: str) -> dict | None:
+    """NEW vs RESUME routing (three outcomes, never a binary) + the session
+    row the turn will run under. Uses route_session (balabot.jev_continuity)
+    over the bot's REAL server-backed sessions; on 'resume' the resumed
+    session is re-anchored from the durable store. Any failure returns None
+    and the turn falls back to the client's session id unchanged."""
+    if not container_ok():
+        return None
+    jev = _jev_chat_client()
+    listing = _session_store_blob(_SESSIONS_LIST_SNIPPET, {"bot_id": bot_id})
+    if listing is None:
+        return None
+    rows = listing.get("sessions") or []
+    now = time.time()
+    candidates = [{
+        "id": r.get("session_id", ""),
+        "bot_id": bot_id,
+        "summary": r.get("purpose", ""),
+        "text": "",
+        "last_active": now - 7 * 86400.0,
+    } for r in rows if r.get("session_id")]
+
+    route = None
+    if jev is not None and candidates:
+        from balabot.jev_continuity import route_session  # noqa: E402
+        route = route_session(turn_text, candidates, jev, bot_id=bot_id, now=now)
+    return {"rows": rows, "route": route}
+
+
+def _resume_carrier(session_id: str, bot_id: str) -> dict | None:
+    """Continuity RESUME carrier: re_anchor() over the durable store, stated
+    as a USER-message line. The session's mandate (purpose + spans +
+    decisions + resume state) re-enters the window from ground truth. The
+    system prompt is untouched."""
+    detail = _session_store_blob(_SESSIONS_GET_SNIPPET,
+                                 {"session_id": session_id, "bot_id": bot_id})
+    if detail is None:
+        return None
+    s = detail.get("session") or {}
+    purpose = s.get("purpose") or ""
+    # Accept both the snake_case store shape and the camelCase shape the
+    # /api/sessions/{id} route maps to, so the carrier works against either.
+    spans_list = s.get("topic_spans") or s.get("topicSpans") or []
+    decisions_list = s.get("decisions") or []
+    resume_map = s.get("resume_state")
+    if not isinstance(resume_map, dict):
+        resume_map = s.get("resumeState") or {}
+    spans = "; ".join(
+        f"{sp.get('topic')}: msgs {sp.get('start_seq')}-{sp.get('end_seq')}"
+        for sp in spans_list)
+    decisions = "; ".join(
+        str(d.get("text") or "") for d in decisions_list[-3:])
+    resume = json.dumps(resume_map or {}, sort_keys=True)[:400]
+    parts = ["<session_resume>",
+             f"Purpose: {purpose}"]
+    if spans:
+        parts.append(f"Topic spans: {spans}")
+    if decisions:
+        parts.append(f"Recent decisions: {decisions}")
+    if resume and resume != "{}":
+        parts.append(f"Resume state: {resume}")
+    parts.append("</session_resume>")
+    return {"carrier": "user_message", "content": "\n".join(parts),
+            "session_id": session_id}
+
+
+def _carrier_dict(carrier) -> dict:
+    """Accept either the InjectionCarrier dataclass (jev_prompt.inject's
+    return type) or an already-plain dict; return the plain 3-key dict."""
+    if hasattr(carrier, "carrier") and hasattr(carrier, "content") \
+            and hasattr(carrier, "session_id"):
+        return {"carrier": carrier.carrier, "content": carrier.content,
+                "session_id": carrier.session_id}
+    return carrier
+
+
+def _carrier_frames(state: dict) -> list[str]:
+    """Serialize the prepared Jev state for the SSE stream: at most one
+    user-message carrier line, one continuity resume line, and ONE stated
+    degrade event. Frames follow the existing `event: <name>` grammar."""
+    frames: list[str] = []
+    for key in ("carrier", "resume_carrier"):
+        raw = state.get(key)
+        if raw is None:
+            continue
+        carrier = _carrier_dict(raw)
+        if not (isinstance(carrier, dict) and carrier.get("content")):
+            continue
+        if set(carrier) != {"carrier", "content", "session_id"}:
+            raise ValueError("carrier must have exactly the keys "
+                             "{carrier, content, session_id}")
+        if carrier["carrier"] != "user_message":
+            raise ValueError(
+                f"unsupported carrier {carrier['carrier']!r}: mid-conversation "
+                "injection may only ride a user message (the system prompt "
+                "stays byte-stable for prefix caching)")
+        frames.append(f"event: jev_carrier\ndata: {json.dumps(carrier)}\n\n")
+    event = state.get("jev_event")
+    if isinstance(event, dict) and event.get("degraded"):
+        frames.append(f"event: jev\ndata: {json.dumps(event)}\n\n")
+    return frames
+
+
 @app.post("/api/chat")
 async def chat(request: Request):
     body = await request.json()
@@ -1667,6 +1967,46 @@ async def chat(request: Request):
     if profile not in _all_bot_meta():
         raise HTTPException(status_code=404, detail=f"unknown bot {profile}")
     messages = body.get("messages") or []
+    session_id = str(body.get("session_id") or "").strip()
+    turn_text = next((str(m.get("content") or "") for m in reversed(messages)
+                      if isinstance(m, dict) and m.get("role") == "user"),
+                     "")
+
+    # Jev + durable session-store preparation happens BEFORE the upstream
+    # stream opens. Every path below degrades honestly: a failure drops the
+    # signal and says so; it never mutates the system prompt, never raises
+    # into the turn, and never returns a silently empty success.
+    jev_state: dict = {}
+    try:
+
+        if session_id and turn_text:
+            routed = _prepare_chat_session(profile, turn_text)
+            session_row = None
+            if routed is not None:
+                route = routed.get("route")
+                session_row = next(
+                    (r for r in (routed.get("rows") or [])
+                     if r.get("session_id") == session_id), None)
+            jev_state = _jev_prepare(profile, turn_text, session_id, messages,
+                                     session_row=session_row)
+            if routed is not None:
+                route = routed.get("route")
+                if route is not None and route.outcome == "resume" \
+                        and route.candidate_id:
+                    # The RESUME route: the resumed session is re-anchored from
+                    # the durable store and rides the user message.
+                    resume = _resume_carrier(route.candidate_id, profile)
+                    if resume is not None:
+                        jev_state["resume_carrier"] = resume
+            carrier_frames = _carrier_frames(jev_state)
+        else:
+            carrier_frames = []
+    except Exception as exc:  # noqa: BLE001 - degrade honestly, never raise
+        reason = f"jev preparation failed ({type(exc).__name__}: {exc})"
+        carrier_frames = ["event: jev\ndata: " +
+                          json.dumps({"degraded": True, "reason": reason}) +
+                          "\n\n"]
+
     url = f"{UPSTREAM}/p/{profile}/v1/chat/completions"
     payload = {"model": profile, "messages": messages, "stream": True}
     headers = {"Authorization": f"Bearer {API_KEY}",
@@ -1674,6 +2014,10 @@ async def chat(request: Request):
 
     async def stream():
         try:
+            # Jev state frames FIRST, so the carrier line precedes the model's
+            # stream: they are visible, stated events in the transcript.
+            for frame in carrier_frames:
+                yield frame
             # Pending org requests for this profile are emitted FIRST, as
             # server-side SSE frames in the same grammar as `event: handoff`.
             # Metadata only (name/description/requestedBy) — a secret value can

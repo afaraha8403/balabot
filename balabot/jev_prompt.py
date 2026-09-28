@@ -36,7 +36,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from .jev import Jev, JevError
-from .jev_depth import MAX_REQUESTS_PER_TURN, PROMPT_LINE_TAG, select_skills
+from .jev_depth import (
+    MAX_REQUESTS_PER_TURN,
+    PROMPT_LINE_TAG,
+    prompt_line as _depth_prompt_line,
+    select_skills,
+)
 
 __all__ = ["SkillInjection", "InjectionCarrier", "select_and_render", "inject"]
 
@@ -191,10 +196,12 @@ def select_and_render(
 
 
 def _render_line(selected: list[str]) -> str:
-    """Single-line render; never an empty tag pair (nothing -> '')."""
+    """Single-line render, delegated to jev_depth.prompt_line itself — this is
+    that function's production call site: the rendering the chat path ships IS
+    jev_depth's renderer, not a second copy of it. Never an empty tag pair."""
     if not selected:
         return ""
-    return f"<{PROMPT_LINE_TAG}>Relevant to the current request: {', '.join(selected)}</{PROMPT_LINE_TAG}>"
+    return _depth_prompt_line(selected, "")
 
 
 def inject(

@@ -58,7 +58,7 @@ import {DecisionsScreen} from './screens/DecisionsScreen';
 import {GovernanceScreen} from './screens/GovernanceScreen';
 import {OpsScreen} from './screens/OpsScreen';
 import {CostScreen} from './screens/CostScreen';
-import {api, streamChat, checkHealth, getFleet, getSubAgents, getSessions, getServerSession, createServerSession, deleteServerSession, type Bot, type ChatMessage, type Handoff, type Session, type SecretCard, type SubAgent, type ToolProgress, type SessionsResponse} from './api';
+import {api, streamChat, checkHealth, getFleet, getSubAgents, getSessions, getServerSession, createServerSession, deleteServerSession, type Bot, type ChatMessage, type Handoff, type JevCarrier, type Session, type SecretCard, type SubAgent, type ToolProgress, type SessionsResponse} from './api';
 import {
   IconAgentComputer,
   IconAgents,
@@ -176,6 +176,9 @@ export default function App() {
   const thinkingRef = useRef('');
   const toolCallsRef = useRef<ToolProgress[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  // Jev USER-message carriers emitted during THIS turn's stream. Cleared at
+  // send, collected during streaming, attached to the final assistant message.
+  const jevCarriersRef = useRef<JevCarrier[]>([]);
 
   // Astryx's responsive contract: above 1024px the third region (the rosters and
   // detail panels) has room; below it, it is dropped rather than squeezed, and
@@ -354,6 +357,7 @@ export default function App() {
     thinkingRef.current = '';
     setToolCalls([]);
     toolCallsRef.current = [];
+    jevCarriersRef.current = [];
     setIsStreaming(true);
 
     const controller = new AbortController();
@@ -395,6 +399,16 @@ export default function App() {
           thinkingRef.current = r;
           setStreamThinking(r);
         },
+        (c: JevCarrier) => {
+          // Jev's cache-safe carrier: a USER-message ride rendered as a
+          // signal row in the transcript. The system prompt is never touched.
+          jevCarriersRef.current = [...jevCarriersRef.current, c];
+        },
+        e => {
+          // A stated Jev degrade — why no signal rode this turn. Never silent.
+          setBanner(`Jev (degraded): ${e.reason}`);
+        },
+        session.id,
       );
       const finalMsg: ChatMessage = {
         role: 'assistant',
@@ -402,6 +416,7 @@ export default function App() {
         at: Date.now(),
         toolCalls: toolCallsRef.current.length ? toolCallsRef.current : undefined,
         thinking: thinkingRef.current || undefined,
+        jevCarriers: jevCarriersRef.current.length ? jevCarriersRef.current : undefined,
       };
       patchSession(session.id, s => ({...s, messages: [...s.messages, finalMsg]}));
     } catch (err) {
