@@ -29,7 +29,9 @@ $BALABOT_DASHBOARD_PASSWORD. Never logged.
 """
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import os
 import pathlib
 import re
@@ -563,13 +565,24 @@ def _attachments_dir() -> pathlib.Path:
     return d
 
 
+ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024  # 10 MiB limit per Polaris specification
+
+
 @app.post("/api/attachments")
 async def upload_attachment(request: Request):
-    """Store an uploaded file attachment and return its URL and server path."""
-    import base64
+    """Store an uploaded file attachment with strict 10 MiB size limit and safe decoding."""
     content_type = request.headers.get("content-type", "")
     attachments_dir = _attachments_dir()
     file_id = f"att_{int(time.time() * 1000):x}_{uuid.uuid4().hex[:6]}"
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            # Quick check: if content-length is definitely way over 10 MiB
+            if int(content_length) > ATTACHMENT_MAX_BYTES * 2:
+                raise HTTPException(status_code=413, detail="attachment exceeds 10 MiB limit")
+        except ValueError:
+            pass
 
     if "multipart/form-data" in content_type:
         form = await request.form()
@@ -580,7 +593,20 @@ async def upload_attachment(request: Request):
         safe_name = re.sub(r"[^\w\-.]", "_", pathlib.Path(filename).name)
         dest_filename = f"{file_id}_{safe_name}"
         dest_path = attachments_dir / dest_filename
-        data = await upload_file.read()
+
+        chunk_size = 64 * 1024
+        chunks = []
+        total_read = 0
+        while True:
+            chunk = await upload_file.read(chunk_size)
+            if not chunk:
+                break
+            total_read += len(chunk)
+            if total_read > ATTACHMENT_MAX_BYTES:
+                raise HTTPException(status_code=413, detail="attachment exceeds 10 MiB limit")
+            chunks.append(chunk)
+
+        data = b"".join(chunks)
         dest_path.write_bytes(data)
         size = len(data)
         mime = getattr(upload_file, "content_type", "application/octet-stream")
@@ -591,10 +617,23 @@ async def upload_attachment(request: Request):
         dest_filename = f"{file_id}_{safe_name}"
         dest_path = attachments_dir / dest_filename
         raw_b64 = body.get("content") or ""
-        try:
-            data = base64.b64decode(raw_b64)
-        except Exception:
-            data = raw_b64.encode("utf-8")
+        if isinstance(raw_b64, str):
+            if "," in raw_b64 and raw_b64.startswith("data:"):
+                raw_b64 = raw_b64.split(",", 1)[1]
+            if len(raw_b64) > ATTACHMENT_MAX_BYTES * 2:
+                raise HTTPException(status_code=413, detail="attachment exceeds 10 MiB limit")
+            try:
+                data = base64.b64decode(raw_b64, validate=True)
+            except Exception:
+                data = raw_b64.encode("utf-8")
+        elif isinstance(raw_b64, bytes):
+            data = raw_b64
+        else:
+            data = b""
+
+        if len(data) > ATTACHMENT_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="attachment exceeds 10 MiB limit")
+
         dest_path.write_bytes(data)
         size = len(data)
         mime = body.get("mime_type") or "application/octet-stream"
@@ -2488,17 +2527,77 @@ async def chat(request: Request):
                       if isinstance(m, dict) and m.get("role") == "user"),
                      "")
 
+    IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
     attachments = body.get("attachments") or []
     if attachments:
         att_lines = []
+        image_parts = []
         for att in attachments:
             name = att.get("name", "file")
             p = att.get("path") or att.get("url") or ""
-            att_lines.append(f"- {name} ({p})")
-        att_block = "\n\n[Attached files:\n" + "\n".join(att_lines) + "\n]"
+            mime = (att.get("mime_type") or att.get("mime") or "").lower()
+            if not mime:
+                mime, _ = mimetypes.guess_type(name)
+                mime = (mime or "application/octet-stream").lower()
+
+            if mime in IMAGE_MIMES:
+                b64_str = None
+                if att.get("content") and isinstance(att["content"], str):
+                    raw_c = att["content"]
+                    if "," in raw_c and raw_c.startswith("data:"):
+                        b64_str = raw_c.split(",", 1)[1]
+                    else:
+                        b64_str = raw_c
+                elif att.get("path") and pathlib.Path(att["path"]).is_file():
+                    try:
+                        b64_str = base64.b64encode(pathlib.Path(att["path"]).read_bytes()).decode("ascii")
+                    except OSError:
+                        pass
+                elif att.get("url") and "/api/attachments/" in att["url"]:
+                    url_parts = att["url"].split("/api/attachments/", 1)[1].split("/")
+                    if len(url_parts) >= 2:
+                        file_id, safe_name = url_parts[0], url_parts[1]
+                        cand = _attachments_dir() / f"{file_id}_{safe_name}"
+                        if cand.is_file():
+                            try:
+                                b64_str = base64.b64encode(cand.read_bytes()).decode("ascii")
+                            except OSError:
+                                pass
+
+                if b64_str:
+                    data_url = f"data:{mime};base64,{b64_str}"
+                    image_parts.append({
+                        "type": "image_url",
+                        "image_url": {"url": data_url},
+                    })
+                else:
+                    att_lines.append(f"- {name} ({p})")
+            else:
+                att_lines.append(f"- {name} ({p})")
+
         for m in reversed(messages):
             if isinstance(m, dict) and m.get("role") == "user":
-                m["content"] = str(m.get("content") or "") + att_block
+                orig_content = m.get("content")
+                if image_parts:
+                    text_content = ""
+                    if isinstance(orig_content, list):
+                        text_parts = [part.get("text", "") for part in orig_content
+                                      if isinstance(part, dict) and part.get("type") == "text"]
+                        text_content = " ".join(text_parts)
+                    elif isinstance(orig_content, str):
+                        text_content = orig_content
+                    if att_lines:
+                        att_block = "\n\n[Attached files:\n" + "\n".join(att_lines) + "\n]"
+                        text_content += att_block
+                    parts = []
+                    if text_content:
+                        parts.append({"type": "text", "text": text_content})
+                    parts.extend(image_parts)
+                    m["content"] = parts
+                else:
+                    if att_lines:
+                        att_block = "\n\n[Attached files:\n" + "\n".join(att_lines) + "\n]"
+                        m["content"] = str(orig_content or "") + att_block
                 break
 
     # Frustration sensor (balabot.growth Layer 1 + 2) -> governor ledger
