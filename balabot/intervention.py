@@ -63,9 +63,12 @@ separated by a blank line):
 from __future__ import annotations
 
 import json
+import os
 import secrets
+import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 __all__ = [
     "InterventionError",
@@ -75,6 +78,7 @@ __all__ = [
     "state",
     "end_turn",
     "active_for_bot",
+    "list_interventions",
     "format_intervention_frame",
     "enqueue_intervention",
     "drain_intervention_frames",
@@ -131,12 +135,101 @@ def _check_bot(bot_id: str) -> str:
     return bot
 
 
-# In-process records: token → record. The parent process owns the pause
-# lifecycle, so per-process storage matches the handoffs queue model.
+# Storage: durable SQLite database backed by BALABOT_INTERVENTIONS_DB
+# (default: <BALABOT_DATA_ROOT>/interventions/interventions.db), with in-memory
+# cache for compatibility with test fixtures.
 _records: dict[str, dict] = {}
-# Queued `event: intervention` frames per bot profile, drained by that bot's
-# next /api/chat stream.
 _pending_frames: dict[str, list[str]] = {}
+
+
+def _db_path() -> Path:
+    env = os.environ.get("BALABOT_INTERVENTIONS_DB")
+    if env:
+        return Path(env)
+    root = os.environ.get("BALABOT_DATA_ROOT", "/opt/data")
+    return Path(root) / "interventions" / "interventions.db"
+
+
+def _get_conn() -> sqlite3.Connection:
+    p = _db_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(p), timeout=30.0)
+    conn.row_factory = sqlite3.Row
+    with conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS interventions (
+                resume_token TEXT PRIMARY KEY,
+                bot          TEXT NOT NULL,
+                reason       TEXT NOT NULL,
+                hint         TEXT NOT NULL DEFAULT '',
+                url          TEXT NOT NULL DEFAULT '',
+                state        TEXT NOT NULL DEFAULT 'pending',
+                requested_at TEXT NOT NULL,
+                expires_at   TEXT NOT NULL,
+                turn_ended   INTEGER NOT NULL DEFAULT 0,
+                resolved_by  TEXT,
+                resolved_at  TEXT,
+                owner_action TEXT,
+                owner_note   TEXT DEFAULT ''
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS intervention_frames (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                bot          TEXT NOT NULL,
+                frame        TEXT NOT NULL,
+                enqueued_at  TEXT NOT NULL,
+                delivered_at TEXT
+            );
+        """)
+    return conn
+
+
+def _row_to_record(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["turn_ended"] = bool(d.get("turn_ended", 0))
+    d["hint"] = d.get("hint") or ""
+    d["url"] = d.get("url") or ""
+    d["owner_note"] = d.get("owner_note") or ""
+    return d
+
+
+def _db_save_record(record: dict) -> None:
+    try:
+        with _get_conn() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO interventions (
+                    resume_token, bot, reason, hint, url, state, requested_at,
+                    expires_at, turn_ended, resolved_by, resolved_at, owner_action, owner_note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                record["resume_token"], record["bot"], record["reason"], record.get("hint", ""),
+                record.get("url", ""), record["state"], record["requested_at"], record["expires_at"],
+                1 if record.get("turn_ended") else 0, record.get("resolved_by"),
+                record.get("resolved_at"), record.get("owner_action"), record.get("owner_note", "")
+            ))
+    except Exception:
+        pass
+
+
+def _db_get_record(token: str) -> dict | None:
+    try:
+        with _get_conn() as conn:
+            row = conn.execute("SELECT * FROM interventions WHERE resume_token = ?", (token,)).fetchone()
+            if row is not None:
+                return _row_to_record(row)
+    except Exception:
+        pass
+    return None
+
+
+def _db_list_records() -> list[dict]:
+    try:
+        with _get_conn() as conn:
+            rows = conn.execute("SELECT * FROM interventions ORDER BY requested_at DESC").fetchall()
+            return [_row_to_record(r) for r in rows]
+    except Exception:
+        return []
 
 
 def request_intervention(bot_id: str, reason: str, hint: str = "",
@@ -169,7 +262,8 @@ def request_intervention(bot_id: str, reason: str, hint: str = "",
         # otherwise; once ended, the intervention can never be applied.
         "turn_ended": False,
     }
-    _records[token] = record
+    _records[token] = dict(record)
+    _db_save_record(record)
     return dict(record)
 
 
@@ -180,10 +274,15 @@ def state(token: str, *, now: datetime | None = None) -> dict:
     so a poll after the timeout always reports `expired` explicitly.
     `now` is injectable so callers (and tests) can reason at a fixed time.
     """
-    record = _records.get(_clean(token, "resume_token"))
+    clean_tok = _clean(token, "resume_token")
+    record = _db_get_record(clean_tok)
+    if record is None:
+        record = _records.get(clean_tok)
     if record is None:
         raise InterventionError("unknown intervention token")
     record = _tick(record, now)
+    _records[clean_tok] = dict(record)
+    _db_save_record(record)
     return dict(record)
 
 
@@ -202,7 +301,10 @@ def end_turn(token: str, *, now: datetime | None = None) -> dict:
     """The parent marks the targeted turn as ENDED (finished, errored, or
     aborted). Any pending intervention for that turn becomes explicitly
     expired — never applied — because the moment it targeted is gone."""
-    record = _records.get(_clean(token, "resume_token"))
+    clean_tok = _clean(token, "resume_token")
+    record = _db_get_record(clean_tok)
+    if record is None:
+        record = _records.get(clean_tok)
     if record is None:
         raise InterventionError("unknown intervention token")
     record["turn_ended"] = True
@@ -210,6 +312,8 @@ def end_turn(token: str, *, now: datetime | None = None) -> dict:
         record["state"] = "expired"
         if now is not None:
             record["expires_at"] = _iso(now)  # honest: it lapsed right now
+    _records[clean_tok] = dict(record)
+    _db_save_record(record)
     return dict(record)
 
 
@@ -235,23 +339,32 @@ def resolve_intervention(token: str, action: str, note: str = "",
     if action not in _ACTIONS:
         raise InterventionError(
             f"action must be one of {sorted(_ACTIONS)}, got {action!r}")
-    record = _records.get(_clean(token, "resume_token"))
+    clean_tok = _clean(token, "resume_token")
+    record = _db_get_record(clean_tok)
+    if record is None:
+        record = _records.get(clean_tok)
     if record is None:
         raise InterventionError("unknown intervention token")
     record = _tick(record, now)
     if record["state"] != "pending":
         # Stale: return the honest decided state — never apply over it.
+        _records[clean_tok] = dict(record)
+        _db_save_record(record)
         return dict(record)
     if record["turn_ended"]:
         # Belt-and-braces: end_turn already expired it, but if it was
         # re-opened somehow the turn boundary still wins.
         record["state"] = "expired"
+        _records[clean_tok] = dict(record)
+        _db_save_record(record)
         return dict(record)
     record["state"] = "accepted" if action == "approve" else "rejected"
     record["resolved_by"] = "owner"
     record["resolved_at"] = _iso(now or _now())
     record["owner_action"] = action
     record["owner_note"] = _clean(note, "note")
+    _records[clean_tok] = dict(record)
+    _db_save_record(record)
     return dict(record)
 
 
@@ -259,13 +372,35 @@ def active_for_bot(bot_id: str, *, now: datetime | None = None) -> dict | None:
     """The pending intervention a bot is paused on, if any (post-expiry tick).
     The bot's paused turn resumes when this is None or state != pending."""
     bot = _check_bot(bot_id)
-    for token in list(_records):
-        record = _records.get(token)
+    all_recs = _db_list_records()
+    seen = {r["resume_token"] for r in all_recs}
+    for tok, r in list(_records.items()):
+        if tok not in seen:
+            all_recs.append(r)
+    for record in all_recs:
         if record and record["bot"] == bot:
             record = _tick(record, now)
-            if record["state"] == "pending":
+            _db_save_record(record)
+            _records[record["resume_token"]] = dict(record)
+            if record["state"] == "pending" and not record.get("turn_ended"):
                 return dict(record)
     return None
+
+
+def list_interventions(*, now: datetime | None = None) -> list[dict]:
+    """All interventions in the store, ticked against expiry."""
+    all_recs = _db_list_records()
+    seen = {r["resume_token"] for r in all_recs}
+    for tok, r in list(_records.items()):
+        if tok not in seen:
+            all_recs.append(r)
+    out = []
+    for record in all_recs:
+        record = _tick(record, now)
+        _db_save_record(record)
+        _records[record["resume_token"]] = dict(record)
+        out.append(dict(record))
+    return out
 
 
 def what_the_bot_was_told(token: str, *, now: datetime | None = None) -> dict:
@@ -304,6 +439,14 @@ def enqueue_intervention(record: dict) -> str:
     so the UI sees 'needs you' the moment it connects. Returns the frame."""
     frame = format_intervention_frame(record)
     _pending_frames.setdefault(record["bot"], []).append(frame)
+    try:
+        with _get_conn() as conn:
+            conn.execute("""
+                INSERT INTO intervention_frames (bot, frame, enqueued_at, delivered_at)
+                VALUES (?, ?, ?, NULL)
+            """, (record["bot"], frame, _iso(_now())))
+    except Exception:
+        pass
     return frame
 
 
@@ -319,9 +462,36 @@ def drain_intervention_frames(profile: str) -> list[str]:
         for frame in drain_intervention_frames(profile):
             yield frame
     """
-    return _pending_frames.pop(profile, [])
+    mem_frames = _pending_frames.pop(profile, [])
+    db_frames = []
+    try:
+        with _get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, frame FROM intervention_frames WHERE bot = ? AND delivered_at IS NULL ORDER BY id ASC",
+                (profile,)
+            ).fetchall()
+            now_iso = _iso(_now())
+            for r in rows:
+                conn.execute("UPDATE intervention_frames SET delivered_at = ? WHERE id = ?", (now_iso, r["id"]))
+                db_frames.append(r["frame"])
+    except Exception:
+        pass
+    if db_frames:
+        return db_frames
+    return mem_frames
 
 
 def pending_intervention_count(profile: str) -> int:
     """Test/diagnostic peek — frames queued for `profile`."""
+    try:
+        with _get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM intervention_frames WHERE bot = ? AND delivered_at IS NULL",
+                (profile,)
+            ).fetchone()
+            if row and row[0] > 0:
+                return int(row[0])
+    except Exception:
+        pass
     return len(_pending_frames.get(profile, []))
+

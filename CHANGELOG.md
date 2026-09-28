@@ -36,6 +36,7 @@
 - Implement and wire attachments intake: `POST /api/attachments` upload, `GET /api/attachments/{id}/{name}`, Composer UI upload handling, and `/api/chat` context delivery.
 
 ### Fixes
+- Persist intervention records and frames in durable SQLite store and block in `request_intervention`: intervention state and frames were previously kept in ephemeral in-memory dictionaries that were lost upon CLI subprocess exit without pausing the agent turn; records and frames now persist to SQLite (`BALABOT_INTERVENTIONS_DB`), `/api/interventions` reads durable state, and `request_intervention` blocks in a polling wait-loop until human resolution or timeout.
 - Enable Agent Computer endpoints for dynamic fleet bots: `/api/computer/{bot_id}/frame`, `/action`, and `/reset` previously validated against hardcoded `PROFILES = ["principal", "governor"]`, returning an unavailable error for user-created bots; they now validate against the dynamic fleet helper `_all_bot_meta()` shared across the server.
 - Inject queued in-flight messages into upstream chat completions payload in `/api/chat`: messages enqueued during active turns were drained into SSE frames but omitted from `messages` sent to the model, dropping user input sent while an agent was busy.
 - Update `ThinkingBlock` and `ThinkingOrb` components to dynamically track active theme mode rather than pinning dark styling.

@@ -31,9 +31,11 @@ T0 = datetime.now(timezone.utc).replace(microsecond=0)
 
 
 @pytest.fixture(autouse=True)
-def _isolated_store(monkeypatch):
-    """Fresh record/frame stores per test — the module keeps in-process state."""
+def _isolated_store(monkeypatch, tmp_path):
+    """Fresh record/frame stores per test."""
     from balabot import intervention as iv
+    monkeypatch.setenv("BALABOT_INTERVENTIONS_DB", str(tmp_path / "interventions.db"))
+    monkeypatch.setenv("BALABOT_DATA_ROOT", str(tmp_path))
     monkeypatch.setattr(iv, "_records", {})
     monkeypatch.setattr(iv, "_pending_frames", {})
 
@@ -240,7 +242,7 @@ def test_enqueue_and_drain_per_profile():
 
 def test_bot_tools_request_intervention():
     from balabot import bot_tools
-    out = bot_tools.request_intervention("principal", "captcha wall", hint="select cats")
+    out = bot_tools.request_intervention("principal", "captcha wall", hint="select cats", wait=False)
     assert out["requested"] is True
     assert out["bot"] == "principal"
     assert out["reason"] == "captcha wall"
@@ -252,7 +254,7 @@ def test_bot_tools_request_intervention_cli(capsys):
     from balabot import bot_tools
     rc = bot_tools.main([
         "request_intervention", "--bot", "principal",
-        "--reason", "login needed", "--hint", "2fa code"
+        "--reason", "login needed", "--hint", "2fa code", "--no-wait"
     ])
     assert rc == 0
     captured = capsys.readouterr()
@@ -260,6 +262,27 @@ def test_bot_tools_request_intervention_cli(capsys):
     assert payload["requested"] is True
     assert payload["bot"] == "principal"
     assert payload["reason"] == "login needed"
+
+
+def test_bot_tools_request_intervention_waits_and_resolves():
+    import threading
+    import time
+    from balabot import bot_tools, intervention
+
+    def resolve_later():
+        time.sleep(0.1)
+        active = intervention.active_for_bot("worker_wait")
+        if active:
+            intervention.resolve_intervention(active["resume_token"], "approve", note="unblocked", by="owner")
+
+    t = threading.Thread(target=resolve_later)
+    t.start()
+    out = bot_tools.request_intervention("worker_wait", "captcha wall", timeout=5, poll_interval=0.05)
+    t.join()
+    assert out["requested"] is True
+    assert out["state"] == "accepted"
+    assert out["resolved"] is True
+    assert out["note"] == "unblocked"
 
 
 def test_intervention_http_routes(monkeypatch):
@@ -323,5 +346,63 @@ def test_intervention_http_routes(monkeypatch):
     resp = client.post(f"/api/intervention/{hold_token}/resolve", json={"action": "approve"})
     assert resp.status_code == 200
     assert resp.json()["record"]["state"] == "expired"
+
+
+def test_cli_subprocess_persists_and_waits_for_resolution(tmp_path, monkeypatch):
+    import json
+    import os
+    import subprocess
+    import sys
+    import time
+    from fastapi.testclient import TestClient
+    from ui import server
+
+    db_path = tmp_path / "interventions.db"
+    env = dict(os.environ, BALABOT_INTERVENTIONS_DB=str(db_path), BALABOT_DATA_ROOT=str(tmp_path))
+    monkeypatch.setenv("BALABOT_INTERVENTIONS_DB", str(db_path))
+    monkeypatch.setenv("BALABOT_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(server, "DASHBOARD_PASSWORD", "pw")
+
+    # Start CLI in a separate subprocess
+    cmd = [
+        sys.executable, "-m", "balabot.bot_tools",
+        "request_intervention", "--bot", "principal",
+        "--reason", "captcha wall", "--hint", "solve puzzle",
+        "--timeout", "10",
+    ]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+
+    # Wait for the subprocess to write the intervention record into persistent storage
+    client = TestClient(server.app)
+    client.headers.update({"Authorization": "Basic YWxpOnB3"})
+    interventions = []
+    for _ in range(50):
+        resp = client.get("/api/interventions")
+        assert resp.status_code == 200
+        interventions = resp.json().get("interventions", [])
+        if interventions:
+            break
+        time.sleep(0.1)
+
+    # 1. The subprocess must be running (blocking/waiting) and not exited prematurely
+    assert len(interventions) >= 1, "Intervention record not visible to host process"
+    assert proc.poll() is None, "CLI subprocess exited prematurely without waiting for human intervention"
+
+    target = interventions[0]
+    token = target["resume_token"]
+
+    # 2. Resolve the intervention via the server API
+    resolve_resp = client.post(f"/api/intervention/{token}/resolve", json={"action": "approve", "note": "captcha solved"})
+    assert resolve_resp.status_code == 200
+
+    # 3. The subprocess should now unblock, exit 0, and output the resolved record
+    stdout, stderr = proc.communicate(timeout=5)
+    assert proc.returncode == 0
+    payload = json.loads(stdout)
+    assert payload["state"] == "accepted"
+    assert payload["outcome"] == "accepted"
+    assert payload["resolved"] is True
+    assert payload["note"] == "captcha solved"
+
 
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -362,20 +363,47 @@ def message_agent(from_bot: str, to_bot: str, message: str, **kwargs) -> dict:
 
 
 def request_intervention(bot_id: str, reason: str, hint: str = "",
-                         url: str = "", timeout: float = 120.0) -> dict:
+                         url: str = "", timeout: float = 120.0,
+                         wait: bool = True, poll_interval: float = 0.25) -> dict:
     """A bot asks for human intervention (captcha, login, 2FA) and pauses its turn."""
     _require_str(bot_id, "bot_id")
     _require_str(reason, "reason")
-    from balabot.intervention import enqueue_intervention, request_intervention as _req_iv
+    from balabot.intervention import (
+        enqueue_intervention,
+        request_intervention as _req_iv,
+        state as _iv_state,
+        what_the_bot_was_told as _what_told,
+    )
     rec = _req_iv(bot_id=bot_id, reason=reason, hint=hint, url=url, timeout=timeout)
     enqueue_intervention(rec)
+    token = rec["resume_token"]
+
+    cur_state = rec
+    if wait and timeout > 0:
+        deadline = time.time() + float(timeout)
+        while time.time() < deadline:
+            cur_state = _iv_state(token)
+            if cur_state["state"] in ("accepted", "rejected", "expired"):
+                break
+            time.sleep(poll_interval)
+        else:
+            cur_state = _iv_state(token)
+    else:
+        cur_state = _iv_state(token)
+
+    told = _what_told(token)
     return {
         "requested": True,
-        "resume_token": rec["resume_token"],
+        "resume_token": token,
         "bot": rec["bot"],
         "reason": rec["reason"],
-        "state": rec["state"],
-        "expires_at": rec["expires_at"],
+        "hint": rec.get("hint", ""),
+        "url": rec.get("url", ""),
+        "state": cur_state["state"],
+        "resolved": told.get("resolved", cur_state["state"] in ("accepted", "expired")),
+        "outcome": cur_state["state"],
+        "note": told.get("note", cur_state.get("owner_note", "")),
+        "expires_at": cur_state["expires_at"],
     }
 
 
@@ -510,7 +538,7 @@ def main(argv: list[str] | None = None) -> int:
         "request_secret_access": ["--bot", "--name", "--reason"],
         "list_org_skills": ["--bot"],
         "message_agent": ["--from", "--to", "--message"],
-        "request_intervention": ["--bot", "--reason", "--hint", "--url"],
+        "request_intervention": ["--bot", "--reason", "--hint", "--url", "--timeout", "--no-wait"],
         "list_pending_requests": ["--bot"],
         "record_growth_audit": ["--action", "--target", "--description", "--author", "--patch", "--bot"],
         "rollback_growth_audit": ["--change-id", "--reason", "--bot"],
@@ -567,7 +595,19 @@ def main(argv: list[str] | None = None) -> int:
             bot, reason = _opt("--bot"), _opt("--reason")
             if not (bot and reason):
                 raise ValueError("request_intervention needs --bot, --reason")
-            _json_out(request_intervention(bot, reason, hint=_opt("--hint", ""), url=_opt("--url", "")))
+            timeout_str = _opt("--timeout", "120.0")
+            try:
+                timeout = float(timeout_str)
+            except ValueError:
+                timeout = 120.0
+            wait = "--no-wait" not in args
+            _json_out(request_intervention(
+                bot, reason,
+                hint=_opt("--hint", ""),
+                url=_opt("--url", ""),
+                timeout=timeout,
+                wait=wait,
+            ))
             return 0
         if tool == "list_pending_requests":
             _json_out(list_pending_requests(_opt("--bot")))
@@ -612,7 +652,7 @@ def main(argv: list[str] | None = None) -> int:
           "request_secret_access --bot B --name N --reason R | "
           "list_org_skills --bot B | "
           "message_agent --from B --to B --message M | "
-          "request_intervention --bot B --reason R [--hint H] [--url U] | "
+          "request_intervention --bot B --reason R [--hint H] [--url U] [--timeout T] [--no-wait] | "
           "list_pending_requests [--bot B] | "
           "record_growth_audit --action A --target T --description D [--author AU] [--patch P] [--bot B] | "
           "rollback_growth_audit --change-id ID [--reason R] [--bot B] | "

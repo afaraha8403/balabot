@@ -727,14 +727,8 @@ async def computer_reset(bot_id: str):
 # Bot pauses turn and requests help -> owner resolves via POST -> turn resumes.
 @app.get("/api/interventions")
 def list_interventions():
-    from balabot.intervention import _records, state as iv_state
-    out = []
-    for token in list(_records):
-        try:
-            out.append(iv_state(token))
-        except Exception:
-            pass
-    return {"ok": True, "interventions": out}
+    from balabot.intervention import list_interventions as iv_list
+    return {"ok": True, "interventions": iv_list()}
 
 
 @app.get("/api/intervention/{resume_token}")
