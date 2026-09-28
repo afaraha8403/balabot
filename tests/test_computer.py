@@ -221,3 +221,55 @@ def test_reset_runs_probe(monkeypatch):
     assert out["state"] == "ready"
     assert "principal" in out["message"]
 
+
+def test_computer_endpoints_support_dynamic_fleet(monkeypatch):
+    from fastapi.testclient import TestClient
+    from ui import server
+
+    monkeypatch.setattr(server, "DASHBOARD_PASSWORD", "pw")
+    meta = {
+        "principal": {"name": "Principal"},
+        "governor": {"name": "Governor"},
+        "scout": {"name": "Scout", "title": "Scout Bot"},
+    }
+    monkeypatch.setattr(server, "_all_bot_meta", lambda: meta)
+
+    calls = []
+
+    def fake_computer_run(cmd, timeout=30.0):
+        calls.append(cmd)
+        return {
+            "ok": True,
+            "state": "ready",
+            "b64": "fake",
+            "width": 100,
+            "height": 100,
+            "capturedAt": "now",
+            "mime": "image/png",
+            "message": "reset ok",
+        }
+
+    monkeypatch.setattr(server, "_computer_run", fake_computer_run)
+
+    client = TestClient(server.app)
+    client.headers.update({"Authorization": "Basic YWxpOnB3"})
+
+    # 1. GET /api/computer/scout/frame
+    resp = client.get("/api/computer/scout/frame")
+    assert resp.status_code == 200
+    assert resp.json().get("reason") != "no bot named 'scout' in this fleet"
+    assert resp.json().get("available") is True
+
+    # 2. POST /api/computer/scout/action
+    resp = client.post("/api/computer/scout/action", json={"action": "click", "x": 10, "y": 10})
+    assert resp.status_code == 200
+    assert resp.json().get("reason") != "no bot named 'scout' in this fleet"
+    assert resp.json().get("available") is True
+
+    # 3. POST /api/computer/scout/reset
+    resp = client.post("/api/computer/scout/reset")
+    assert resp.status_code == 200
+    assert resp.json().get("reason") != "no bot named 'scout' in this fleet"
+    assert resp.json().get("available") is True
+
+

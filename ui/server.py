@@ -665,7 +665,7 @@ def _computer_run(snippet: str, timeout: float = 30.0) -> dict:
 
 @app.get("/api/computer/{bot_id}/frame")
 def computer_frame(bot_id: str):
-    if bot_id not in PROFILES:
+    if bot_id not in _all_bot_meta():
         return unavailable(f"no bot named {bot_id!r} in this fleet")
     res = _computer_run(
         "import json\n"
@@ -685,7 +685,7 @@ def computer_frame(bot_id: str):
 
 @app.post("/api/computer/{bot_id}/action")
 async def computer_action(bot_id: str, request: Request):
-    if bot_id not in PROFILES:
+    if bot_id not in _all_bot_meta():
         return unavailable(f"no bot named {bot_id!r} in this fleet")
     try:
         payload = await request.json()
@@ -708,7 +708,7 @@ async def computer_action(bot_id: str, request: Request):
 
 @app.post("/api/computer/{bot_id}/reset")
 async def computer_reset(bot_id: str):
-    if bot_id not in PROFILES:
+    if bot_id not in _all_bot_meta():
         return unavailable(f"no bot named {bot_id!r} in this fleet")
     res = _computer_run(
         "import json\n"
