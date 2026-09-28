@@ -1162,8 +1162,8 @@ export default function App() {
                 paddingInline={3}
                 paddingBlock={2}
                 style={{
-                  borderBottom: '1px solid var(--border-default, rgba(255, 255, 255, 0.1))',
-                  backgroundColor: 'var(--surface-default, #121214)',
+                  borderBottom: '1px solid var(--border)',
+                  backgroundColor: 'var(--card)',
                 }}
               >
                 <HStack gap={2} vAlign="center">
@@ -1618,9 +1618,9 @@ export default function App() {
                       padding: '8px',
                       fontFamily: 'inherit',
                       fontSize: '13px',
-                      backgroundColor: 'var(--surface-sunken, rgba(255, 255, 255, 0.05))',
+                      backgroundColor: 'var(--muted)',
                       color: 'inherit',
-                      border: '1px solid var(--border-default, rgba(255, 255, 255, 0.15))',
+                      border: '1px solid var(--border)',
                       borderRadius: 'var(--radius-md, 6px)',
                       resize: 'vertical',
                     }}

@@ -12,23 +12,28 @@ export const balabotTheme = defineTheme({
   },
   radius: {base: 4, multiplier: 1.5},
   tokens: {
-    // Near-black X/Grok surfaces (dark mode values used in both modes).
-    '--color-background-body': ['#000000', '#000000'],
-    '--color-background-surface': ['#16181c', '#16181c'],
-    '--color-background-card': ['#202327', '#202327'],
-    '--color-background-popover': ['#202327', '#202327'],
-    '--color-background-muted': ['#20232766', '#20232766'],
-    '--color-text-primary': ['#ffffff', '#ffffff'],
-    '--color-text-secondary': ['#71767b', '#71767b'],
-    '--color-border': ['#2a2a2a', '#2a2a2a'],
-    '--color-border-emphasized': ['#3e4144', '#3e4144'],
+    // Astryx token pairs are [light, dark] and follow data-theme. Both entries
+    // used to be the dark value, so Astryx-styled components stayed near-black in
+    // light mode while our tokens.css layer switched — half-themed UI. The light
+    // entries below mirror the light values in tokens.css so both layers agree.
+    '--color-background-body': ['#fafaf8', '#000000'],
+    '--color-background-surface': ['#ecece9', '#16181c'],
+    '--color-background-card': ['#ffffff', '#202327'],
+    '--color-background-popover': ['#ffffff', '#202327'],
+    '--color-background-muted': ['#f0f0ed', '#20232766'],
+    '--color-text-primary': ['#1a1a1a', '#ffffff'],
+    '--color-text-secondary': ['#6c6c70', '#71767b'],
+    '--color-border': ['#e8e8e4', '#2a2a2a'],
+    '--color-border-emphasized': ['#d8d8d2', '#3e4144'],
+    // Overlays stay dark in both modes: they are scrims over content.
     '--color-overlay': ['#00000066', '#00000066'],
-    '--color-overlay-hover': ['#ffffff0c', '#ffffff0c'],
-    '--color-overlay-pressed': ['#ffffff19', '#ffffff19'],
+    '--color-overlay-hover': ['#0000000c', '#ffffff0c'],
+    '--color-overlay-pressed': ['#00000019', '#ffffff19'],
     '--color-accent': ['#1d9bf0', '#1d9bf0'],
     '--color-on-accent': ['#000000', '#000000'],
-    // Primary button: white bg, black text.
-    '--color-background-inverted': ['#ffffff', '#ffffff'],
+    // Primary button inverts against the page: white-on-black in dark mode,
+    // near-black-on-cream in light. Its label reads the body background token.
+    '--color-background-inverted': ['#111111', '#ffffff'],
   },
   components: {
     'chat-message-bubble': {

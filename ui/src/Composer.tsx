@@ -158,7 +158,7 @@ export function Composer({
           justify="between"
           padding={2}
           style={{
-            backgroundColor: 'var(--surface-sunken, rgba(255, 255, 255, 0.05))',
+            backgroundColor: 'var(--muted)',
             borderRadius: 'var(--radius-sm, 4px)',
             marginBottom: '4px',
             borderLeft: '3px solid var(--accent, #6366f1)',
