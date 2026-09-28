@@ -118,6 +118,19 @@ CHECKPOINT_PROVIDER_READY = True
 #: The provider directory seeded into $HERMES_HOME/plugins/ at every boot.
 MEMORY_PLUGIN_DIRNAME = "balabot-jev"
 
+#: Agent-facing plugins (system-prompt sections / hooks, not memory providers)
+#: vendored under the repo's hermes/plugins/ and seeded into every profile home
+#: at boot, for the same reason as the memory provider: /opt/data is a named
+#: volume, so a straight COPY into it is shadowed at runtime, and a persona's
+#: agent resolves plugins from ITS OWN home only.
+#:
+#: 'texting-style' is the natural-register doctrine (short, human, SMS-style
+#: replies). Both persona config templates already listed it under
+#: plugins.enabled — but the image never shipped it, so the setting was a
+#: silent no-op and the bots answered like ops daemons. Declared intent with no
+#: artifact is exactly the 'modules called from nowhere' defect class.
+AGENT_PLUGIN_DIRNAMES = ("texting-style",)
+
 #: The unprivileged user the agents run as inside the shipped container. The
 #: checkpoint store is written by the AGENT, so anything provisioning creates as
 #: root must be handed to this user or the agent cannot checkpoint at all.
@@ -177,6 +190,24 @@ def _force_deltas(cfg: dict[str, Any], workspace: Path, name: str) -> None:
     cfg.setdefault("telegram", {})
     # Empty, always. Never clone a sibling token into a profile.
     cfg["telegram"]["bot_token"] = ""
+
+    # Agent-facing plugins. Seeding the files is not enough: the profile must
+    # enable them, and texting-style's default gate (bot_chat_only=true) covers
+    # only the Desktop's canonical session titled "Bot Chat" — BalaBot chats are
+    # api_server sessions, so the doctrine must apply everywhere or it silently
+    # does nothing on the very surface the owner uses. That silent no-op is why
+    # a one-word "Hey" got a system-status audit.
+    cfg.setdefault("plugins", {})
+    _enabled = cfg["plugins"].setdefault("enabled", [])
+    for _dirname in AGENT_PLUGIN_DIRNAMES:
+        if _dirname not in _enabled:
+            _enabled.append(_dirname)
+        _entry = cfg["plugins"].setdefault("entries", {}).setdefault(_dirname, {})
+        _entry["enabled"] = True
+        _settings = _entry.setdefault("settings", {})
+        _settings.setdefault("enabled", True)
+        if _dirname == "texting-style":
+            _settings["bot_chat_only"] = False
 
     # Secret delivery — reuse Hermes' own extension point rather than inventing
     # a parallel path. The helper reads the org registry, filters by THIS bot's
@@ -538,6 +569,39 @@ def install_memory_plugin(hermes_home: Path | None = None) -> list[str]:
     return actions
 
 
+def install_agent_plugins(hermes_home: Path | None = None) -> list[str]:
+    """Seed BalaBot's agent-facing plugins into every profile home that runs one.
+
+    Same volume/shadowing and per-profile-resolution reasoning as
+    :func:`install_memory_plugin`: a persona's agent loads plugins from
+    ``<root>/profiles/<name>/plugins/``, so a root-only seed is invisible to the
+    agents it is for. Re-seeds each boot so an image upgrade takes effect.
+    """
+    home = hermes_home or _hermes_home()
+    actions: list[str] = []
+    for dirname in AGENT_PLUGIN_DIRNAMES:
+        source = _repo_root() / "hermes" / "plugins" / dirname
+        if not source.is_dir():
+            raise BootstrapError(
+                f"agent plugin source missing: {source} (expected the repo's "
+                f"hermes/plugins/{dirname}/)"
+            )
+        targets = [home / "plugins" / dirname]
+        profiles_dir = home / "profiles"
+        if profiles_dir.is_dir():
+            for child in sorted(profiles_dir.iterdir()):
+                if child.is_dir() and (child / "config.yaml").exists():
+                    targets.append(child / "plugins" / dirname)
+        for target in targets:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(source, target,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            actions.append(f"seeded agent plugin '{dirname}' -> {target}")
+    return actions
+
+
 def _normalize_store_ownership() -> list[str]:
     """Best-effort chown of the durable paths to the user the agents run as.
 
@@ -623,6 +687,7 @@ def run_bootstrap() -> list[dict[str, Any]]:
     # memory.provider names a directory, and an absent provider is a hard
     # activation failure at agent start.
     plugin_actions = install_memory_plugin()
+    plugin_actions += install_agent_plugins()
     plugin_actions += _normalize_store_ownership()
     # The default org exists BEFORE personas are provisioned: a persona is a
     # member of it, and the org layer 404s on every secret route without it.

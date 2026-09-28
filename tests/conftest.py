@@ -92,6 +92,18 @@ def fake_repo(tmp_path):
     plugin.mkdir(parents=True)
     (plugin / "__init__.py").write_text(
         "# MemoryProvider checkpoint provider (fixture)\n", encoding="utf-8")
+    # Agent-facing plugins are fatal-if-absent for the same reason: a persona
+    # config that enables a plugin the image never shipped is a silent no-op —
+    # which is exactly how the bots shipped without their texting voice while
+    # config.yaml said `plugins.enabled: [texting-style]`.
+    for dirname in bootstrap_mod.AGENT_PLUGIN_DIRNAMES:
+        aplugin = root / "hermes" / "plugins" / dirname
+        aplugin.mkdir(parents=True)
+        (aplugin / "plugin.yaml").write_text(
+            f"manifest_version: 2\napi_version: 1\nname: {dirname}\n",
+            encoding="utf-8")
+        (aplugin / "__init__.py").write_text(
+            "# agent plugin (fixture)\n", encoding="utf-8")
     return root
 
 
