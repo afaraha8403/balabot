@@ -241,3 +241,134 @@ def test_messages_fail_loud_on_unknown_session(db):
     """P1-2: Attempting to record messages for a nonexistent session raises UnknownSession."""
     with pytest.raises(UnknownSession):
         db.record_message("nonexistent_session", "user", "hello")
+
+
+def test_all_product_durable_stores_report_wal_journal_mode(tmp_path, monkeypatch):
+    """Gap 4: Every SQLite database created and owned by the product must be in WAL journal mode."""
+    import sqlite3
+    import importlib.util
+    from pathlib import Path
+    from balabot.sessions import SessionStore
+    from balabot.queueing import MessageQueue
+    from balabot import handoffs, intervention
+
+    monkeypatch.setenv("BALABOT_DATA_ROOT", str(tmp_path))
+
+    # 1. Continuity store (transcripts, purpose, spans)
+    cont_path = tmp_path / "sessions" / "continuity.db"
+    store = SessionStore(cont_path)
+    store.close()
+    with sqlite3.connect(str(cont_path)) as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0].lower()
+        assert mode == "wal", f"SessionStore at {cont_path} journal_mode must be wal, got {mode}"
+
+    # 2. Per-session message queue store
+    queue_path = tmp_path / "queue" / "queue.db"
+    q_store = MessageQueue(queue_path)
+    q_store.close()
+    with sqlite3.connect(str(queue_path)) as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0].lower()
+        assert mode == "wal", f"QueueStore at {queue_path} journal_mode must be wal, got {mode}"
+
+    # 3. Inter-bot handoffs store
+    handoffs_db = tmp_path / "handoffs" / "handoffs.db"
+    handoffs.enqueue_handoff("bot_a", "bot_b", "summary")
+    with sqlite3.connect(str(handoffs_db)) as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0].lower()
+        assert mode == "wal", f"Handoffs store at {handoffs_db} journal_mode must be wal, got {mode}"
+
+    # 4. Human intervention pause/resolve store
+    iv_db = tmp_path / "interventions" / "interventions.db"
+    monkeypatch.setenv("BALABOT_INTERVENTIONS_DB", str(iv_db))
+    intervention.request_intervention("worker_wal", "need help")
+    with sqlite3.connect(str(iv_db)) as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0].lower()
+        assert mode == "wal", f"Interventions store at {iv_db} journal_mode must be wal, got {mode}"
+
+    # 5. Balabot-Jev memory plugin store (continuity.db scoped under hermes_home)
+    plugin_checkpoint = Path(__file__).resolve().parent.parent / "hermes" / "plugins" / "balabot-jev" / "checkpoint.py"
+    spec = importlib.util.spec_from_file_location("balabot_jev_checkpoint_wal_test", str(plugin_checkpoint))
+    plugin_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(plugin_mod)
+    jev_home = tmp_path / "profiles" / "principal"
+    jev_adapter = plugin_mod.load_sessions_store(str(jev_home))
+    jev_adapter.raw.close()
+    jev_db = jev_home / "memory" / "balabot-jev" / "continuity.db"
+    assert jev_db.exists()
+    with sqlite3.connect(str(jev_db)) as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0].lower()
+        assert mode == "wal", f"balabot-jev store at {jev_db} journal_mode must be wal, got {mode}"
+
+
+def test_durable_stores_backup_and_integrity_check(tmp_path, monkeypatch):
+    """Gap 4: Every durable store must support online backup and integrity check."""
+    import sqlite3
+    from balabot.sessions import SessionStore, backup_sessions_db, verify_sessions_integrity
+    from balabot.queueing import MessageQueue, backup_queue_db, verify_queue_integrity
+    from balabot.handoffs import enqueue_handoff, backup_handoffs_db, verify_handoffs_integrity
+    from balabot.intervention import request_intervention, backup_interventions_db, verify_interventions_integrity
+
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("BALABOT_DATA_ROOT", str(data_root))
+
+    # 1. Sessions store
+    cont_db = data_root / "sessions" / "continuity.db"
+    monkeypatch.setenv("BALABOT_CONTINUITY_DB", str(cont_db))
+    with SessionStore(cont_db) as store:
+        store.create_session("sess_1", "bot_1", "testing backups")
+        store.record_message("sess_1", "user", "hello backup")
+        assert store.integrity_check() is True
+
+    backup_cont = tmp_path / "cont_backup.db"
+    backup_sessions_db(backup_cont)
+    assert backup_cont.exists()
+    assert verify_sessions_integrity() is True
+    with sqlite3.connect(str(backup_cont)) as conn:
+        rows = conn.execute("PRAGMA integrity_check").fetchall()
+        assert rows == [("ok",)]
+        msg_count = conn.execute("SELECT count(*) FROM messages").fetchone()[0]
+        assert msg_count == 1
+
+    # 2. Queue store
+    q_db = data_root / "sessions" / "queue.db"
+    monkeypatch.setenv("BALABOT_QUEUE_DB", str(q_db))
+    q = MessageQueue(q_db)
+    q.enqueue("sess_1", "queued message")
+    assert q.integrity_check() is True
+    q.close()
+
+    backup_q = tmp_path / "q_backup.db"
+    backup_queue_db(backup_q)
+    assert backup_q.exists()
+    assert verify_queue_integrity() is True
+    with sqlite3.connect(str(backup_q)) as conn:
+        rows = conn.execute("PRAGMA integrity_check").fetchall()
+        assert rows == [("ok",)]
+        q_count = conn.execute("SELECT count(*) FROM queue_messages").fetchone()[0]
+        assert q_count == 1
+
+    # 3. Handoffs store
+    h_db = data_root / "handoffs" / "handoffs.db"
+    monkeypatch.setenv("BALABOT_HANDOFFS_DB", str(h_db))
+    enqueue_handoff("bot_a", "bot_b", "summary")
+    assert verify_handoffs_integrity() is True
+
+    backup_h = tmp_path / "h_backup.db"
+    backup_handoffs_db(backup_h)
+    assert backup_h.exists()
+    with sqlite3.connect(str(backup_h)) as conn:
+        rows = conn.execute("PRAGMA integrity_check").fetchall()
+        assert rows == [("ok",)]
+
+    # 4. Interventions store
+    iv_db = data_root / "interventions" / "interventions.db"
+    monkeypatch.setenv("BALABOT_INTERVENTIONS_DB", str(iv_db))
+    request_intervention("worker_b", "intervention backup test")
+    assert verify_interventions_integrity() is True
+
+    backup_iv = tmp_path / "iv_backup.db"
+    backup_interventions_db(backup_iv)
+    assert backup_iv.exists()
+    with sqlite3.connect(str(backup_iv)) as conn:
+        rows = conn.execute("PRAGMA integrity_check").fetchall()
+        assert rows == [("ok",)]

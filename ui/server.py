@@ -2860,6 +2860,7 @@ import json, os, sqlite3
 from balabot.sessions import DEFAULT_DB_PATH
 db = os.environ.get('BALABOT_CONTINUITY_DB', DEFAULT_DB_PATH)
 conn = sqlite3.connect(db)
+conn.execute("PRAGMA journal_mode = WAL")
 cur = conn.execute('DELETE FROM sessions WHERE session_id = ?',
                    (payload['session_id'],))
 spans = conn.execute('DELETE FROM topic_spans WHERE session_id = ?',
@@ -2928,6 +2929,7 @@ if not sets:
                       'status': 400}))
     raise SystemExit(0)
 conn = sqlite3.connect(db)
+conn.execute("PRAGMA journal_mode = WAL")
 args.append(payload['session_id'])
 cur = conn.execute('UPDATE sessions SET ' + ', '.join(sets) +
                    ' WHERE session_id = ?', args)

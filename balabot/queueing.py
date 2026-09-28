@@ -57,6 +57,8 @@ __all__ = [
     "QueueStoreUnavailable",
     "UnknownSession",
     "MessageQueue",
+    "backup_queue_db",
+    "verify_queue_integrity",
 ]
 
 DEFAULT_DB_PATH = "/opt/data/sessions/queue.db"
@@ -119,6 +121,23 @@ class MessageQueue:
 
     def close(self) -> None:
         self._conn.close()
+
+    def backup(self, dest_path: str | Path) -> Path:
+        """Create an online, consistent backup of the queue database.
+
+        Uses SQLite's online backup API, which safely copies pages even
+        while concurrent WAL writes or readers are active.
+        """
+        dest = Path(dest_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(str(dest)) as dest_conn:
+            self._conn.backup(dest_conn)
+        return dest
+
+    def integrity_check(self) -> bool:
+        """Verify SQLite database integrity via PRAGMA integrity_check."""
+        rows = self._conn.execute("PRAGMA integrity_check").fetchall()
+        return len(rows) == 1 and rows[0][0].lower() == "ok"
 
     # ── turn state ────────────────────────────────────────────────────────
 
@@ -276,3 +295,61 @@ class MessageQueue:
     def _row_to_dict(row) -> dict:
         return {"message_id": row[0], "session_id": row[1], "content": row[2],
                 "enqueued_at": row[3], "seq": row[4], "delivered_at": row[5]}
+
+
+# ----------------------------------------------------------------------
+# Backup, Restore, and Integrity Verification
+# ----------------------------------------------------------------------
+# Restore drill:
+#   1. Stop balabot / worker processes.
+#   2. Remove existing journal/wal files if replacing DB:
+#      rm -f /opt/data/sessions/queue.db-wal /opt/data/sessions/queue.db-shm
+#   3. Copy backup file over existing store:
+#      cp /path/to/backup.db /opt/data/sessions/queue.db
+#   4. Verify integrity:
+#      python -m balabot.queueing verify
+#   5. Start services.
+
+
+def backup_queue_db(dest_path: str | Path | None = None) -> Path:
+    """Create an online, consistent backup of the queue database."""
+    db_path = _env_db_path()
+    if dest_path is None:
+        now_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        target = db_path.parent / f"queue_backup_{now_ts}.db"
+    else:
+        target = Path(dest_path)
+    q = MessageQueue(db_path)
+    try:
+        return q.backup(target)
+    finally:
+        q.close()
+
+
+def verify_queue_integrity() -> bool:
+    """Verify queue database integrity via PRAGMA integrity_check."""
+    db_path = _env_db_path()
+    if not db_path.exists():
+        return True
+    q = MessageQueue(db_path)
+    try:
+        return q.integrity_check()
+    finally:
+        q.close()
+
+
+if __name__ == "__main__":
+    import sys
+    import json
+    argv = sys.argv[1:]
+    if argv[:1] == ["backup"]:
+        dest = argv[1] if len(argv) > 1 else None
+        p = backup_queue_db(dest)
+        print(json.dumps({"ok": True, "backup_path": str(p)}, indent=2))
+        sys.exit(0)
+    if argv[:1] == ["verify"]:
+        ok = verify_queue_integrity()
+        print(json.dumps({"ok": ok, "status": "ok" if ok else "corrupt"}, indent=2))
+        sys.exit(0 if ok else 1)
+    print("usage: python -m balabot.queueing backup [dest] | verify", file=sys.stderr)
+    sys.exit(2)

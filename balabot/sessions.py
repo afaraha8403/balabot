@@ -61,6 +61,8 @@ __all__ = [
     "SessionError",
     "UnknownSession",
     "SessionStore",
+    "backup_sessions_db",
+    "verify_sessions_integrity",
 ]
 
 DEFAULT_DB_PATH = "/opt/data/sessions/continuity.db"
@@ -123,12 +125,33 @@ class SessionStore:
         self._path = Path(db_path) if db_path is not None else _env_db_path()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path))
+        self._conn.execute("PRAGMA journal_mode = WAL")
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
+
+    def backup(self, dest_path: str | Path) -> Path:
+        """Create an online, consistent backup of the sessions database.
+
+        Uses SQLite's online backup API, which safely copies pages even
+        while concurrent WAL writes or readers are active.
+        """
+        dest = Path(dest_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(str(dest)) as dest_conn:
+            self._conn.backup(dest_conn)
+        return dest
+
+    def integrity_check(self) -> bool:
+        """Verify SQLite database integrity via PRAGMA integrity_check.
+
+        Returns True if the check returns 'ok', False otherwise.
+        """
+        rows = self._conn.execute("PRAGMA integrity_check").fetchall()
+        return len(rows) == 1 and rows[0][0].lower() == "ok"
 
     def __enter__(self) -> "SessionStore":
         return self
@@ -426,3 +449,58 @@ class SessionStore:
             (session_id,),
         ).fetchone()
         return (row[0], row[1]) if row is not None else None
+
+
+# ----------------------------------------------------------------------
+# Backup, Restore, and Integrity Verification
+# ----------------------------------------------------------------------
+# Restore drill:
+#   1. Stop balabot / worker processes writing to continuity.db.
+#   2. Remove existing journal/wal files if replacing DB:
+#      rm -f /opt/data/sessions/continuity.db-wal /opt/data/sessions/continuity.db-shm
+#   3. Copy backup file over existing store:
+#      cp /path/to/backup.db /opt/data/sessions/continuity.db
+#   4. Verify integrity:
+#      python -m balabot.sessions verify
+#   5. Start services.
+
+
+def backup_sessions_db(dest_path: str | Path | None = None) -> Path:
+    """Create an online, consistent backup of the sessions database.
+
+    Uses SQLite's online backup API (VACUUM INTO / conn.backup), ensuring
+    consistent point-in-time snapshot without taking the database offline.
+    """
+    db_path = _env_db_path()
+    if dest_path is None:
+        now_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        target = db_path.parent / f"continuity_backup_{now_ts}.db"
+    else:
+        target = Path(dest_path)
+    with SessionStore(db_path) as store:
+        return store.backup(target)
+
+
+def verify_sessions_integrity() -> bool:
+    """Verify continuity database integrity via PRAGMA integrity_check."""
+    db_path = _env_db_path()
+    if not db_path.exists():
+        return True
+    with SessionStore(db_path) as store:
+        return store.integrity_check()
+
+
+if __name__ == "__main__":
+    import sys
+    argv = sys.argv[1:]
+    if argv[:1] == ["backup"]:
+        dest = argv[1] if len(argv) > 1 else None
+        p = backup_sessions_db(dest)
+        print(json.dumps({"ok": True, "backup_path": str(p)}, indent=2))
+        sys.exit(0)
+    if argv[:1] == ["verify"]:
+        ok = verify_sessions_integrity()
+        print(json.dumps({"ok": ok, "status": "ok" if ok else "corrupt"}, indent=2))
+        sys.exit(0 if ok else 1)
+    print("usage: python -m balabot.sessions backup [dest] | verify", file=sys.stderr)
+    sys.exit(2)

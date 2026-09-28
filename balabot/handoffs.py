@@ -40,6 +40,8 @@ __all__ = [
     "enqueue_handoff",
     "drain_handoff_frames",
     "pending_handoff_count",
+    "backup_handoffs_db",
+    "verify_handoffs_integrity",
 ]
 
 
@@ -96,6 +98,7 @@ def _get_conn() -> sqlite3.Connection | None:
         p = _db_path()
         p.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(p), timeout=30.0)
+        conn.execute("PRAGMA journal_mode = WAL")
         with conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS handoff_frames (
@@ -184,3 +187,68 @@ def pending_handoff_count(profile: str) -> int:
         return count
     except Exception:
         return len(_pending_handoffs.get(profile, []))
+
+
+# ----------------------------------------------------------------------
+# Backup, Restore, and Integrity Verification
+# ----------------------------------------------------------------------
+# Restore drill:
+#   1. Stop balabot / worker processes.
+#   2. Remove existing journal/wal files if replacing DB:
+#      rm -f /opt/data/handoffs/handoffs.db-wal /opt/data/handoffs/handoffs.db-shm
+#   3. Copy backup file over existing store:
+#      cp /path/to/backup.db /opt/data/handoffs/handoffs.db
+#   4. Verify integrity:
+#      python -m balabot.handoffs verify
+#   5. Start services.
+
+
+def backup_handoffs_db(dest_path: str | Path | None = None) -> Path:
+    """Create an online, consistent backup of the handoffs database."""
+    p = _db_path()
+    if dest_path is None:
+        now_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        target = p.parent / f"handoffs_backup_{now_ts}.db"
+    else:
+        target = Path(dest_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    conn = _get_conn()
+    if conn is None:
+        raise RuntimeError("cannot connect to handoffs database")
+    try:
+        with sqlite3.connect(str(target)) as dest_conn:
+            conn.backup(dest_conn)
+    finally:
+        conn.close()
+    return target
+
+
+def verify_handoffs_integrity() -> bool:
+    """Verify handoffs database integrity via PRAGMA integrity_check."""
+    p = _db_path()
+    if not p.exists():
+        return True
+    conn = _get_conn()
+    if conn is None:
+        return False
+    try:
+        rows = conn.execute("PRAGMA integrity_check").fetchall()
+        return len(rows) == 1 and rows[0][0].lower() == "ok"
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    import sys
+    argv = sys.argv[1:]
+    if argv[:1] == ["backup"]:
+        dest = argv[1] if len(argv) > 1 else None
+        p = backup_handoffs_db(dest)
+        print(json.dumps({"ok": True, "backup_path": str(p)}, indent=2))
+        sys.exit(0)
+    if argv[:1] == ["verify"]:
+        ok = verify_handoffs_integrity()
+        print(json.dumps({"ok": ok, "status": "ok" if ok else "corrupt"}, indent=2))
+        sys.exit(0 if ok else 1)
+    print("usage: python -m balabot.handoffs backup [dest] | verify", file=sys.stderr)
+    sys.exit(2)
