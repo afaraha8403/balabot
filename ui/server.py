@@ -2296,6 +2296,10 @@ try:
             store.record_decision(payload['session_id'], dec['text'],
                                   dec.get('provenance', 'jev-gate'),
                                   at=dec.get('at') or '')
+        for msg in payload.get('messages') or []:
+            store.record_message(payload['session_id'], msg['role'], msg['content'],
+                                 message_id=msg.get('message_id'),
+                                 created_at=msg.get('created_at'))
 except UnknownSession as exc:
     out['ok'] = False
     out['error'] = 'unknown_session'
@@ -2413,6 +2417,8 @@ def _jev_prepare(profile: str, turn_text: str, session_id: str,
         store_payload["resume_state"]["last_seq"] = out["session"].get("next_seq")
     if decisions:
         store_payload["decisions"] = decisions
+    if turn_text:
+        store_payload["messages"] = [{"role": "user", "content": turn_text}]
     res = _chat_append_session_state(store_payload)
     if res.get("ok"):
         out["store"] = {"appended": True}
@@ -2730,9 +2736,39 @@ async def chat(request: Request):
                         yield (f"event: error\ndata: "
                                f"{json.dumps({'message': f'backend {r.status_code}: {detail}'})}\n\n")
                         return
+                    accumulated_content = []
                     async for chunk in r.aiter_bytes():
                         # pass the upstream bytes through untouched
                         yield chunk
+                        try:
+                            chunk_str = chunk.decode("utf-8", "replace")
+                            for line in chunk_str.splitlines():
+                                line_s = line.strip()
+                                if line_s.startswith("data: ") and not line_s.startswith("data: [DONE]"):
+                                    data_json = json.loads(line_s[6:])
+                                    choices = data_json.get("choices") or []
+                                    if choices and isinstance(choices[0], dict):
+                                        if "delta" in choices[0] and isinstance(choices[0]["delta"], dict):
+                                            delta_c = choices[0]["delta"].get("content")
+                                            if delta_c:
+                                                accumulated_content.append(delta_c)
+                                        elif "message" in choices[0] and isinstance(choices[0]["message"], dict):
+                                            msg_c = choices[0]["message"].get("content")
+                                            if msg_c:
+                                                accumulated_content.append(msg_c)
+                                    elif "content" in data_json and isinstance(data_json["content"], str):
+                                        accumulated_content.append(data_json["content"])
+                        except Exception:
+                            pass
+                    assistant_text = "".join(accumulated_content)
+                    if assistant_text and session_id:
+                        try:
+                            _chat_append_session_state({
+                                "session_id": session_id,
+                                "messages": [{"role": "assistant", "content": assistant_text}]
+                            })
+                        except Exception:
+                            pass
         except Exception as exc:  # noqa: BLE001
             yield (f"event: error\ndata: "
                    f"{json.dumps({'message': f'{type(exc).__name__}: {exc}'})}\n\n")
@@ -2788,6 +2824,7 @@ try:
         if row is None:
             raise UnknownSession(payload['session_id'])
         anchor = store.re_anchor(payload['session_id'])
+        msgs = store.messages(payload['session_id'])
 except UnknownSession as exc:
     print(json.dumps({'ok': False, 'error': 'not_found',
                       'detail': str(exc), 'status': 404}))
@@ -2795,7 +2832,8 @@ except UnknownSession as exc:
 print(json.dumps({'session': {**row, 'topic_spans': anchor['topic_spans'],
                               'decisions': anchor['decisions'],
                               'resume_state': anchor['resume_state'],
-                              'recent_window': anchor['recent_window']}}))
+                              'recent_window': anchor['recent_window'],
+                              'messages': msgs}}))
 '''
 
 _SESSIONS_DELETE_SNIPPET = '''\
@@ -2809,6 +2847,8 @@ spans = conn.execute('DELETE FROM topic_spans WHERE session_id = ?',
                      (payload['session_id'],)).rowcount
 decisions = conn.execute('DELETE FROM decisions WHERE session_id = ?',
                          (payload['session_id'],)).rowcount
+messages = conn.execute('DELETE FROM messages WHERE session_id = ?',
+                        (payload['session_id'],)).rowcount
 conn.commit()
 conn.close()
 if cur.rowcount == 0:
@@ -2817,7 +2857,40 @@ if cur.rowcount == 0:
                       'status': 404}))
     raise SystemExit(0)
 print(json.dumps({'deleted': True, 'topic_spans_removed': spans,
-                  'decisions_removed': decisions}))
+                  'decisions_removed': decisions,
+                  'messages_removed': messages}))
+'''
+
+_SESSIONS_MESSAGES_SNIPPET = '''\
+from balabot.sessions import SessionStore, UnknownSession
+try:
+    with SessionStore() as store:
+        limit = payload.get('limit')
+        msgs = store.messages(payload['session_id'], limit=limit)
+except UnknownSession as exc:
+    print(json.dumps({'ok': False, 'error': 'not_found',
+                      'detail': str(exc), 'status': 404}))
+    raise SystemExit(0)
+print(json.dumps({'ok': True, 'session_id': payload['session_id'], 'messages': msgs}))
+'''
+
+_SESSION_RECORD_MESSAGE_SNIPPET = '''\
+from balabot.sessions import SessionStore, UnknownSession, SessionError
+try:
+    with SessionStore() as store:
+        msg = store.record_message(payload['session_id'], payload['role'],
+                                   payload['content'],
+                                   message_id=payload.get('message_id'),
+                                   created_at=payload.get('created_at'))
+except UnknownSession as exc:
+    print(json.dumps({'ok': False, 'error': 'not_found',
+                      'detail': str(exc), 'status': 404}))
+    raise SystemExit(0)
+except SessionError as exc:
+    print(json.dumps({'ok': False, 'error': 'session_error',
+                      'detail': str(exc), 'status': 400}))
+    raise SystemExit(0)
+print(json.dumps({'ok': True, 'message': msg}))
 '''
 
 _SESSIONS_PATCH_SNIPPET = '''\
@@ -2945,6 +3018,7 @@ async def sessions_get(session_id: str, bot: str = ""):
         "decisions": s.get("decisions", []),
         "resumeState": s.get("resume_state", {}),
         "recentWindow": s.get("recent_window"),
+        "messages": s.get("messages", []),
         "nextSeq": s.get("next_seq"),
         "compactionCount": s.get("compaction_count", 0),
         "lastCompactionAt": s.get("last_compaction_at"),
@@ -2965,7 +3039,8 @@ async def sessions_delete(session_id: str):
         return unavailable(res.get("reason", "could not delete the session"))
     return {"deleted": True, "id": session_id,
             "topic_spans_removed": res.get("topic_spans_removed", 0),
-            "decisions_removed": res.get("decisions_removed", 0)}
+            "decisions_removed": res.get("decisions_removed", 0),
+            "messages_removed": res.get("messages_removed", 0)}
 
 
 @app.patch("/api/sessions/{session_id}")
@@ -2997,6 +3072,45 @@ async def sessions_update(session_id: str, request: Request):
         "compactionCount": s.get("compaction_count", 0),
         "lastCompactionAt": s.get("last_compaction_at"),
     }}
+
+
+@app.get("/api/sessions/{session_id}/messages")
+async def sessions_messages_list(session_id: str, limit: int = 0):
+    """Retrieve durable server-side transcript messages for a session."""
+    if not container_ok():
+        return unavailable("balabot container is not running — no conversation store")
+    res = await _org_run_async(_wrap(_SESSIONS_MESSAGES_SNIPPET, True),
+                               payload={"session_id": session_id, "limit": limit or None})
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not read session messages"))
+    return {"available": True, "sessionId": session_id, "messages": res.get("messages", [])}
+
+
+@app.post("/api/sessions/{session_id}/messages")
+async def sessions_messages_create(session_id: str, request: Request):
+    """Append a message to the durable session transcript."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    role = (body.get("role") or "").strip()
+    content = str(body.get("content") or "")
+    if not role or not content:
+        raise HTTPException(status_code=400, detail="role and content are required")
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot record messages")
+    res = await _org_run_async(_wrap(_SESSION_RECORD_MESSAGE_SNIPPET, True), payload={
+        "session_id": session_id, "role": role, "content": content,
+        "message_id": body.get("message_id") or body.get("id"),
+        "created_at": body.get("created_at") or body.get("createdAt"),
+    })
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not record session message"))
+    return {"created": True, "message": res.get("message")}
 
 
 # ── SPA ──────────────────────────────────────────────────────────────────────

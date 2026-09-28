@@ -204,3 +204,40 @@ def test_create_session_fails_loud_on_duplicate_id(db):
         db.create_session("s1", "principal", "second")
     # The original purpose survives the failed overwrite.
     assert db.re_anchor("s1")["purpose"] == "first"
+
+
+# ---------------------------------------------------------------------------
+# P1-2: Message persistence in SQLite
+# ---------------------------------------------------------------------------
+
+def test_messages_persist_across_reopen(tmp_path):
+    """P1-2: User and assistant messages persist to SQLite and survive store reopen."""
+    path = tmp_path / "continuity.db"
+    store = SessionStore(path)
+    store.create_session("s_msgs", "principal", "test chat transcript")
+    m1 = store.record_message("s_msgs", "user", "What is the capital of France?")
+    m2 = store.record_message("s_msgs", "assistant", "Paris.")
+    assert m1["role"] == "user"
+    assert m1["content"] == "What is the capital of France?"
+    assert m1["seq"] == 1
+    assert m2["role"] == "assistant"
+    assert m2["content"] == "Paris."
+    assert m2["seq"] == 2
+    store.close()
+
+    reopened = SessionStore(path)
+    msgs = reopened.messages("s_msgs")
+    assert len(msgs) == 2
+    assert msgs[0]["role"] == "user"
+    assert msgs[0]["content"] == "What is the capital of France?"
+    assert msgs[0]["seq"] == 1
+    assert msgs[1]["role"] == "assistant"
+    assert msgs[1]["content"] == "Paris."
+    assert msgs[1]["seq"] == 2
+    reopened.close()
+
+
+def test_messages_fail_loud_on_unknown_session(db):
+    """P1-2: Attempting to record messages for a nonexistent session raises UnknownSession."""
+    with pytest.raises(UnknownSession):
+        db.record_message("nonexistent_session", "user", "hello")

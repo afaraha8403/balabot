@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Features
+- Implement server-authoritative conversation transcript persistence in SQLite: add `messages` table to `SessionStore` (`balabot/sessions.py`) with `record_message` and `messages` query accessors; commit user and streaming assistant turns to SQLite in `/api/chat`; expose `GET /api/sessions/{session_id}/messages` and `POST /api/sessions/{session_id}/messages` routes for cross-device transcript retrieval and synchronization without mutating frozen UI assets.
 - Bridge Astryx design theme and Polaris CSS custom properties with dynamic light/dark mode switching, zero-flash `localStorage` theme bootstrap, and toggles across top header, Settings panel, and Command Palette.
 - Verify "Teach a task" live demonstration recording end-to-end, validating coordinate click and keystroke action capture into client-side demonstration buffers and persistence to server-backed bot routines.
 - Adopt OpenUI (`@openuidev/react-lang` + `@openuidev/lang-core`) for agent-driven generative interfaces: add bounded component registry (`HireAgentCard`, `Card`, `CardHeader`, `FormField`, `ConfirmButtons`) in `ui/src/openui/library.tsx`, token-mapped styles in `ui/src/openui/openui.css`, dual-mode `OpenUIRenderer.tsx` embedded in the live chat transcript, interactive consent confirmation flow for bot hiring, and agent prompt instruction contracts in `docs/PROJECT-RULES.md`.

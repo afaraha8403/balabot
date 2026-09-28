@@ -50,7 +50,10 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sqlite3
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +98,14 @@ CREATE TABLE IF NOT EXISTS decisions (
     provenance  TEXT NOT NULL,
     created_at  TEXT NOT NULL,
     seq         INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS messages (
+    message_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id),
+    role       TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    seq        INTEGER NOT NULL
 );
 """
 
@@ -240,6 +251,70 @@ class SessionStore:
         ).fetchall()
         return [
             {"text": t, "provenance": p, "created_at": a} for (t, p, a) in rows
+        ]
+
+    # ------------------------------------------------------------------
+    # Conversation transcript messages
+    # ------------------------------------------------------------------
+
+    def record_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        *,
+        message_id: str | None = None,
+        created_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Record a user or assistant message to the session's durable transcript."""
+        self._require(session_id)
+        if not isinstance(role, str) or not role.strip():
+            raise SessionError("role must be a non-empty string")
+        if not isinstance(content, str):
+            raise SessionError("content must be a string")
+        mid = message_id or f"m_{int(time.time() * 1000):x}_{secrets.token_hex(4)}"
+        at = created_at or datetime.now(timezone.utc).isoformat()
+        seq = self._next_seq(session_id)
+        self._conn.execute(
+            "INSERT INTO messages (message_id, session_id, role, content, created_at, seq) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (mid, session_id, role.strip(), content, at, seq),
+        )
+        self._bump_seq(session_id)
+        self._conn.commit()
+        return {
+            "message_id": mid,
+            "session_id": session_id,
+            "role": role.strip(),
+            "content": content,
+            "created_at": at,
+            "seq": seq,
+        }
+
+    def messages(
+        self, session_id: str, *, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Ordered conversation messages for a session: [{message_id, session_id, role, content, created_at, seq}, ...]."""
+        self._require(session_id)
+        query = (
+            "SELECT message_id, session_id, role, content, created_at, seq FROM messages "
+            "WHERE session_id = ? ORDER BY seq ASC"
+        )
+        params: list[Any] = [session_id]
+        if limit is not None and limit > 0:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = self._conn.execute(query, params).fetchall()
+        return [
+            {
+                "message_id": mid,
+                "session_id": sid,
+                "role": r,
+                "content": c,
+                "created_at": ca,
+                "seq": s,
+            }
+            for (mid, sid, r, c, ca, s) in rows
         ]
 
     # ------------------------------------------------------------------

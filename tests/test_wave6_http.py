@@ -57,6 +57,7 @@ def client(monkeypatch, tmp_path):
     data_root = tmp_path / "data"
     data_root.mkdir()
     monkeypatch.setenv("BALABOT_DATA_ROOT", str(data_root))
+    monkeypatch.setenv("BALABOT_CONTINUITY_DB", str(tmp_path / "continuity.db"))
     from balabot import orgs
     orgs.add_org("balacode", "Balacode", members=["principal", "governor"])
     monkeypatch.setattr(server, "_org_run", _fake_org_run)
@@ -335,4 +336,118 @@ def test_spooled_proposals_drain_on_list_and_explicit_drain(client):
     assert r2.status_code == 200
     body2 = r2.json()
     assert any(p["name"] == "Data Sync Bot" for p in body2["drained"])
+
+
+def test_sessions_messages_endpoints_and_transcript_persistence(client, monkeypatch, tmp_path):
+    """P1-2: Server-authoritative transcript messages persist and are readable via API routes."""
+    # 1. Create a session
+    sess_id = "s_trans_1"
+    create_res = client.post("/api/sessions", json={
+        "id": sess_id,
+        "botId": "principal",
+        "purpose": "transcript persistence test",
+    })
+    assert create_res.status_code == 200
+
+    # 2. Append user message via API
+    m1_res = client.post(f"/api/sessions/{sess_id}/messages", json={
+        "role": "user",
+        "content": "Hello agent!",
+    })
+    assert m1_res.status_code == 200
+    m1 = m1_res.json()["message"]
+    assert m1["role"] == "user"
+    assert m1["content"] == "Hello agent!"
+
+    # 3. Append assistant message via API
+    m2_res = client.post(f"/api/sessions/{sess_id}/messages", json={
+        "role": "assistant",
+        "content": "Hello human, I am ready.",
+    })
+    assert m2_res.status_code == 200
+    m2 = m2_res.json()["message"]
+    assert m2["role"] == "assistant"
+    assert m2["content"] == "Hello human, I am ready."
+
+    # 4. Read back transcript from GET /api/sessions/{id}/messages
+    list_res = client.get(f"/api/sessions/{sess_id}/messages")
+    assert list_res.status_code == 200
+    data = list_res.json()
+    assert data["available"] is True
+    assert data["sessionId"] == sess_id
+    msgs = data["messages"]
+    assert len(msgs) == 2
+    assert msgs[0]["role"] == "user"
+    assert msgs[0]["content"] == "Hello agent!"
+    assert msgs[1]["role"] == "assistant"
+    assert msgs[1]["content"] == "Hello human, I am ready."
+
+    # 5. Read back session details from GET /api/sessions/{id}
+    detail_res = client.get(f"/api/sessions/{sess_id}?bot=principal")
+    assert detail_res.status_code == 200
+    detail = detail_res.json()["session"]
+    assert detail["id"] == sess_id
+    assert len(detail["messages"]) == 2
+    assert detail["messages"][0]["content"] == "Hello agent!"
+
+
+def test_chat_turn_persists_transcript_to_server_store(client, monkeypatch):
+    """P1-2 real-path proof: drive a turn and read the transcript back from the server store."""
+    sess_id = "s_turn_proof"
+    # Create session in store
+    create_res = client.post("/api/sessions", json={
+        "id": sess_id,
+        "botId": "principal",
+        "purpose": "chat transcript test",
+    })
+    assert create_res.status_code == 200
+
+    # Mock upstream model response
+    class FakeStreamResponse:
+        status_code = 200
+        async def aread(self):
+            return b""
+        async def aiter_bytes(self):
+            yield b'data: {"choices": [{"delta": {"content": "I am "}}]}\n\n'
+            yield b'data: {"choices": [{"delta": {"content": "BalaBot."}}]}\n\n'
+            yield b'data: [DONE]\n\n'
+
+    class FakeStreamContext:
+        async def __aenter__(self):
+            return FakeStreamResponse()
+        async def __aexit__(self, *a):
+            return False
+
+    class FakeAsyncClient:
+        def __init__(self, *a, **kw):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        def stream(self, *a, **kw):
+            return FakeStreamContext()
+
+    monkeypatch.setattr(server.httpx, "AsyncClient", FakeAsyncClient)
+
+    # Drive the chat turn
+    chat_payload = {
+        "bot_id": "principal",
+        "session_id": sess_id,
+        "messages": [{"role": "user", "content": "Who are you?"}],
+    }
+    chat_res = client.post("/api/chat", json=chat_payload)
+    assert chat_res.status_code == 200
+    assert "BalaBot" in chat_res.text
+
+    # Read back transcript from the server store
+    msg_res = client.get(f"/api/sessions/{sess_id}/messages")
+    assert msg_res.status_code == 200
+    messages = msg_res.json()["messages"]
+    assert len(messages) == 2
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "Who are you?"
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["content"] == "I am BalaBot."
+
 
