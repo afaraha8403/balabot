@@ -45,6 +45,9 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 __all__ = [
     "STAGES",
@@ -54,6 +57,10 @@ __all__ = [
     "install_skill",
     "install_third_party",
     "approve",
+    "save_skill",
+    "parse_skill_md",
+    "validate_skill_md",
+    "build_skill_md",
     "pin",
     "unpin",
     "get_record",
@@ -105,11 +112,91 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+FRONTMATTER_FENCE = re.compile(r"^---\r?\n([\s\S]*?)\r?\n---\r?\n?")
+
+
+def parse_skill_md(content: str) -> dict[str, Any]:
+    """Parse a SKILL.md document. Requires YAML frontmatter with `name` and `description`.
+
+    Adopted from Polaris (packages/core/src/agent-skill.ts:61-89).
+    Extra frontmatter keys are kept in `frontmatter`.
+    """
+    trimmed = content.lstrip("\ufeff")
+    match = FRONTMATTER_FENCE.match(trimmed)
+    if not match:
+        return {"error": "SKILL.md must start with YAML frontmatter (--- ... ---)."}
+    frontmatter_text = match.group(1)
+    body = trimmed[match.end():].lstrip("\r\n")
+    try:
+        data = yaml.safe_load(frontmatter_text)
+    except Exception as exc:
+        return {"error": f"Invalid SKILL.md frontmatter: {exc}"}
+    if not isinstance(data, dict):
+        return {"error": "Invalid SKILL.md frontmatter: must be a YAML mapping."}
+
+    name = str(data.get("name") or "").strip()
+    description = str(data.get("description") or "").strip()
+    if not name:
+        return {"error": "SKILL.md frontmatter requires name."}
+    if not description:
+        return {"error": "SKILL.md frontmatter requires description."}
+    if len(name) > 80:
+        return {"error": "Skill name must be at most 80 characters."}
+    if len(description) > 2000:
+        return {"error": "Skill description must be at most 2000 characters."}
+    return {
+        "name": name,
+        "description": description,
+        "body": body,
+        "frontmatter": data,
+    }
+
+
+def validate_skill_md(content: str) -> dict[str, Any]:
+    """Validate a SKILL.md document.
+
+    Returns the parsed skill info or raises ValueError with a clear error message.
+    """
+    res = parse_skill_md(content)
+    if "error" in res:
+        raise ValueError(res["error"])
+    return res
+
+
+def build_skill_md(
+    name: str,
+    description: str,
+    body: str,
+    frontmatter: dict[str, Any] | None = None,
+) -> str:
+    """Build SKILL.md, preserving extra frontmatter keys from a prior parse."""
+    name = name.strip()
+    description = description.strip()
+    if not name:
+        raise ValueError("Skill name is required.")
+    if not description:
+        raise ValueError("Skill description is required.")
+    if len(name) > 80:
+        raise ValueError("Skill name must be at most 80 characters.")
+    if len(description) > 2000:
+        raise ValueError("Skill description must be at most 2000 characters.")
+    merged = dict(frontmatter or {})
+    merged["name"] = name
+    merged["description"] = description
+    ordered = {"name": name, "description": description}
+    for k in sorted(merged.keys()):
+        if k not in ordered:
+            ordered[k] = merged[k]
+    fm_str = yaml.safe_dump(ordered, sort_keys=False).strip()
+    return f"---\n{fm_str}\n---\n\n{body.strip()}\n"
+
+
 def _new_record(name: str, *, origin: str, scope: str | None) -> dict:
     """A skill record. usage is NEVER pre-populated — absent ledger means
     'no usage data', never zeros presented as truth."""
     return {
         "name": name,
+        "description": None,
         "origin": origin,
         "scope": scope,
         "state": "active",
@@ -179,7 +266,8 @@ def _find(recs: list[dict], name: str) -> dict | None:
 
 
 def install_skill(name: str, *, origin: str, scope: str | None = None,
-                  source: str | None = None, bot_id: str | None = None) -> dict:
+                  source: str | None = None, bot_id: str | None = None,
+                  skill_md: str | None = None) -> dict:
     """Install a skill into the registry.
 
     - origin ``learned``: self-improvement loop output. scope = the bot that
@@ -206,12 +294,27 @@ def install_skill(name: str, *, origin: str, scope: str | None = None,
     rec["source"] = source
     if bot_id is not None:
         rec["bot_id"] = bot_id
+
+    # Validation before saving (P2-2)
+    if skill_md is not None:
+        parsed = validate_skill_md(skill_md)
+        if parsed["name"] != name:
+            raise ValueError(f"SKILL.md frontmatter name {parsed['name']!r} does not match {name!r}")
+        rec["description"] = parsed["description"]
+        skill_dir = _skills_dir() / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+    elif (_skills_dir() / name / "SKILL.md").is_file():
+        content = (_skills_dir() / name / "SKILL.md").read_text(encoding="utf-8")
+        parsed = validate_skill_md(content)
+        rec["description"] = parsed["description"]
+
     recs.append(rec)
     _save_records_now(recs)
     return dict(rec)
 
 
-def install_third_party(name: str, source: str) -> dict:
+def install_third_party(name: str, source: str, skill_md: str | None = None) -> dict:
     """QUARANTINE lane: a third-party skill lands INERT.
 
     quarantined=True, scope=None. It must be approved before it can ever
@@ -226,13 +329,57 @@ def install_third_party(name: str, source: str) -> dict:
     rec = _new_record(name, origin="brought", scope=None)
     rec["source"] = source
     rec["quarantined"] = True
+
+    if skill_md is not None:
+        parsed = validate_skill_md(skill_md)
+        if parsed["name"] != name:
+            raise ValueError(f"SKILL.md frontmatter name {parsed['name']!r} does not match {name!r}")
+        rec["description"] = parsed["description"]
+        skill_dir = _skills_dir() / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+
     recs.append(rec)
     _save_records_now(recs)
     return dict(rec)
 
 
-def approve(name: str, scope: str) -> dict:
-    """Promote a quarantined skill: assign a scope, clear the quarantine flag."""
+def save_skill(name: str, content: str, *, origin: str = "brought", scope: str | None = None,
+               source: str | None = "authored", bot_id: str | None = None) -> dict:
+    """Save a skill document (SKILL.md) and update/register it in the registry.
+
+    Validates YAML frontmatter before saving (P2-2).
+    """
+    parsed = validate_skill_md(content)
+    if parsed["name"] != name:
+        raise ValueError(f"SKILL.md frontmatter name {parsed['name']!r} does not match {name!r}")
+
+    skill_dir = _skills_dir() / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
+
+    recs = _load_records()
+    rec = _find(recs, name)
+    if rec is None:
+        rec = _new_record(name, origin=origin, scope=scope)
+        rec["source"] = source
+        if bot_id is not None:
+            rec["bot_id"] = bot_id
+        recs.append(rec)
+    else:
+        if scope is not None:
+            rec["scope"] = scope
+        rec["updated_at"] = _now()
+    rec["description"] = parsed["description"]
+    _save_records_now(recs)
+    return dict(rec)
+
+
+def approve(name: str, scope: str, *, skill_md: str | None = None) -> dict:
+    """Promote a quarantined skill: assign a scope, clear the quarantine flag.
+
+    Validates YAML frontmatter before promoting (P2-2).
+    """
     if scope not in SCOPES:
         raise ValueError(f"invalid scope {scope!r}: must be one of {SCOPES}")
     recs = _load_records()
@@ -241,6 +388,25 @@ def approve(name: str, scope: str) -> dict:
         raise KeyError(f"unknown skill: {name!r}")
     if not rec.get("quarantined"):
         raise ValueError(f"skill {name!r} is not in quarantine")
+
+    # Validate before promoting (P2-2)
+    if skill_md is not None:
+        parsed = validate_skill_md(skill_md)
+        if parsed["name"] != name:
+            raise ValueError(f"SKILL.md frontmatter name {parsed['name']!r} does not match {name!r}")
+        rec["description"] = parsed["description"]
+        skill_dir = _skills_dir() / name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+    else:
+        skill_file = _skills_dir() / name / "SKILL.md"
+        if skill_file.is_file():
+            content = skill_file.read_text(encoding="utf-8")
+            parsed = validate_skill_md(content)
+            if parsed["name"] != name:
+                raise ValueError(f"SKILL.md frontmatter name {parsed['name']!r} does not match {name!r}")
+            rec["description"] = parsed["description"]
+
     rec["quarantined"] = False
     rec["scope"] = scope
     rec["state"] = "active"

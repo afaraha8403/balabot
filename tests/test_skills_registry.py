@@ -380,3 +380,133 @@ def test_skills_http_pin_promote_curate(reg, monkeypatch):
     assert resp.json()["ok"] is True
     assert "applied" in resp.json()["report"]
 
+
+# ---- P2-2: SKILL.md frontmatter parsing & validation -------------------------
+
+
+def test_parse_and_validate_skill_md_valid():
+    valid_content = """---
+name: doc-writer
+description: Generates clean markdown documentation.
+tags: [docs, markdown]
+version: 1.0.0
+---
+
+# Documentation Writer
+
+This skill creates clear documentation.
+"""
+    res = sr.parse_skill_md(valid_content)
+    assert "error" not in res
+    assert res["name"] == "doc-writer"
+    assert res["description"] == "Generates clean markdown documentation."
+    assert "Documentation Writer" in res["body"]
+    assert res["frontmatter"]["tags"] == ["docs", "markdown"]
+
+    validated = sr.validate_skill_md(valid_content)
+    assert validated["name"] == "doc-writer"
+
+
+def test_parse_skill_md_malformed_rejected_with_clear_error():
+    # 1. Missing fence
+    r1 = sr.parse_skill_md("Just regular markdown without frontmatter")
+    assert "error" in r1
+    assert "SKILL.md must start with YAML frontmatter" in r1["error"]
+    with pytest.raises(ValueError, match="SKILL.md must start with YAML frontmatter"):
+        sr.validate_skill_md("Just regular markdown without frontmatter")
+
+    # 2. Missing name
+    r2 = sr.parse_skill_md("---\ndescription: A valid description.\n---\nBody\n")
+    assert "error" in r2
+    assert "SKILL.md frontmatter requires name" in r2["error"]
+    with pytest.raises(ValueError, match="SKILL.md frontmatter requires name"):
+        sr.validate_skill_md("---\ndescription: A valid description.\n---\nBody\n")
+
+    # 3. Missing description
+    r3 = sr.parse_skill_md("---\nname: my-skill\n---\nBody\n")
+    assert "error" in r3
+    assert "SKILL.md frontmatter requires description" in r3["error"]
+    with pytest.raises(ValueError, match="SKILL.md frontmatter requires description"):
+        sr.validate_skill_md("---\nname: my-skill\n---\nBody\n")
+
+    # 4. Name too long (> 80 chars)
+    long_name = "x" * 81
+    r4 = sr.parse_skill_md(f"---\nname: {long_name}\ndescription: desc\n---\nBody\n")
+    assert "error" in r4
+    assert "Skill name must be at most 80 characters" in r4["error"]
+    with pytest.raises(ValueError, match="Skill name must be at most 80 characters"):
+        sr.validate_skill_md(f"---\nname: {long_name}\ndescription: desc\n---\nBody\n")
+
+    # 5. Description too long (> 2000 chars)
+    long_desc = "d" * 2001
+    r5 = sr.parse_skill_md(f"---\nname: ok-name\ndescription: {long_desc}\n---\nBody\n")
+    assert "error" in r5
+    assert "Skill description must be at most 2000 characters" in r5["error"]
+    with pytest.raises(ValueError, match="Skill description must be at most 2000 characters"):
+        sr.validate_skill_md(f"---\nname: ok-name\ndescription: {long_desc}\n---\nBody\n")
+
+    # 6. Malformed YAML
+    r6 = sr.parse_skill_md("---\n[invalid: yaml\n---\nBody\n")
+    assert "error" in r6
+    assert "Invalid SKILL.md frontmatter" in r6["error"]
+    with pytest.raises(ValueError, match="Invalid SKILL.md frontmatter"):
+        sr.validate_skill_md("---\n[invalid: yaml\n---\nBody\n")
+
+
+def test_build_skill_md():
+    doc = sr.build_skill_md("format-code", "Formats code with Black", "# Usage\nRun black .", {"version": "2.0"})
+    parsed = sr.validate_skill_md(doc)
+    assert parsed["name"] == "format-code"
+    assert parsed["description"] == "Formats code with Black"
+    assert parsed["frontmatter"]["version"] == "2.0"
+    assert "Run black ." in parsed["body"]
+
+    with pytest.raises(ValueError, match="Skill name must be at most 80 characters"):
+        sr.build_skill_md("a" * 81, "desc", "body")
+
+
+def test_save_skill_validates_and_persists(reg):
+    content = "---\nname: code-cleaner\ndescription: Lints and cleans code\n---\n# Code cleaner"
+    rec = sr.save_skill("code-cleaner", content, origin="brought", scope="org")
+    assert rec["name"] == "code-cleaner"
+    assert rec["description"] == "Lints and cleans code"
+
+    # SKILL.md written to disk
+    skill_file = reg / "skills" / "code-cleaner" / "SKILL.md"
+    assert skill_file.is_file()
+    assert "Lints and cleans code" in skill_file.read_text(encoding="utf-8")
+
+    # Rejects malformed SKILL.md content
+    bad_content = "---\nname: code-cleaner\n---\nNo description"
+    with pytest.raises(ValueError, match="SKILL.md frontmatter requires description"):
+        sr.save_skill("code-cleaner", bad_content)
+
+    # Rejects mismatched name
+    mismatched = "---\nname: other-name\ndescription: desc\n---\nBody"
+    with pytest.raises(ValueError, match="frontmatter name 'other-name' does not match"):
+        sr.save_skill("code-cleaner", mismatched)
+
+
+def test_approve_rejects_malformed_skill_md(reg):
+    sr.install_third_party("bad-skill", source="hub")
+    bad_file = reg / "skills" / "bad-skill" / "SKILL.md"
+    bad_file.parent.mkdir(parents=True, exist_ok=True)
+    bad_file.write_text("No YAML frontmatter at all", encoding="utf-8")
+
+    # Attempting to approve/promote a quarantined skill with malformed SKILL.md must fail
+    with pytest.raises(ValueError, match="SKILL.md must start with YAML frontmatter"):
+        sr.approve("bad-skill", scope="org")
+
+    # Confirm it was NOT promoted
+    rec = sr.get_record("bad-skill")
+    assert rec["quarantined"] is True
+    assert rec["scope"] is None
+
+    # Fix the SKILL.md and approve again
+    good_content = "---\nname: bad-skill\ndescription: Now properly described\n---\n# Body"
+    bad_file.write_text(good_content, encoding="utf-8")
+    promoted = sr.approve("bad-skill", scope="org")
+    assert promoted["quarantined"] is False
+    assert promoted["scope"] == "org"
+    assert promoted["description"] == "Now properly described"
+
