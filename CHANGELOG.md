@@ -33,3 +33,8 @@
 - Wire growth loop frustration sensor into `/api/chat` turn stream, recording signals into governor ledger with routes `GET /api/growth/ledger` and `POST /api/growth/run`.
 - Implement and wire attachments intake: `POST /api/attachments` upload, `GET /api/attachments/{id}/{name}`, Composer UI upload handling, and `/api/chat` context delivery.
 
+### Fixes
+- Remove the seeded demo conversation from `ui/src/sessions.ts`: a hardcoded "hire a marketing and SEO expert" exchange with a fabricated OpenUI card appeared in every install with an empty session store. An empty store now yields an empty roster — a conversation exists only because an agent or the owner actually had one.
+- Correct the OpenUI approve handler's error path in `ui/src/App.tsx`, which reported `Proposal created: <error>` — success wording on a failure.
+- Require an explicit chat confirmation before an agent files a bot proposal: `personas/principal/AGENTS.md` and `personas/governor/AGENTS.md` previously instructed agents to file immediately, which is why a request to hire an agent produced a proposal with no name, role or confirmation settled in the conversation.
+
