@@ -291,3 +291,12 @@ If you skip tests, say so in chat with the reason — never in a code comment.
 2. An existing test already covers the exact behavior.
 3. The human explicitly overrode the test requirement.
 <!-- END balakit -->
+
+## Project rules — read this first
+
+Non-trivial work in this repo starts at **`docs/PROJECT-RULES.md`**. It records what this repo has
+cost us the hard way: which Hermes instance you are touching, the KB-as-spec rule, what "shipped"
+means (a real call site), one-owner-per-file, the secrets law, the test/mutation bar, the deploy
+reality (`npm run build` **is** the UI deploy; a container rebuild is not), persona voice, Jev as a
+hard dependency, no fabrication, scope walls, and the `git push origin master:main` quirk.
+
