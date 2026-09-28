@@ -106,6 +106,16 @@ def test_classify_without_jev_defers_never_confirms() -> None:
     assert result["confirmed"] is False
 
 
+def test_classify_heuristic_mode_confirms_high_severity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When JEV_MODE=heuristic, classify confirms high-severity signals even without Jev."""
+    monkeypatch.setenv("JEV_MODE", "heuristic")
+    signals = growth.scan("this is broken")
+    result = growth.classify(signals, "this is broken", None)
+    assert result["confirmed"] is True
+    assert result["escalate"] is True
+
+
+
 def test_classify_no_signals_makes_no_jev_call() -> None:
     jev = FakeJev()
     result = growth.classify([], "perfectly calm message", jev)

@@ -38,7 +38,10 @@ it is promoted out of shadow.
 
 from __future__ import annotations
 
+import json
 import os
+import re
+import sqlite3
 import time
 from typing import Any
 
@@ -107,6 +110,53 @@ def _ctx(context: str) -> str:
     return f" ({context})" if context else ""
 
 
+def _fts5_rank_candidates(query: str, candidates: dict[str, str]) -> dict[str, float]:
+    """Rank candidate items (name -> text) against query using SQLite FTS5 BM25.
+
+    Returns mapping of name -> normalized score (0..1).
+    """
+    if not candidates:
+        return {}
+    stopwords = {"and", "or", "not", "the", "a", "an", "in", "on", "of", "to", "for", "is", "it", "with", "from"}
+    tokens = [re.sub(r"[^\w\u0600-\u06FF]", "", t) for t in query.split()]
+    clean_tokens = [t for t in tokens if len(t) > 1 and t.lower() not in stopwords]
+    if not clean_tokens:
+        clean_tokens = [t for t in tokens if len(t) > 1]
+    if not clean_tokens:
+        return {name: (0.80 if name.lower() in query.lower() else 0.20) for name in candidates}
+
+    fts_query = " OR ".join(f'"{t}"' for t in clean_tokens[:16])
+    scores: dict[str, float] = {}
+    try:
+        conn = sqlite3.connect(":memory:")
+        with conn:
+            conn.execute("CREATE VIRTUAL TABLE items USING fts5(id, text);")
+            for name, text in candidates.items():
+                conn.execute("INSERT INTO items (id, text) VALUES (?, ?)", (name, f"{name} {text}"))
+            rows = conn.execute(
+                "SELECT id, rank FROM items WHERE items MATCH ? ORDER BY rank ASC",
+                (fts_query,),
+            ).fetchall()
+        conn.close()
+        if rows:
+            best_rank = rows[0][1]
+            worst_rank = rows[-1][1]
+            rank_range = abs(worst_rank - best_rank) if worst_rank != best_rank else 1.0
+            for name, rank in rows:
+                norm = 0.50 + 0.45 * (1.0 - (rank - best_rank) / rank_range)
+                scores[name] = round(norm, 2)
+    except sqlite3.Error:
+        scores.clear()
+
+    for name, text in candidates.items():
+        if name not in scores:
+            if name.lower() in query.lower() or any(t.lower() in text.lower() for t in tokens):
+                scores[name] = 0.50
+            else:
+                scores[name] = 0.15
+    return scores
+
+
 class Jev:
     """Thin, faithful HTTP client for the System One endpoint."""
 
@@ -117,12 +167,14 @@ class Jev:
         model: str = DEFAULT_MODEL,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         session: requests.Session | None = None,
+        mode: str | None = None,
     ) -> None:
+        self.mode = (mode or os.environ.get("JEV_MODE", "api")).lower()
         self.api_key = api_key if api_key is not None else _env_key()
-        if not self.api_key:
+        if not self.api_key and self.mode != "heuristic":
             raise JevNotConfigured(
                 "TYPESAFE_API_KEY is not set. Jev is a hard dependency; "
-                "there is no fallback provider."
+                "there is no fallback provider (set JEV_MODE=heuristic for offline fallback)."
             )
         self.model = model
         self.timeout_s = timeout_s
@@ -154,12 +206,131 @@ class Jev:
         """
         if not questions:
             raise ValueError("questions must not be empty")
+        if self.mode == "heuristic":
+            result = self._evaluate_heuristic(state, questions)
+            if shadow:
+                result["shadow"] = True
+            return result
         payload = {"model": self.model, "state": state, "questions": questions}
         response = self._post_with_transient_retry(payload)
         result: dict[str, Any] = response.json()
         if shadow:
             result["shadow"] = True
         return result
+
+    def _evaluate_heuristic(
+        self,
+        state: str | dict[str, Any] | list[str],
+        questions: dict[str, Any],
+    ) -> dict[str, Any]:
+        if isinstance(state, str):
+            state_text = state
+        elif isinstance(state, list):
+            state_text = "\n".join(str(s) for s in state)
+        elif isinstance(state, dict):
+            state_text = json.dumps(state)
+        else:
+            state_text = str(state)
+
+        state_lower = state_text.lower()
+        search_query = state_text
+        task_match = re.search(r"Task:\s*(.*?)(?:\n|$)", state_text, re.IGNORECASE)
+        if task_match:
+            search_query = task_match.group(1).strip()
+
+        answers: dict[str, Any] = {}
+
+        for q_name, q_def in questions.items():
+            q_type = q_def.get("type", "noul")
+            instructions = q_def.get("instructions", "")
+
+            if q_type == "noul":
+                if "health probe" in instructions.lower() or "always answer true" in instructions.lower():
+                    prob = 1.0
+                elif q_name == "is_frustration" or "frustration" in instructions.lower():
+                    frust_markers = (
+                        "broken", "not working", "fails", "failing", "useless",
+                        "annoying", "waste of time", "fml", "again?!", "for god's sake",
+                        "terrible", "hate this", "giving up", "غلط", "ما يشتغل", "تعبان", "متضايق",
+                    )
+                    has_frust = any(w in state_lower for w in frust_markers)
+                    prob = 0.85 if has_frust else 0.15
+                elif q_name == "decision_worthy" or "decision" in instructions.lower():
+                    decision_keywords = (
+                        "decide", "decision", "will ", "plan", "approve", "approved",
+                        "choose", "choice", "commit", "set ", "use ", "never ",
+                        "always ", "hire", "fire", "deploy", "release", "ship",
+                        "reject", "confirm", "merge", "rule", "policy", "implement",
+                    )
+                    chatter = ("hi", "hello", "hey", "how are you", "what is", "can you", "thanks", "thank you")
+                    if any(w in state_lower for w in decision_keywords):
+                        prob = 0.85
+                    elif any(state_lower.strip().startswith(c) for c in chatter) and "?" in state_lower:
+                        prob = 0.20
+                    else:
+                        prob = 0.65
+                elif "fact:" in instructions.lower() or "fact is relevant" in instructions.lower():
+                    fact_part = instructions.split("Fact:", 1)[-1].strip() if "Fact:" in instructions else instructions
+                    rank_res = _fts5_rank_candidates(search_query, {q_name: fact_part})
+                    prob = rank_res.get(q_name, 0.40)
+                elif "how relevant is this skill" in instructions.lower():
+                    skill_text = q_name
+                    desc_match = re.search(rf"-\s*{re.escape(q_name)}:\s*(.*?)(?:\n|$)", state_text, re.IGNORECASE)
+                    if desc_match:
+                        skill_text = f"{skill_text} {desc_match.group(1)}"
+                    rank_res = _fts5_rank_candidates(search_query, {q_name: skill_text})
+                    prob = rank_res.get(q_name, 0.20)
+                elif q_name in ("is_decision", "is_durable_fact", "is_live_task_state", "needs_new_session", "same_purpose_s_old", "drifted", "saliency"):
+                    if q_name == "drifted":
+                        prob = 0.10
+                    elif q_name == "saliency":
+                        prob = 0.80
+                    elif q_name in ("needs_new_session", "same_purpose_s_old"):
+                        prob = 0.75 if any(w in state_lower for w in ("session", "resume", "continue", "task")) else 0.25
+                    else:
+                        prob = 0.70
+                else:
+                    rank_res = _fts5_rank_candidates(search_query, {q_name: instructions})
+                    prob = rank_res.get(q_name, 0.50)
+
+                answers[q_name] = {"type": "noul", "noul": prob, "probability": prob}
+
+            elif q_type == "choice":
+                criteria = dict(q_def.get("criteria", {}))
+                for name in list(criteria):
+                    desc_match = re.search(rf"-\s*{re.escape(name)}:\s*(.*?)(?:\n|$)", state_text, re.IGNORECASE)
+                    if desc_match:
+                        criteria[name] = f"{criteria[name]} {desc_match.group(1)}"
+                scores = _fts5_rank_candidates(search_query, criteria)
+                best = max(scores, key=scores.get) if scores else ""
+                if q_name == "candidates":
+                    answers[q_name] = scores
+                else:
+                    answers[q_name] = {
+                        "type": "choice",
+                        "choice": best,
+                        "confidence": scores.get(best, 1.0) if scores else 1.0,
+                        "probabilities": scores,
+                    }
+
+            elif q_type == "score":
+                legend = q_def.get("legend", {"0": "low", "1": "high"})
+                answers[q_name] = {
+                    "type": "score",
+                    "score": 1.0,
+                    "confidence": 0.8,
+                    "legend": legend,
+                    "probabilities": {k: 1.0 / len(legend) for k in legend},
+                }
+            else:
+                answers[q_name] = {"type": q_type, "value": True}
+
+        return {
+            "model": "heuristic",
+            "answers": answers,
+            "confidence": 0.85,
+            "usage": {"input_tokens": 10, "output_tokens": 2},
+        }
 
     def _post_with_transient_retry(self, payload: dict[str, Any]) -> requests.Response:
         attempt = 0
@@ -257,10 +428,17 @@ def check_jev_health(
     default/optimistic status — an unknown failure reports as unreachable.
     """
     key = api_key
+    mode = getattr(client, "mode", None) if client is not None else os.environ.get("JEV_MODE", "").lower()
     if client is not None:
         key = client.api_key
         session = session or client._session
     if not key:
+        if mode == "heuristic":
+            return JevHealth(
+                "ok",
+                "Jev operating in local heuristic fallback mode (JEV_MODE=heuristic).",
+                latency_ms=0.0,
+            )
         return JevHealth("no-key", "TYPESAFE_API_KEY is not set; Jev cannot be checked.")
     http = session or requests.Session()
     payload = {

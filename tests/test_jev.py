@@ -247,3 +247,117 @@ def test_noul_probability_rejects_booleans():
 
     with pytest.raises(JevResponseError):
         noul_probability({"noul": True})
+
+
+# ---------------------------------------------------------------------------
+# P1-5: Heuristic fallback mode (JEV_MODE=heuristic) for offline/local use
+# ---------------------------------------------------------------------------
+
+def test_jev_heuristic_mode_initializes_without_api_key(monkeypatch):
+    """When JEV_MODE=heuristic, Jev client initializes without TYPESAFE_API_KEY."""
+    monkeypatch.setenv("JEV_MODE", "heuristic")
+    client = Jev()
+    assert client.mode == "heuristic"
+    assert client.api_key is None
+
+
+def test_jev_heuristic_system_one_evaluates_noul_and_choice(monkeypatch):
+    """Heuristic mode provides rule-based and FTS5 rank ordering responses."""
+    monkeypatch.setenv("JEV_MODE", "heuristic")
+    client = Jev()
+    
+    # 1. Noul decision-worthy question
+    resp_noul = client.system_one(
+        "we will approve and deploy the change to production",
+        {"decision_worthy": {"type": "noul", "instructions": "Is this a decision?"}},
+    )
+    ans_noul = resp_noul["answers"]["decision_worthy"]
+    assert ans_noul["type"] == "noul"
+    assert ans_noul["noul"] >= 0.5
+
+    # 2. Choice with FTS5 BM25 rank ordering
+    criteria = {
+        "pptx-read": "read and extract text from PowerPoint presentations",
+        "xlsx": "create and edit Excel spreadsheets",
+    }
+    resp_choice = client.system_one(
+        "read powerpoint slides and deck",
+        {"candidates": {"type": "choice", "criteria": criteria}},
+    )
+    candidates = resp_choice["answers"]["candidates"]
+    assert candidates["pptx-read"] > candidates["xlsx"]
+
+
+def test_jev_heuristic_health_check(monkeypatch):
+    """check_jev_health returns ok when JEV_MODE=heuristic without API key."""
+    from balabot.jev import check_jev_health
+    monkeypatch.setenv("JEV_MODE", "heuristic")
+    health = check_jev_health()
+    assert health.status == "ok"
+    assert health.ok
+    assert "heuristic" in health.detail.lower()
+
+
+def test_jev_heuristic_depth_integration(monkeypatch):
+    """Real Jev client in heuristic mode drives jev_depth decision gate and skill selection."""
+    from balabot.jev_depth import is_decision_worthy, select_skills
+
+    monkeypatch.setenv("JEV_MODE", "heuristic")
+    client = Jev()
+
+    # Decision gate
+    decision = is_decision_worthy("we will deploy the new release", jev=client)
+    assert decision.worthy is True
+
+    # Skill selection with SQLite FTS5 rank ordering
+    catalog = {
+        "pptx-read": "Read and extract text from PowerPoint presentations.",
+        "xlsx": "Create, read, and edit Excel workbooks.",
+    }
+    selected = select_skills("extract text from PowerPoint presentation deck", catalog, jev=client)
+    assert selected == ["pptx-read"]
+
+
+def test_entrypoint_boot_gate_allows_heuristic_mode():
+    """entrypoint.sh accepts JEV_MODE=heuristic when TYPESAFE_API_KEY is unset."""
+    import os
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    bash_bin = shutil.which("bash") or "bash"
+    repo_root = Path(__file__).resolve().parent.parent
+    entrypoint = repo_root / "entrypoint.sh"
+    assert entrypoint.exists()
+
+    # Read the first 27 lines (the Jev boot gate)
+    content = entrypoint.read_text(encoding="utf-8")
+    lines = content.splitlines()[:27]
+    script = "\n".join(lines)
+
+    # 1. Without JEV_MODE or key, exits 1
+    env_empty = dict(os.environ)
+    env_empty.pop("TYPESAFE_API_KEY", None)
+    env_empty.pop("JEV_MODE", None)
+    res_empty = subprocess.run(
+        [bash_bin, "-c", script],
+        capture_output=True,
+        text=True,
+        env=env_empty,
+    )
+    assert res_empty.returncode == 1
+    assert "FATAL: TYPESAFE_API_KEY is not set" in res_empty.stderr
+
+    # 2. With JEV_MODE=heuristic, passes gate (exit 0)
+    env_heuristic = dict(os.environ, JEV_MODE="heuristic")
+    env_heuristic.pop("TYPESAFE_API_KEY", None)
+    res_heuristic = subprocess.run(
+        [bash_bin, "-c", script],
+        capture_output=True,
+        text=True,
+        env=env_heuristic,
+    )
+    assert res_heuristic.returncode == 0
+    assert "JEV_MODE=heuristic" in res_heuristic.stdout
+
+

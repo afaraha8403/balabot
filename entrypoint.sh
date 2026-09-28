@@ -12,12 +12,17 @@ set -eu
 # fallback provider by design. No key -> no start. No placeholder, no default.
 # ---------------------------------------------------------------------------
 if [ -z "${TYPESAFE_API_KEY:-}" ]; then
-    echo "FATAL: TYPESAFE_API_KEY is not set." >&2
-    echo "" >&2
-    echo "Jev is a HARD dependency of BalaBot and there is no fallback provider." >&2
-    echo "Refusing to start a silently degraded system." >&2
-    echo "Put it in your .env (see .env.example) and retry." >&2
-    exit 1
+    if [ "${JEV_MODE:-}" = "heuristic" ]; then
+        echo "[balabot] TYPESAFE_API_KEY is unset but JEV_MODE=heuristic."
+        echo "[balabot] Running with local rule-based heuristic and SQLite FTS5 rank ordering fallback."
+    else
+        echo "FATAL: TYPESAFE_API_KEY is not set." >&2
+        echo "" >&2
+        echo "Jev is a HARD dependency of BalaBot and there is no fallback provider." >&2
+        echo "Refusing to start a silently degraded system." >&2
+        echo "Put it in your .env (see .env.example) and retry, or set JEV_MODE=heuristic for offline fallback." >&2
+        exit 1
+    fi
 fi
 
 # ---------------------------------------------------------------------------

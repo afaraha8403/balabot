@@ -26,6 +26,7 @@ denominator with every rate it reports for exactly that reason.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -213,6 +214,17 @@ def classify(signals: list[Signal], text: str, jev: Callable[..., dict[str, Any]
     windows = [context_window(text, sig.span) for sig in signals]
     state = " | ".join(windows)
     if jev is None:
+        if os.environ.get("JEV_MODE", "").lower() == "heuristic":
+            has_high = any(s.severity == "high" for s in signals)
+            prob = 0.85 if has_high else 0.40
+            return {
+                "escalate": True,
+                "confirmed": prob >= FRUSTRATION_CONFIRMATION_GATE,
+                "probability": prob,
+                "state": state,
+                "signals": [s.to_dict() for s in signals],
+                "heuristic": True,
+            }
         return {"escalate": True, "confirmed": False, "signals": [s.to_dict() for s in signals],
                 "reason": "no Jev callable injected; signal recorded as deferred, not confirmed"}
     response = jev(state, JEV_QUESTIONS)
