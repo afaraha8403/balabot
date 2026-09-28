@@ -60,13 +60,14 @@ import {DecisionsScreen} from './screens/DecisionsScreen';
 import {GovernanceScreen} from './screens/GovernanceScreen';
 import {OpsScreen} from './screens/OpsScreen';
 import {CostScreen} from './screens/CostScreen';
-import {CommandPalette} from './CommandPalette';
+import {CommandPalette, isCommandPaletteHotkey} from './CommandPalette';
 import {InterventionCard} from './InterventionCard';
 import {DraftCard, parseDraftsFromContent} from './DraftCard';
 import {VoiceMemoCard} from './VoiceMemoCard';
 import {HoldEverythingControl} from './HoldEverythingControl';
 import {RoutinesList} from './RoutinesList';
 import {FilePreviewCard} from './FilePreviewCard';
+import {MessageHoverMetadata} from './MessageHoverMetadata';
 import {
   api,
   streamChat,
@@ -442,7 +443,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       // Cmd/Ctrl+K: Command Palette
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if (isCommandPaletteHotkey(e)) {
         e.preventDefault();
         setShowCommandPalette(prev => !prev);
       }
@@ -979,6 +980,7 @@ export default function App() {
                     placeholder="Search bots… (Ctrl+Shift+F)"
                     value={rosterQuery}
                     onChange={setRosterQuery}
+                    type={"search" as any}
                     size="sm"
                     width={`${Math.max(100, roster.size - 90)}px`}
                   />
@@ -1184,7 +1186,8 @@ export default function App() {
                         tooltip={false}
                       />
                     }>
-                    <ChatMessageBubble
+                    <div className="message-row-container">
+                      <ChatMessageBubble
                       variant={isUser ? 'filled' : 'ghost'}
                       group={group}
                       name={
@@ -1281,52 +1284,51 @@ export default function App() {
                         </VStack>
                       )}
                     </ChatMessageBubble>
-                    {/* Reactions and Reply-in-Thread action */}
-                    <HStack gap={1} vAlign="center" wrap="wrap" style={{marginTop: '2px', paddingInline: '4px'}}>
-                      {Object.entries(m.reactions || {}).map(([emoji, count]) =>
-                        count > 0 ? (
-                          <Button
-                            key={emoji}
-                            label={`${emoji} ${count}`}
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleToggleReaction(i, emoji)}
-                          />
-                        ) : null,
-                      )}
-                      <HStack gap={1} vAlign="center">
-                        {['👍', '❤️', '🚀'].map(emoji => (
-                          <button
-                            key={emoji}
-                            type="button"
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              cursor: 'pointer',
-                              padding: '2px 4px',
-                              fontSize: '13px',
-                              opacity: 0.6,
-                            }}
-                            title={`React with ${emoji}`}
-                            aria-label={`React ${emoji}`}
-                            onClick={() => handleToggleReaction(i, emoji)}
-                          >
-                            {emoji}
-                          </button>
-                        ))}
-                        <Button
-                          label="Reply"
-                          size="sm"
-                          variant="ghost"
-                          onClick={() =>
-                            setReplyingToMessage({
-                              sender: isUser ? 'You' : activeBot.name,
-                              text: m.content,
-                            })
-                          }
-                        />
-                      </HStack>
-                    </HStack>
+                      {/* Reactions and Reply-in-Thread action with MessageHoverMetadata */}
+                      <MessageHoverMetadata
+                        side={isUser ? 'start' : 'end'}
+                        pinned={Object.values(m.reactions || {}).some(c => c > 0)}
+                      >
+                        <HStack gap={1} vAlign="center" wrap="wrap" style={{paddingInline: '4px'}}>
+                          {Object.entries(m.reactions || {}).map(([emoji, count]) =>
+                            count > 0 ? (
+                              <Button
+                                key={emoji}
+                                label={`${emoji} ${count}`}
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleToggleReaction(i, emoji)}
+                              />
+                            ) : null,
+                          )}
+                          <HStack gap={1} vAlign="center">
+                            {['👍', '❤️', '🚀'].map(emoji => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                className="message-reaction-button"
+                                title={`React with ${emoji}`}
+                                aria-label={`React ${emoji}`}
+                                onClick={() => handleToggleReaction(i, emoji)}
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                            <Button
+                              label="Reply"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() =>
+                                setReplyingToMessage({
+                                  sender: isUser ? 'You' : activeBot.name,
+                                  text: m.content,
+                                })
+                              }
+                            />
+                          </HStack>
+                        </HStack>
+                      </MessageHoverMetadata>
+                    </div>
                   </ChatMessageRow>
                 );
               })}

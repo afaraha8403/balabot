@@ -48,8 +48,7 @@ export function BotDeleteDialog({bot, onClose, onDeleted}: Props) {
     <Dialog
       isOpen
       onOpenChange={open => !open && onClose()}
-      purpose="form"
-      variant="fullscreen">
+      purpose="form">
       <DialogHeader
         title={`Delete ${bot.name}?`}
         subtitle="This removes the bot, its sessions and its memory from the fleet."

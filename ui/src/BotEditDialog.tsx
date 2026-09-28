@@ -76,14 +76,13 @@ export function BotEditDialog({bot, onClose, onUpdated}: Props) {
     <Dialog
       isOpen
       onOpenChange={open => !open && onClose()}
-      purpose="form"
-      variant="fullscreen">
+      purpose="form">
       <DialogHeader
         title={`Edit ${bot.name}`}
         subtitle="Changes rename and re-describe the bot everywhere it appears."
         onOpenChange={onClose}
       />
-      <VStack gap={3} padding={4}>
+      <VStack gap={3} padding={4} maxWidth={560}>
         {error ? (
           <Banner
             status="error"

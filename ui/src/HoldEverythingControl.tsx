@@ -148,10 +148,11 @@ export function HoldEverythingControl({
             right: 0,
             zIndex: 1000,
             minWidth: '280px',
-            backgroundColor: 'var(--surface-overlay, #1c1c1e)',
-            border: '1px solid var(--border-default, rgba(255, 255, 255, 0.15))',
-            borderRadius: 'var(--radius-md, 8px)',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            backgroundColor: 'var(--popover)',
+            color: 'var(--popover-foreground)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-lg)',
+            boxShadow: '0 8px 24px var(--overlay)',
             padding: '10px',
           }}
         >

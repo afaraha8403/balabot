@@ -111,8 +111,7 @@ export function BotCreationDialog({bots, onClose, onFleetChanged}: Props) {
     <Dialog
       isOpen
       onOpenChange={open => !open && onClose()}
-      purpose="form"
-      variant="fullscreen">
+      purpose="form">
       <DialogHeader
         title="Create a bot — with your consent"
         subtitle="Propose → you approve → create → fleet registration. Nothing is created without explicit human approval."

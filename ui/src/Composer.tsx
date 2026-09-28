@@ -113,17 +113,26 @@ export function Composer({
       });
     }
 
-    // / skill trigger: reference a saved skill (GrokBot spec)
-    if (skills.length > 0) {
-      list.push({
-        character: '/',
-        searchSource: createStaticSource(
-          skills.map(s => ({id: s.name, label: s.name})),
-        ),
-        onSelect: item => `/${item.label} `,
-        menuLabel: 'Reference Skill',
-      });
-    }
+    // / slash trigger: reference skills and slash actions (Polaris parity)
+    const slashItems = [
+      ...skills.map(s => ({id: s.name, label: s.name})),
+      {id: 'chat-settings', label: 'chat settings'},
+      {id: 'settings-general', label: 'settings: general'},
+      {id: 'settings-usage', label: 'settings: usage'},
+      ...(skills.length === 0
+        ? [
+            {id: 'no-skills', label: 'no skills installed'},
+            {id: 'skill-library', label: 'open skill library'},
+          ]
+        : []),
+    ];
+
+    list.push({
+      character: '/',
+      searchSource: createStaticSource(slashItems),
+      onSelect: item => `/${item.label} `,
+      menuLabel: 'Reference Skill & Actions',
+    });
 
     return list;
   }, [bots, groups, skills]);

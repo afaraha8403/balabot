@@ -4,6 +4,7 @@ import {Theme} from '@astryxdesign/core/theme';
 import {balabotTheme} from './balabot';
 import '@astryxdesign/core/reset.css';
 import '@astryxdesign/core/astryx.css';
+import './tokens.css';
 import './balabot.css';
 import App from './App';
 

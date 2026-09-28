@@ -114,10 +114,10 @@ export function DraftCard({draft, onSend, onDiscard}: Props) {
               padding: '8px 12px',
               fontFamily: 'inherit',
               fontSize: '14px',
-              backgroundColor: 'var(--surface-sunken, rgba(255, 255, 255, 0.05))',
-              color: 'inherit',
-              border: '1px solid var(--border-default, rgba(255, 255, 255, 0.15))',
-              borderRadius: 'var(--radius-md, 6px)',
+              backgroundColor: 'var(--input)',
+              color: 'var(--foreground)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)',
               resize: 'vertical',
             }}
           />

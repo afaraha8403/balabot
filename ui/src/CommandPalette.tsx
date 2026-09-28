@@ -44,6 +44,17 @@ type PaletteItem = {
   onExecute: () => void;
 };
 
+export function isCommandPaletteHotkey(event: KeyboardEvent): boolean {
+  if (event.repeat || event.altKey || event.shiftKey) return false;
+  if (!(event.metaKey || event.ctrlKey)) return false;
+  return event.key.toLowerCase() === 'k';
+}
+
+function isApplePlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
+}
+
 export function CommandPalette({
   isOpen,
   onClose,
@@ -57,7 +68,12 @@ export function CommandPalette({
 }: Props) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [modKey, setModKey] = useState('⌘');
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setModKey(isApplePlatform() ? '⌘' : 'Ctrl+');
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -221,6 +237,23 @@ export function CommandPalette({
     );
   }, [items, query]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    function onGlobalKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.repeat) {
+        return;
+      }
+      if (!/^[1-9]$/.test(event.key)) return;
+      const index = Number(event.key) - 1;
+      const target = filteredItems[index];
+      if (!target) return;
+      event.preventDefault();
+      target.onExecute();
+    }
+    window.addEventListener('keydown', onGlobalKeyDown);
+    return () => window.removeEventListener('keydown', onGlobalKeyDown);
+  }, [filteredItems, isOpen]);
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -286,7 +319,14 @@ export function CommandPalette({
                   ) : undefined
                 }
                 endContent={
-                  <Badge label={item.category} variant="neutral" />
+                  <HStack gap={1} vAlign="center">
+                    <Badge label={item.category} variant="neutral" />
+                    {idx < 9 ? (
+                      <span className="rk-kbd-shortcut">
+                        {modKey}{idx + 1}
+                      </span>
+                    ) : null}
+                  </HStack>
                 }
               />
             ))}
