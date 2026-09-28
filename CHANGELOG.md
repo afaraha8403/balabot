@@ -9,4 +9,7 @@
 - Implement and wire durable per-session message queueing (`balabot.queueing`): `GET/POST /api/queue/{session_id}` routes and FIFO draining at the top of `/api/chat` turns with busy/idle state tracking.
 - Wire skill library management routes: `POST /api/org/skills/pin`, `POST /api/org/skills/promote`, and `POST /api/org/skills/curate` to `balabot.skills_registry`.
 - Wire Jev memory relevance ladder into Hermes balabot-jev memory prefetch with candidate re-ranking.
+- Implement and wire growth-loop audit trail and rollback ledger (`balabot.growth`, `bot_tools.py`, routes `GET/POST /api/growth/audit` and `/api/growth/audit/{id}/rollback`).
+- Wire growth loop frustration sensor into `/api/chat` turn stream, recording signals into governor ledger with routes `GET /api/growth/ledger` and `POST /api/growth/run`.
+- Implement and wire attachments intake: `POST /api/attachments` upload, `GET /api/attachments/{id}/{name}`, Composer UI upload handling, and `/api/chat` context delivery.
 

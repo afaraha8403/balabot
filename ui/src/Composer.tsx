@@ -10,8 +10,7 @@ import {IconButton} from '@astryxdesign/core/IconButton';
 import {HStack} from '@astryxdesign/core/Stack';
 import {VStack} from '@astryxdesign/core/VStack';
 import {IconAttach, IconFile} from './icons';
-
-export type Attachment = {id: string; name: string};
+import {uploadAttachment, type Attachment} from './api';
 
 type Props = {
   isStreaming: boolean;
@@ -40,12 +39,20 @@ export function Composer({isStreaming, onSubmit, onStop, isDisabled}: Props) {
     setAttachments([]);
   };
 
-  const addFiles = (files: File[]) => {
-    const next = files.map(f => ({
-      id: `a_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      name: f.name,
-    }));
-    setAttachments(prev => [...prev, ...next]);
+  const addFiles = async (files: File[]) => {
+    const uploaded = await Promise.all(
+      files.map(async f => {
+        try {
+          return await uploadAttachment(f);
+        } catch {
+          return {
+            id: `a_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            name: f.name,
+          };
+        }
+      }),
+    );
+    setAttachments(prev => [...prev, ...uploaded]);
   };
 
   return (

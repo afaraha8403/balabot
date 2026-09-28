@@ -201,3 +201,37 @@ def test_cli_json_stdout(org_env, tmp_path, capsys):
         capture_output=True, text=True, env=env, cwd=REPO_ROOT)
     assert r.returncode == 1
     assert "leaky" not in r.stdout and "value" in r.stderr
+
+
+def test_growth_audit_tools_and_cli(org_env, capsys):
+    from balabot import bot_tools as bt
+    res = bt.record_growth_audit(
+        "promote_skill", "skills_registry", "promoted tool after testing",
+        author="principal", name="principal", rollback_patch="demote skill",
+    )
+    assert res["status"] == "applied"
+    cid = res["change_id"]
+
+    rb = bt.rollback_growth_audit(cid, reason="failed validation", name="principal")
+    assert rb["status"] == "rolled_back"
+    assert rb["reverses_change_id"] == cid
+
+    # CLI test
+    code = bt.main([
+        "record_growth_audit",
+        "--action", "patch_prompt",
+        "--target", "AGENTS.md",
+        "--description", "fix ambiguous rule",
+        "--author", "principal",
+    ])
+    assert code == 0
+    cli_out = json.loads(capsys.readouterr().out)
+    assert cli_out["action"] == "patch_prompt"
+    cid2 = cli_out["change_id"]
+
+    code2 = bt.main(["rollback_growth_audit", "--change-id", cid2, "--reason", "caused regression"])
+    assert code2 == 0
+    cli_rb = json.loads(capsys.readouterr().out)
+    assert cli_rb["status"] == "rolled_back"
+    assert cli_rb["reverses_change_id"] == cid2
+

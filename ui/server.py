@@ -32,9 +32,12 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import secrets
 import subprocess
+import tempfile
 import time
+import uuid
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -464,6 +467,157 @@ def jev_incidents():
     from balabot.bootstrap import list_jev_incidents  # noqa: E402
     rows = list_jev_incidents("principal")
     return {"incidents": rows, "count": len(rows)}
+
+
+# ── Growth loop & audit trail ────────────────────────────────────────────────
+@app.get("/api/growth/ledger")
+def growth_ledger(name: str = "governor"):
+    """Governor's frustration ledger and calculated frustration rate."""
+    from balabot.growth import read_frustration_entries, frustration_rate
+    entries = read_frustration_entries(name)
+    rate = frustration_rate(entries)
+    return {
+        "available": True,
+        "persona": name,
+        "entries": entries,
+        "count": len(entries),
+        "frustration_rate_per_1000": rate,
+    }
+
+
+@app.post("/api/growth/run")
+def growth_run(name: str = "principal", ledger_name: str = "governor"):
+    """Principal's growth review job over the accumulated frustration ledger."""
+    from balabot.growth import growth_job
+    proposal = growth_job(name=name, ledger_name=ledger_name)
+    return {"available": True, "job": proposal}
+
+
+@app.get("/api/growth/audit")
+def growth_audit(name: str = "principal"):
+    """Growth loop audit trail of principal changes."""
+    from balabot.growth import read_audit_entries
+    entries = read_audit_entries(name)
+    return {"available": True, "persona": name, "entries": entries, "count": len(entries)}
+
+
+@app.post("/api/growth/audit")
+async def growth_audit_record(request: Request):
+    """Record a change into the growth loop audit trail."""
+    from balabot.growth import record_audit_entry, GrowthError
+    body = await request.json()
+    action = body.get("action")
+    target = body.get("target")
+    description = body.get("description")
+    if not (action and target and description):
+        raise HTTPException(status_code=400, detail="action, target, description are required")
+    try:
+        entry = record_audit_entry(
+            action=action,
+            target=target,
+            description=description,
+            before_state=body.get("before_state"),
+            after_state=body.get("after_state"),
+            rollback_patch=body.get("rollback_patch"),
+            author=body.get("author", "principal"),
+            name=body.get("persona", "principal"),
+            change_id=body.get("change_id"),
+        )
+        return {"recorded": True, "entry": entry}
+    except GrowthError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/growth/audit/{change_id}/rollback")
+async def growth_audit_rollback(change_id: str, request: Request):
+    """Roll back a recorded growth change."""
+    from balabot.growth import rollback_audit_entry, GrowthError
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    reason = body.get("reason", "")
+    persona = body.get("persona", "principal")
+    try:
+        res = rollback_audit_entry(change_id, name=persona, reason=reason)
+        return {"rolled_back": True, "result": res}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except GrowthError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── attachments: intake and serving for in-chat files ───────────────────────
+def _attachments_dir() -> pathlib.Path:
+    env = os.environ.get("BALABOT_DATA_ROOT")
+    if env:
+        d = pathlib.Path(env) / "attachments"
+    else:
+        d = pathlib.Path("/opt/data/attachments")
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        d = pathlib.Path(tempfile.gettempdir()) / "balabot_attachments"
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+@app.post("/api/attachments")
+async def upload_attachment(request: Request):
+    """Store an uploaded file attachment and return its URL and server path."""
+    import base64
+    content_type = request.headers.get("content-type", "")
+    attachments_dir = _attachments_dir()
+    file_id = f"att_{int(time.time() * 1000):x}_{uuid.uuid4().hex[:6]}"
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        upload_file = form.get("file")
+        if not upload_file:
+            raise HTTPException(status_code=400, detail="missing file in form")
+        filename = getattr(upload_file, "filename", "file") or "file"
+        safe_name = re.sub(r"[^\w\-.]", "_", pathlib.Path(filename).name)
+        dest_filename = f"{file_id}_{safe_name}"
+        dest_path = attachments_dir / dest_filename
+        data = await upload_file.read()
+        dest_path.write_bytes(data)
+        size = len(data)
+        mime = getattr(upload_file, "content_type", "application/octet-stream")
+    else:
+        body = await request.json()
+        filename = body.get("name") or "file"
+        safe_name = re.sub(r"[^\w\-.]", "_", pathlib.Path(filename).name)
+        dest_filename = f"{file_id}_{safe_name}"
+        dest_path = attachments_dir / dest_filename
+        raw_b64 = body.get("content") or ""
+        try:
+            data = base64.b64decode(raw_b64)
+        except Exception:
+            data = raw_b64.encode("utf-8")
+        dest_path.write_bytes(data)
+        size = len(data)
+        mime = body.get("mime_type") or "application/octet-stream"
+
+    url = f"/api/attachments/{file_id}/{safe_name}"
+    return {
+        "id": file_id,
+        "name": safe_name,
+        "size": size,
+        "mime_type": mime,
+        "url": url,
+        "path": str(dest_path),
+    }
+
+
+@app.get("/api/attachments/{file_id}/{filename}")
+def get_attachment(file_id: str, filename: str):
+    """Retrieve an uploaded file attachment."""
+    safe_name = re.sub(r"[^\w\-.]", "_", pathlib.Path(filename).name)
+    target = _attachments_dir() / f"{file_id}_{safe_name}"
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="attachment not found")
+    return FileResponse(target, filename=safe_name)
 
 
 # ── sub-agents: live rows from the container's real spawn ledger ─────────────
@@ -2138,6 +2292,43 @@ async def chat(request: Request):
     turn_text = next((str(m.get("content") or "") for m in reversed(messages)
                       if isinstance(m, dict) and m.get("role") == "user"),
                      "")
+
+    attachments = body.get("attachments") or []
+    if attachments:
+        att_lines = []
+        for att in attachments:
+            name = att.get("name", "file")
+            p = att.get("path") or att.get("url") or ""
+            att_lines.append(f"- {name} ({p})")
+        att_block = "\n\n[Attached files:\n" + "\n".join(att_lines) + "\n]"
+        for m in reversed(messages):
+            if isinstance(m, dict) and m.get("role") == "user":
+                m["content"] = str(m.get("content") or "") + att_block
+                break
+
+    # Frustration sensor (balabot.growth Layer 1 + 2) -> governor ledger
+    if turn_text:
+        try:
+            from balabot import growth
+            signals = growth.scan(turn_text)
+            if signals:
+                jev_cl = _jev_chat_client()
+                jev_fn = jev_cl.system_one if jev_cl is not None else None
+                classification = growth.classify(signals, turn_text, jev_fn)
+                growth_entry = {
+                    "text": turn_text,
+                    "bot_id": profile,
+                    "session_id": session_id,
+                    "escalate": classification.get("escalate", False),
+                    "confirmed": classification.get("confirmed", False),
+                    "probability": classification.get("probability"),
+                    "signals": classification.get("signals", []),
+                    "message_count": 1,
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+                growth.record_frustration(growth_entry, name="governor")
+        except Exception:
+            pass
 
     # Jev + durable session-store preparation happens BEFORE the upstream
     # stream opens. Every path below degrades honestly: a failure drops the

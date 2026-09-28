@@ -35,6 +35,15 @@ export type JevCarrier = {
 };
 export type JevEvent = {degraded: boolean; reason: string};
 
+export type Attachment = {
+  id: string;
+  name: string;
+  size?: number;
+  mime_type?: string;
+  url?: string;
+  path?: string;
+};
+
 export type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -46,6 +55,8 @@ export type ChatMessage = {
   /** Jev USER-message carriers (skill relevance / session resume) emitted while
    * producing this message. Cache-safe: the system prompt is never touched. */
   jevCarriers?: JevCarrier[];
+  /** File attachments associated with this message. */
+  attachments?: Attachment[];
 };
 
 export type Session = {
@@ -285,6 +296,31 @@ export async function checkHealth(): Promise<boolean> {
 }
 
 /**
+ * POST /api/attachments — upload file attachment.
+ */
+export async function uploadAttachment(file: File): Promise<Attachment> {
+  const reader = new FileReader();
+  const base64 = await new Promise<string>((resolve, reject) => {
+    reader.onload = () => {
+      const res = (reader.result as string) || '';
+      const comma = res.indexOf(',');
+      resolve(comma >= 0 ? res.slice(comma + 1) : res);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  return api<Attachment>('/api/attachments', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: file.name,
+      size: file.size,
+      mime_type: file.type || 'application/octet-stream',
+      content: base64,
+    }),
+  });
+}
+
+/**
  * POST /api/chat and parse the SSE-ish stream. Supports both OpenAI-style
  * frames (`data: {"choices":[{"delta":{"content":"tok"}}]}`) and named events
  * (`event: token` / `event: final` / `event: done` / `event: error`).
@@ -314,14 +350,19 @@ export async function streamChat(
   onJevEvent?: (e: JevEvent) => void,
   /** The server-backed session id the turn runs under. */
   sessionId?: string,
+  /** Uploaded or referenced attachments for this user message. */
+  attachments?: Attachment[],
 ): Promise<string> {
+  const payload: Record<string, unknown> = {bot_id: botId, messages};
+  if (sessionId) payload.session_id = sessionId;
+  if (attachments && attachments.length > 0) payload.attachments = attachments;
+
   const res = await fetch('/api/chat', {
     method: 'POST',
     credentials: 'include',
     signal,
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(sessionId ? {bot_id: botId, messages, session_id: sessionId}
-                                  : {bot_id: botId, messages}),
+    body: JSON.stringify(payload),
   });
   if (!res.ok || !res.body) throw new Error(`chat stream failed: ${res.status}`);
 

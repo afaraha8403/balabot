@@ -39,6 +39,8 @@ __all__ = [
     "message_agent",
     "request_intervention",
     "list_pending_requests",
+    "record_growth_audit",
+    "rollback_growth_audit",
     "enqueue_org_request",
     "main",
 ]
@@ -384,6 +386,42 @@ def list_pending_requests(bot_id: str | None = None) -> list[dict]:
     return rows
 
 
+def record_growth_audit(
+    action: str,
+    target: str,
+    description: str,
+    *,
+    before_state: Any = None,
+    after_state: Any = None,
+    rollback_patch: Any = None,
+    author: str = "principal",
+    name: str = "principal",
+) -> dict:
+    """Record a growth-loop change with rollback instructions into the audit ledger."""
+    from balabot.growth import record_audit_entry
+    return record_audit_entry(
+        action=action,
+        target=target,
+        description=description,
+        before_state=before_state,
+        after_state=after_state,
+        rollback_patch=rollback_patch,
+        author=author,
+        name=name,
+    )
+
+
+def rollback_growth_audit(
+    change_id: str,
+    *,
+    reason: str = "",
+    name: str = "principal",
+) -> dict:
+    """Reverse a previous growth-loop change recorded in the audit ledger."""
+    from balabot.growth import rollback_audit_entry
+    return rollback_audit_entry(change_id, name=name, reason=reason)
+
+
 # ---- CLI -------------------------------------------------------------------
 
 
@@ -404,6 +442,8 @@ def main(argv: list[str] | None = None) -> int:
         "message_agent": ["--from", "--to", "--message"],
         "request_intervention": ["--bot", "--reason", "--hint", "--url"],
         "list_pending_requests": ["--bot"],
+        "record_growth_audit": ["--action", "--target", "--description", "--author", "--patch", "--bot"],
+        "rollback_growth_audit": ["--change-id", "--reason", "--bot"],
     }
     allowed = known_flags.get(tool)
     if allowed is not None:
@@ -461,6 +501,27 @@ def main(argv: list[str] | None = None) -> int:
         if tool == "list_pending_requests":
             _json_out(list_pending_requests(_opt("--bot")))
             return 0
+        if tool == "record_growth_audit":
+            action, target, desc = _opt("--action"), _opt("--target"), _opt("--description")
+            if not (action and target and desc):
+                raise ValueError("record_growth_audit needs --action, --target, --description")
+            _json_out(record_growth_audit(
+                action, target, desc,
+                author=_opt("--author", "principal"),
+                rollback_patch=_opt("--patch"),
+                name=_opt("--bot", "principal"),
+            ))
+            return 0
+        if tool == "rollback_growth_audit":
+            cid = _opt("--change-id")
+            if not cid:
+                raise ValueError("rollback_growth_audit needs --change-id <ID>")
+            _json_out(rollback_growth_audit(
+                cid,
+                reason=_opt("--reason", ""),
+                name=_opt("--bot", "principal"),
+            ))
+            return 0
     except (ValueError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -471,7 +532,9 @@ def main(argv: list[str] | None = None) -> int:
           "list_org_skills --bot B | "
           "message_agent --from B --to B --message M | "
           "request_intervention --bot B --reason R [--hint H] [--url U] | "
-          "list_pending_requests [--bot B]",
+          "list_pending_requests [--bot B] | "
+          "record_growth_audit --action A --target T --description D [--author AU] [--patch P] [--bot B] | "
+          "rollback_growth_audit --change-id ID [--reason R] [--bot B]",
           file=sys.stderr)
     return 2
 

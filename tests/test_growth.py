@@ -216,3 +216,178 @@ def test_frustration_rate_zero_messages_is_zero_not_crash() -> None:
 def test_frustration_rate_default_denominator_is_one_per_entry() -> None:
     entries = [{"confirmed": True, "signals": [{"marker": "useless", "severity": "high"}]}]
     assert growth.frustration_rate(entries) == 1000.0
+
+
+# ---------------------------------------------------------------------------
+# Layer 5 — Growth-loop audit trail and rollback
+# ---------------------------------------------------------------------------
+
+def test_record_and_read_audit_entry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BALABOT_DATA_ROOT", str(tmp_path))
+    rec = growth.record_audit_entry(
+        action="patch_skill",
+        target="skills_registry",
+        description="add missing skill for user complaint",
+        before_state={"skills": ["a"]},
+        after_state={"skills": ["a", "b"]},
+        rollback_patch="remove skill b",
+        author="principal",
+    )
+    assert rec["change_id"].startswith("growth-")
+    assert rec["status"] == "applied"
+    entries = growth.read_audit_entries("principal")
+    assert len(entries) == 1
+    assert entries[0]["change_id"] == rec["change_id"]
+    assert entries[0]["rollback_patch"] == "remove skill b"
+
+
+def test_rollback_audit_entry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BALABOT_DATA_ROOT", str(tmp_path))
+    rec = growth.record_audit_entry(
+        action="route_change",
+        target="model_router",
+        description="switch to stronger model",
+        before_state={"model": "fast"},
+        after_state={"model": "strong"},
+        author="principal",
+    )
+    cid = rec["change_id"]
+    rb = growth.rollback_audit_entry(cid, name="principal", reason="model was too slow")
+    assert rb["reverses_change_id"] == cid
+    assert rb["status"] == "rolled_back"
+    assert rb["restored_state"] == {"model": "fast"}
+
+    # Repeated rollback is safe and reports already_rolled_back
+    rb2 = growth.rollback_audit_entry(cid, name="principal")
+    assert rb2.get("already_rolled_back") is True
+
+
+def test_rollback_unknown_id_raises_keyerror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BALABOT_DATA_ROOT", str(tmp_path))
+    with pytest.raises(KeyError):
+        growth.rollback_audit_entry("growth-nonexistent", name="principal")
+
+
+# ---------------------------------------------------------------------------
+# HTTP Layer: routes /api/growth/* and /api/attachments/*
+# ---------------------------------------------------------------------------
+
+def test_growth_and_audit_http_routes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ui"))
+    import server
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("BALABOT_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(server, "DASHBOARD_PASSWORD", "pw")
+    client = TestClient(server.app)
+    client.headers.update({"Authorization": "Basic YWxpOnB3"})
+
+    # 1. Initially empty ledger
+    r = client.get("/api/growth/ledger?name=governor")
+    assert r.status_code == 200
+    assert r.json()["count"] == 0
+    assert r.json()["frustration_rate_per_1000"] == 0.0
+
+    # 2. Record audit change
+    r = client.post("/api/growth/audit", json={
+        "action": "propose_skill_patch",
+        "target": "skills_registry",
+        "description": "add stripe payment skill",
+        "before_state": None,
+        "after_state": "stripe skill installed",
+        "rollback_patch": "uninstall stripe skill",
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["recorded"] is True
+    cid = data["entry"]["change_id"]
+
+    # 3. Read audit trail
+    r = client.get("/api/growth/audit?name=principal")
+    assert r.status_code == 200
+    audit_list = r.json()["entries"]
+    assert len(audit_list) == 1
+    assert audit_list[0]["change_id"] == cid
+
+    # 4. Rollback change
+    r = client.post(f"/api/growth/audit/{cid}/rollback", json={"reason": "test rollback"})
+    assert r.status_code == 200
+    assert r.json()["rolled_back"] is True
+    assert r.json()["result"]["status"] == "rolled_back"
+
+    # 5. Run growth job
+    r = client.post("/api/growth/run")
+    assert r.status_code == 200
+    assert r.json()["available"] is True
+    assert "job" in r.json()
+
+
+def test_attachments_http_routes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ui"))
+    import server
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("BALABOT_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(server, "DASHBOARD_PASSWORD", "pw")
+    client = TestClient(server.app)
+    client.headers.update({"Authorization": "Basic YWxpOnB3"})
+
+    # 1. JSON upload
+    r = client.post("/api/attachments", json={
+        "name": "sample.txt",
+        "content": "SGVsbG8gQmFsYUJvdCE=",  # "Hello BalaBot!" base64
+        "mime_type": "text/plain",
+    })
+    assert r.status_code == 200
+    att = r.json()
+    assert att["name"] == "sample.txt"
+    assert att["size"] == 14
+    file_id = att["id"]
+
+    # 2. Download attachment
+    dl = client.get(att["url"])
+    assert dl.status_code == 200
+    assert dl.text == "Hello BalaBot!"
+
+    # 3. Chat with frustration phrase records in governor ledger
+    import httpx
+    # Fake upstream chat response
+    async def fake_stream(*a, **kw):
+        yield b'data: {"choices":[{"delta":{"content":"Understood."}}]}\n\n'
+    monkeypatch.setattr(server, "_jev_chat_client", lambda: None)
+    monkeypatch.setattr(server, "_all_bot_meta", lambda: {"principal": {}})
+
+    class FakeAsyncClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        def stream(self, method, url, **kw):
+            class StreamCtx:
+                async def __aenter__(self_):
+                    class FakeResp:
+                        status_code = 200
+                        def aiter_lines(self__):
+                            async def gen():
+                                yield 'data: {"choices":[{"delta":{"content":"Understood."}}]}'
+                            return gen()
+                    return FakeResp()
+                async def __aexit__(self_, *a): pass
+            return StreamCtx()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    chat_resp = client.post("/api/chat", json={
+        "bot_id": "principal",
+        "messages": [{"role": "user", "content": "this is broken again?!"}],
+        "attachments": [att],
+    })
+    assert chat_resp.status_code == 200
+
+    # Frustration entry was recorded in governor ledger
+    ledger = growth.read_frustration_entries("governor")
+    assert len(ledger) >= 1
+    assert any("this is broken" in str(e.get("signals")) for e in ledger)
+
+

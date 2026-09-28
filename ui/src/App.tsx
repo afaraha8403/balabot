@@ -58,10 +58,11 @@ import {DecisionsScreen} from './screens/DecisionsScreen';
 import {GovernanceScreen} from './screens/GovernanceScreen';
 import {OpsScreen} from './screens/OpsScreen';
 import {CostScreen} from './screens/CostScreen';
-import {api, streamChat, checkHealth, getFleet, getSubAgents, getSessions, getServerSession, createServerSession, deleteServerSession, type Bot, type ChatMessage, type Handoff, type JevCarrier, type Session, type SecretCard, type SubAgent, type ToolProgress, type SessionsResponse} from './api';
+import {api, streamChat, checkHealth, getFleet, getSubAgents, getSessions, getServerSession, createServerSession, deleteServerSession, type Bot, type ChatMessage, type Handoff, type JevCarrier, type Session, type SecretCard, type SubAgent, type ToolProgress, type SessionsResponse, type Attachment} from './api';
 import {
   IconAgentComputer,
   IconAgents,
+  IconFile,
   IconBotKnowledge,
   IconClose,
   IconCollapsePanel,
@@ -345,10 +346,15 @@ export default function App() {
     setIsStreaming(false);
   };
 
-  const send = async (text: string) => {
+  const send = async (text: string, attachments?: Attachment[]) => {
     if (!activeBot) return;
     const session = ensureSession(activeBot);
-    const userMsg: ChatMessage = {role: 'user', content: text, at: Date.now()};
+    const userMsg: ChatMessage = {
+      role: 'user',
+      content: text,
+      at: Date.now(),
+      attachments: attachments?.length ? attachments : undefined,
+    };
     const history = [...session.messages, userMsg];
 
     patchSession(session.id, s => ({...s, messages: history, title: s.messages.length === 0 ? text.slice(0, 40) : s.title}));
@@ -409,6 +415,7 @@ export default function App() {
           setBanner(`Jev (degraded): ${e.reason}`);
         },
         session.id,
+        attachments,
       );
       const finalMsg: ChatMessage = {
         role: 'assistant',
@@ -681,7 +688,7 @@ export default function App() {
               composer={
               <Composer
                 isStreaming={isStreaming}
-                onSubmit={text => void send(text)}
+                onSubmit={(text, attachments) => void send(text, attachments)}
                 onStop={stop}
               />
             }
@@ -748,7 +755,16 @@ export default function App() {
                         )
                       }>
                       {isUser ? (
-                        m.content
+                        <VStack gap={1} align="start">
+                          <Text>{m.content}</Text>
+                          {m.attachments && m.attachments.length > 0 ? (
+                            <HStack gap={1} wrap="wrap">
+                              {m.attachments.map(a => (
+                                <Token key={a.id} label={a.name} size="sm" icon={<IconFile />} />
+                              ))}
+                            </HStack>
+                          ) : null}
+                        </VStack>
                       ) : (
                         <VStack gap={2}>
                           {showThinking && m.thinking ? (

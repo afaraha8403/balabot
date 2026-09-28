@@ -297,7 +297,7 @@ def record_frustration(entry: dict[str, Any], name: str = GOVERNOR) -> dict[str,
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(yaml.safe_dump(record, sort_keys=False))
+            fh.write(yaml.safe_dump(record, sort_keys=False) + "---\n")
     except OSError as exc:
         raise GrowthError(f"could not write frustration ledger entry for '{name}': {exc}") from exc
     return record
@@ -426,6 +426,127 @@ def frustration_rate(entries: list[dict[str, Any]]) -> float:
     return round(confirmed_signals * 1000.0 / total_messages, 3)
 
 
+# ---------------------------------------------------------------------------
+# LAYER 5 — Growth-loop audit trail and rollback ledger
+# ---------------------------------------------------------------------------
+
+def _audit_path(name: str = PRINCIPAL) -> Path:
+    from .bootstrap import _data_root as _dr
+    return _dr() / "profiles" / name / LEDGER_DIRNAME / "growth_audit.jsonl"
+
+
+def record_audit_entry(
+    action: str,
+    target: str,
+    description: str,
+    *,
+    before_state: Any = None,
+    after_state: Any = None,
+    rollback_patch: Any = None,
+    author: str = PRINCIPAL,
+    name: str = PRINCIPAL,
+    change_id: str | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Record an audit trail entry for a principal-driven growth or config change.
+
+    Carries before/after state and rollback instructions so any change can be
+    inspected and reversed. Fails loud with GrowthError if the ledger cannot be written.
+    """
+    import uuid
+
+    _require_non_empty(action, "action")
+    _require_non_empty(target, "target")
+    _require_non_empty(description, "description")
+    if not change_id:
+        change_id = f"growth-{uuid.uuid4().hex[:8]}"
+
+    record = {
+        "change_id": change_id,
+        "type": "growth-audit-entry",
+        "action": action,
+        "target": target,
+        "description": description,
+        "before_state": before_state,
+        "after_state": after_state,
+        "rollback_patch": rollback_patch,
+        "author": author,
+        "status": "applied",
+        "timestamp": _now(),
+        **extra,
+    }
+
+    path = _audit_path(name)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(yaml.safe_dump(record, sort_keys=False) + "---\n")
+    except OSError as exc:
+        raise GrowthError(f"could not write growth audit entry for '{name}': {exc}") from exc
+    return record
+
+
+def read_audit_entries(name: str = PRINCIPAL) -> list[dict[str, Any]]:
+    """Read every growth audit trail entry, oldest first."""
+    path = _audit_path(name)
+    if not path.is_file():
+        return []
+    entries: list[dict[str, Any]] = []
+    for chunk in path.read_text(encoding="utf-8").split("---\n"):
+        if not chunk.strip():
+            continue
+        try:
+            rec = yaml.safe_load(chunk)
+        except yaml.YAMLError:
+            continue
+        if isinstance(rec, dict):
+            entries.append(rec)
+    return entries
+
+
+def rollback_audit_entry(
+    change_id: str,
+    *,
+    name: str = PRINCIPAL,
+    reason: str = "",
+) -> dict[str, Any]:
+    """Roll back a previous growth change by recording a reversal audit entry.
+
+    Fails loud if change_id is unknown or invalid.
+    """
+    _require_non_empty(change_id, "change_id")
+    entries = read_audit_entries(name)
+    target_entry = next((e for e in reversed(entries) if e.get("change_id") == change_id), None)
+    if target_entry is None:
+        raise KeyError(f"change_id '{change_id}' not found in growth audit ledger for '{name}'")
+
+    existing_rollback = next((e for e in reversed(entries) if e.get("reverses_change_id") == change_id), None)
+    if existing_rollback is not None:
+        return {"already_rolled_back": True, "change_id": change_id, "entry": existing_rollback}
+
+    rollback_record = {
+        "change_id": f"rollback-{change_id}",
+        "reverses_change_id": change_id,
+        "type": "growth-audit-rollback",
+        "action": f"rollback_{target_entry.get('action')}",
+        "target": target_entry.get("target"),
+        "description": f"Rollback {change_id}: {reason or target_entry.get('description', '')}".strip(),
+        "restored_state": target_entry.get("before_state"),
+        "status": "rolled_back",
+        "author": name,
+        "timestamp": _now(),
+    }
+
+    path = _audit_path(name)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(yaml.safe_dump(rollback_record, sort_keys=False) + "---\n")
+    except OSError as exc:
+        raise GrowthError(f"could not write growth rollback entry for '{name}': {exc}") from exc
+    return rollback_record
+
+
 __all__ = [
     "Signal",
     "FRUSTRATION_MARKERS",
@@ -441,4 +562,7 @@ __all__ = [
     "read_frustration_entries",
     "growth_job",
     "frustration_rate",
+    "record_audit_entry",
+    "read_audit_entries",
+    "rollback_audit_entry",
 ]
