@@ -1774,7 +1774,21 @@ async def _upstream_turn(profile: str, messages: list[dict]) -> str:
 
 _PROPOSALS_LIST_SNIPPET = '''\
 from balabot import bot_creation
+try:
+    bot_creation.drain_spool()
+except Exception:
+    pass
 print(json.dumps({'proposals': bot_creation.list_proposals()}))
+'''
+
+_PROPOSALS_DRAIN_SNIPPET = '''\
+from balabot import bot_creation
+drained = []
+try:
+    drained = bot_creation.drain_spool()
+except Exception:
+    pass
+print(json.dumps({'drained': drained, 'proposals': bot_creation.list_proposals()}))
 '''
 
 _PROPOSE_SNIPPET = '''\
@@ -1783,7 +1797,8 @@ try:
     p = bot_creation.propose_bot(
         name=payload['name'], role=payload['role'],
         proposed_by=payload.get('proposed_by') or 'user',
-        model=payload.get('model') or None)
+        model=payload.get('model') or None,
+        reason=payload.get('reason') or '')
 except bot_creation.CreationError as exc:
     print(json.dumps({'ok': False, 'error': 'bad_request',
                       'detail': str(exc), 'status': 400}))
@@ -1900,6 +1915,17 @@ def bot_proposals_list():
     return {"available": True, "proposals": res.get("proposals", [])}
 
 
+@app.post("/api/bot-proposals/drain")
+def bot_proposals_drain():
+    """Drain agent-spooled proposals into real proposals."""
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot drain proposals")
+    res = _org_run(_wrap(_PROPOSALS_DRAIN_SNIPPET, False))
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "could not drain proposals spool"))
+    return {"available": True, "drained": res.get("drained", []), "proposals": res.get("proposals", [])}
+
+
 @app.post("/api/bot-proposals")
 async def bot_proposals_create(request: Request):
     """File a proposal. `proposed_by` may be a bot (peer creation) or 'user'."""
@@ -1919,6 +1945,7 @@ async def bot_proposals_create(request: Request):
         return unavailable("balabot container is not running — cannot file proposals")
     res = _org_run(_wrap(_PROPOSE_SNIPPET, True), payload={
         "name": name, "role": role, "proposed_by": proposed_by,
+        "reason": body.get("reason") or "",
         "model": body.get("model")})
     if not res.get("ok"):
         if res.get("status"):

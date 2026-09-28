@@ -235,3 +235,132 @@ def test_growth_audit_tools_and_cli(org_env, capsys):
     assert cli_rb["status"] == "rolled_back"
     assert cli_rb["reverses_change_id"] == cid2
 
+
+# ---- propose_bot & spooling ------------------------------------------------
+
+
+def test_propose_bot_spools_and_refuses_junk(org_env):
+    from balabot import bot_creation
+    out = bot_tools.propose_bot(
+        bot_id="principal",
+        name="Research Analyst",
+        role="Analyzes data and market trends",
+        reason="Expansion for Q4",
+    )
+    assert out["proposed"] is True
+    assert out["status"] == "spooled"
+    assert out["name"] == "Research Analyst"
+    assert out["role"] == "Analyzes data and market trends"
+    assert out["reason"] == "Expansion for Q4"
+    assert out["proposed_by"] == "principal"
+    assert out["bot_id"] == "research-analyst"
+
+    # Spool file was created on disk
+    spool_dir = org_env["data_root"] / "spool" / "bot_proposals"
+    spool_files = list(spool_dir.glob("sp_*.json"))
+    assert len(spool_files) == 1
+    spooled_content = json.loads(spool_files[0].read_text(encoding="utf-8"))
+    assert spooled_content["name"] == "Research Analyst"
+
+    # Root proposal store has NOT been written yet
+    root_proposals_file = org_env["data_root"] / "bot_creation" / "proposals.json"
+    assert not root_proposals_file.exists() or not bot_creation.list_proposals()
+
+    # Rejection of junk
+    with pytest.raises(ValueError, match="bot"):
+        bot_tools.propose_bot(bot_id="", name="Valid", role="Valid role")
+    with pytest.raises(ValueError, match="name"):
+        bot_tools.propose_bot(bot_id="principal", name="", role="Valid role")
+    with pytest.raises(ValueError, match="role"):
+        bot_tools.propose_bot(bot_id="principal", name="Valid", role="")
+    with pytest.raises(ValueError, match="usable character"):
+        bot_tools.propose_bot(bot_id="principal", name="///", role="Valid role")
+    with pytest.raises(ValueError, match="extra kwarg"):
+        bot_tools.propose_bot(bot_id="principal", name="Valid", role="Valid role", rogue="forbidden")
+
+
+def test_propose_bot_refuses_human_impersonation(org_env):
+    with pytest.raises(ValueError, match="human identity"):
+        bot_tools.propose_bot(bot_id="user", name="SubBot", role="SubRole")
+    with pytest.raises(ValueError, match="human identity"):
+        bot_tools.propose_bot(bot_id="ali", name="SubBot", role="SubRole")
+    with pytest.raises(ValueError, match="human identity"):
+        bot_tools.propose_bot(bot_id="admin", name="SubBot", role="SubRole")
+
+
+def test_propose_bot_cli(org_env, capsys, tmp_path):
+    from balabot import bot_tools as bt
+    code = bt.main([
+        "propose_bot",
+        "--bot", "principal",
+        "--name", "Junior Tester",
+        "--role", "Runs regression tests",
+        "--reason", "Quality assurance",
+    ])
+    assert code == 0
+    cli_out = json.loads(capsys.readouterr().out)
+    assert cli_out["proposed"] is True
+    assert cli_out["name"] == "Junior Tester"
+    assert cli_out["proposed_by"] == "principal"
+
+    # Missing arguments
+    assert bt.main(["propose_bot", "--bot", "principal"]) == 1
+
+    # Subprocess execution
+    env = {**os.environ, "BALABOT_DATA_ROOT": str(tmp_path / "data")}
+    r = subprocess.run(
+        [sys.executable, "-m", "balabot.bot_tools", "propose_bot",
+         "--bot", "principal", "--name", "Subprocess Bot", "--role", "CLI test role"],
+        capture_output=True, text=True, env=env, cwd=REPO_ROOT,
+    )
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    assert data["proposed"] is True
+    assert data["name"] == "Subprocess Bot"
+
+
+def test_spool_drains_to_proposal_store(org_env):
+    from balabot import bot_creation
+    bot_tools.propose_bot(bot_id="principal", name="Bot One", role="First bot role")
+    bot_tools.propose_bot(bot_id="governor", name="Bot Two", role="Second bot role")
+
+    spool_dir = org_env["data_root"] / "spool" / "bot_proposals"
+    assert len(list(spool_dir.glob("sp_*.json"))) == 2
+
+    drained = bot_creation.drain_spool()
+    assert len(drained) == 2
+    # Spool files unlinked
+    assert len(list(spool_dir.glob("sp_*.json"))) == 0
+
+    proposals = bot_creation.list_proposals()
+    assert len(proposals) == 2
+    names = {p["name"] for p in proposals}
+    assert names == {"Bot One", "Bot Two"}
+
+    # Repeated drain is a no-op
+    assert bot_creation.drain_spool() == []
+
+
+def test_consent_ladder_intact_no_self_approval(org_env):
+    from balabot import bot_creation
+    bot_tools.propose_bot(
+        bot_id="principal",
+        name="Auto Bot",
+        role="Autonomous worker",
+    )
+    drained = bot_creation.drain_spool()
+    pid = drained[0]["id"]
+
+    # Proposing bot cannot approve its own proposal
+    with pytest.raises(bot_creation.CreationError, match="human operator"):
+        bot_creation.approve_proposal(pid, approved_by="principal")
+
+    # Another bot cannot approve either
+    with pytest.raises(bot_creation.CreationError, match="human operator"):
+        bot_creation.approve_proposal(pid, approved_by="governor")
+
+    # Only human operator can approve
+    app = bot_creation.approve_proposal(pid, approved_by="user")
+    assert app["status"] == "approved"
+    assert app["approved_by"] == "user"
+

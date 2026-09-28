@@ -36,6 +36,8 @@ from pathlib import Path
 __all__ = [
     "CreationError",
     "propose_bot",
+    "spool_proposal",
+    "drain_spool",
     "list_proposals",
     "get_proposal",
     "approve_proposal",
@@ -46,6 +48,7 @@ __all__ = [
 
 HUMAN_APPROVER = "user"
 PROPOSALS_DIRNAME = "bot_creation"
+SPOOL_SUBDIR = "spool/bot_proposals"
 
 
 class CreationError(ValueError):
@@ -54,6 +57,20 @@ class CreationError(ValueError):
 
 def _root() -> Path:
     return Path(os.environ.get("BALABOT_DATA_ROOT", "/opt/data")) / PROPOSALS_DIRNAME
+
+
+def _spool_dir() -> Path:
+    return Path(os.environ.get("BALABOT_DATA_ROOT", "/opt/data")) / SPOOL_SUBDIR
+
+
+def _ensure_spool_dir() -> Path:
+    sdir = _spool_dir()
+    sdir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(sdir, 0o777)
+    except OSError:
+        pass
+    return sdir
 
 
 def _path() -> Path:
@@ -107,7 +124,7 @@ def new_bot_id(name: str) -> str:
 
 
 def propose_bot(*, name: str, role: str, proposed_by: str,
-                model: str | None = None) -> dict:
+                model: str | None = None, reason: str = "") -> dict:
     """File a bot-creation proposal. Metadata only; nothing is provisioned."""
     if not name or not isinstance(name, str) or len(name.strip()) > 60:
         raise CreationError("bot name must be a non-empty string (max 60 chars)")
@@ -128,6 +145,7 @@ def propose_bot(*, name: str, role: str, proposed_by: str,
         "bot_id": bot_id,
         "name": name.strip(),
         "role": role.strip(),
+        "reason": (reason or "").strip(),
         "model": model or "",
         "proposed_by": proposed_by,
         "status": "proposed",
@@ -140,6 +158,95 @@ def propose_bot(*, name: str, role: str, proposed_by: str,
     data["proposals"].append(proposal)
     _save(data)
     return proposal
+
+
+def spool_proposal(*, name: str, role: str, proposed_by: str,
+                   reason: str = "", model: str | None = None) -> dict:
+    """Spool a bot proposal into the agent-writable spool.
+
+    Validates input without touching root-owned proposals.json.
+    """
+    if not name or not isinstance(name, str) or len(name.strip()) > 60:
+        raise CreationError("bot name must be a non-empty string (max 60 chars)")
+    if not role or not isinstance(role, str) or len(role) > 800:
+        raise CreationError("role must be a non-empty description (max 800 chars)")
+    if not proposed_by or not isinstance(proposed_by, str) or not proposed_by.strip():
+        raise CreationError("proposed_by must be the proposing bot id or 'user'")
+    bot_id = new_bot_id(name)
+    spool_id = f"sp_{uuid.uuid4().hex[:12]}"
+    record = {
+        "id": spool_id,
+        "bot_id": bot_id,
+        "name": name.strip(),
+        "role": role.strip(),
+        "reason": (reason or "").strip(),
+        "proposed_by": proposed_by.strip(),
+        "model": (model or "").strip() if model else "",
+        "created_at": _now(),
+        "status": "spooled",
+    }
+    sdir = _ensure_spool_dir()
+    target = sdir / f"{spool_id}.json"
+    fd, tmp = tempfile.mkstemp(dir=str(sdir), prefix=".sp-", suffix=".tmp")
+    try:
+        try:
+            os.fchmod(fd, 0o666)
+        except (AttributeError, OSError):
+            pass
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(record, fh, indent=2, sort_keys=True)
+            fh.write("\n")
+        os.replace(tmp, target)
+        try:
+            os.chmod(target, 0o666)
+        except OSError:
+            pass
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return record
+
+
+def drain_spool() -> list[dict]:
+    """Drain spooled proposals into real proposals.json records.
+
+    Safe to call concurrently or repeatedly. Returns list of newly created
+    proposals.
+    """
+    sdir = _spool_dir()
+    if not sdir.exists():
+        return []
+    drained: list[dict] = []
+    for p in sorted(sdir.glob("sp_*.json")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
+        try:
+            res = propose_bot(
+                name=data["name"],
+                role=data["role"],
+                proposed_by=data.get("proposed_by") or "user",
+                model=data.get("model") or None,
+                reason=data.get("reason") or "",
+            )
+            drained.append(res)
+        except CreationError:
+            # Duplicate conflict or bad input — discard spool so it doesn't loop
+            pass
+        finally:
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return drained
 
 
 def get_proposal(pid: str) -> dict:

@@ -40,3 +40,11 @@ not a judge**: it is tuned to over-admit, and you deduplicate and consolidate af
 do not transfer between question shapes — calibrate on real data.
 
 Jev is infrastructure and a hard dependency. Unreachable Jev is an incident, not a warning.
+
+## Bot creation & peer expansion
+When asked to create a new agent or employee:
+- **File the proposal yourself** using `propose_bot`:
+  `python3 -m balabot.bot_tools propose_bot --bot governor --name <Name> --role <Role> [--reason <Reason>]`
+- Never tell the owner to file it by hand or write to the proposal store.
+- Proposals spool for human approval in the dashboard. You propose; only the owner approves.
+

@@ -38,6 +38,7 @@ it is promoted out of shadow.
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -45,7 +46,7 @@ import requests
 
 SYSTEM_ONE_URL = "https://api.typesafe.ai/v1/systemone"
 DEFAULT_MODEL = "jev-1.13.0"
-DEFAULT_TIMEOUT_S = 5.0  # observed latency 70-500ms; 5s is generous
+DEFAULT_TIMEOUT_S = float(os.environ.get("JEV_TIMEOUT_S", "30.0"))
 TRANSIENT_STATUSES = {429, 500, 502, 503, 504}
 MAX_TRANSIENT_RETRIES = 2
 

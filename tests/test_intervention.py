@@ -173,12 +173,12 @@ def test_active_for_bot_reflects_pause_and_expiry():
 def test_state_is_explicit_at_every_step():
     rec = _req(timeout=10)
     assert rec["state"] == "pending"
-    st = state(rec["resume_token"])
+    st = state(rec["resume_token"], now=T0)
     assert st["state"] == "pending"
     assert st["requested_at"] and st["expires_at"]
     resolve_intervention(rec["resume_token"], "deny", by="owner",
                          now=T0 + timedelta(seconds=1))
-    st = state(rec["resume_token"])
+    st = state(rec["resume_token"], now=T0 + timedelta(seconds=1))
     assert st["state"] == "rejected"
     assert st["resolved_at"] and st["owner_action"] == "deny"
 

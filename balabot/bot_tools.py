@@ -42,6 +42,7 @@ __all__ = [
     "record_growth_audit",
     "rollback_growth_audit",
     "enqueue_org_request",
+    "propose_bot",
     "main",
 ]
 
@@ -422,6 +423,75 @@ def rollback_growth_audit(
     return rollback_audit_entry(change_id, name=name, reason=reason)
 
 
+def propose_bot(
+    bot_id: str | None = None,
+    name: str = "",
+    role: str = "",
+    reason: str = "",
+    *,
+    proposed_by: str | None = None,
+    model: str | None = None,
+    **kwargs,
+) -> dict:
+    """A bot proposes the creation of a new bot/agent into the consent ladder.
+
+    SECURITY & CONSENT BOUNDARY:
+        A bot NEVER writes root-owned stores (fleet roster or proposal store)
+        directly. Instead, it writes into an agent-writable spool. The server-side
+        drain (running as root) turns spooled proposals into real proposals
+        for the human owner to approve in the dashboard.
+        A bot can NEVER approve a proposal (self-approval is refused).
+    """
+    proposing_bot = bot_id or proposed_by
+    _require_str(proposing_bot, "bot")
+    _require_str(name, "name")
+    _require_str(role, "role")
+    if kwargs:
+        raise ValueError(
+            "propose_bot accepts no extra kwarg(s) "
+            f"{sorted(kwargs)!r}"
+        )
+    if proposing_bot.strip().lower() in _OWNER_IDENTITIES:
+        raise ValueError(
+            f"{proposing_bot!r} is a human identity — a bot can never propose "
+            "an agent as the owner; use the proposing bot's own id"
+        )
+    from balabot import bot_creation
+    try:
+        spooled = bot_creation.spool_proposal(
+            name=name.strip(),
+            role=role.strip(),
+            proposed_by=proposing_bot.strip(),
+            reason=(reason or "").strip(),
+            model=(model or "").strip() if model else None,
+        )
+    except bot_creation.CreationError as exc:
+        raise ValueError(str(exc)) from exc
+
+    try:
+        enqueue_org_request(proposing_bot.strip(), {
+            "kind": "bot_proposal",
+            "bot": proposing_bot.strip(),
+            "name": spooled["name"],
+            "role": spooled["role"],
+            "reason": spooled["reason"],
+        })
+    except Exception:
+        pass
+
+    return {
+        "proposed": True,
+        "id": spooled["id"],
+        "bot_id": spooled["bot_id"],
+        "name": spooled["name"],
+        "role": spooled["role"],
+        "reason": spooled["reason"],
+        "proposed_by": spooled["proposed_by"],
+        "status": spooled["status"],
+        "created_at": spooled["created_at"],
+    }
+
+
 # ---- CLI -------------------------------------------------------------------
 
 
@@ -444,6 +514,7 @@ def main(argv: list[str] | None = None) -> int:
         "list_pending_requests": ["--bot"],
         "record_growth_audit": ["--action", "--target", "--description", "--author", "--patch", "--bot"],
         "rollback_growth_audit": ["--change-id", "--reason", "--bot"],
+        "propose_bot": ["--bot", "--name", "--role", "--reason", "--model"],
     }
     allowed = known_flags.get(tool)
     if allowed is not None:
@@ -522,6 +593,16 @@ def main(argv: list[str] | None = None) -> int:
                 name=_opt("--bot", "principal"),
             ))
             return 0
+        if tool == "propose_bot":
+            bot, name, role = _opt("--bot"), _opt("--name"), _opt("--role")
+            if not (bot and name and role):
+                raise ValueError("propose_bot needs --bot, --name, --role")
+            _json_out(propose_bot(
+                bot, name, role,
+                reason=_opt("--reason", ""),
+                model=_opt("--model"),
+            ))
+            return 0
     except (ValueError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -534,7 +615,8 @@ def main(argv: list[str] | None = None) -> int:
           "request_intervention --bot B --reason R [--hint H] [--url U] | "
           "list_pending_requests [--bot B] | "
           "record_growth_audit --action A --target T --description D [--author AU] [--patch P] [--bot B] | "
-          "rollback_growth_audit --change-id ID [--reason R] [--bot B]",
+          "rollback_growth_audit --change-id ID [--reason R] [--bot B] | "
+          "propose_bot --bot B --name N --role R [--reason REASON] [--model M]",
           file=sys.stderr)
     return 2
 

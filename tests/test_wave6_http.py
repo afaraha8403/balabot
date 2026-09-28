@@ -300,3 +300,39 @@ def test_proposals_list_honest_when_container_down(client, monkeypatch):
     assert r.status_code == 200
     body = r.json()
     assert body["available"] is False and body["reason"]
+
+
+def test_spooled_proposals_drain_on_list_and_explicit_drain(client):
+    from balabot import bot_tools
+    # Agent spools proposal without hitting root proposals.json
+    bot_tools.propose_bot(
+        bot_id="principal",
+        name="Security Auditor",
+        role="Audits permissions",
+        reason="Security compliance",
+    )
+
+    # Calling GET /api/bot-proposals drains the spool automatically
+    r = client.get("/api/bot-proposals")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is True
+    props = body["proposals"]
+    auditor = next((p for p in props if p["name"] == "Security Auditor"), None)
+    assert auditor is not None
+    assert auditor["status"] == "proposed"
+    assert auditor["proposed_by"] == "principal"
+    assert auditor["reason"] == "Security compliance"
+
+    # Spool another proposal
+    bot_tools.propose_bot(
+        bot_id="governor",
+        name="Data Sync Bot",
+        role="Syncs shared state",
+    )
+    # Explicit drain endpoint
+    r2 = client.post("/api/bot-proposals/drain")
+    assert r2.status_code == 200
+    body2 = r2.json()
+    assert any(p["name"] == "Data Sync Bot" for p in body2["drained"])
+

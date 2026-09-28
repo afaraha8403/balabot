@@ -46,6 +46,7 @@ export function AgentComputerDialog({bot, onClose}: Props) {
   const [teachTitle, setTeachTitle] = useState('');
   const [teachSchedule, setTeachSchedule] = useState('Daily');
   const [teachSteps, setTeachSteps] = useState('');
+  const [recordedSteps, setRecordedSteps] = useState<string[]>([]);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   const noDriver = frame?.state === 'no-driver';
@@ -88,13 +89,32 @@ export function AgentComputerDialog({bot, onClose}: Props) {
         // Grab a fresh frame immediately so the result is visible right away.
         const f = await getComputerFrame(bot.id);
         setFrame(f);
+        if (showTeachTask) {
+          let stepDesc = '';
+          if (action.action === 'click') {
+            stepDesc = `Click at (${action.x}, ${action.y})`;
+          } else if (action.action === 'type') {
+            stepDesc = `Type "${action.text}"`;
+          } else if (action.action === 'key') {
+            stepDesc = `Press key "${action.key}"`;
+          } else if (action.action === 'scroll') {
+            stepDesc = `Scroll ${action.amount && action.amount > 0 ? 'down' : 'up'} (${Math.abs(action.amount || 0)} units)`;
+          }
+          if (stepDesc) {
+            setRecordedSteps(prev => {
+              const next = [...prev, stepDesc];
+              setTeachSteps(next.map((s, idx) => `${idx + 1}. ${s}`).join('\n'));
+              return next;
+            });
+          }
+        }
       } catch (e) {
         setError((e as Error).message);
       } finally {
         setBusy(false);
       }
     },
-    [bot.id, inputsEnabled],
+    [bot.id, inputsEnabled, showTeachTask],
   );
 
   const handleResetComputer = async () => {
@@ -129,6 +149,7 @@ export function AgentComputerDialog({bot, onClose}: Props) {
       setShowTeachTask(false);
       setTeachTitle('');
       setTeachSteps('');
+      setRecordedSteps([]);
     } catch (err) {
       setError(`Failed to save task: ${(err as Error).message}`);
     }
@@ -191,8 +212,12 @@ export function AgentComputerDialog({bot, onClose}: Props) {
         {showTeachTask ? (
           <Banner
             status="info"
-            title={`Teach a task to ${bot.name} (Demonstration)`}
-            description="Notice: Real-time demonstration recording daemon (cua-driver record) is not active in this container runtime. Steps will be structured and saved as a routine until headless video recording is supported."
+            title={`Teach a task to ${bot.name} (Demonstration Recording)`}
+            description={
+              recordedSteps.length > 0
+                ? `Recording take-over actions: ${recordedSteps.length} action(s) captured live in this session. (Container-side capture daemon cua-driver record is not running; recording explicit user take-over clicks, keystrokes, and scrolls).`
+                : "Live action recorder: Take over and interact with the screen below — clicks, typing, keys, and scrolls are captured in sequence. (Container-side daemon cua-driver record is not running; recording explicit user take-over inputs)."
+            }
             collapsible={false}
           >
             <VStack gap={2} paddingBlock={2}>
@@ -211,8 +236,12 @@ export function AgentComputerDialog({bot, onClose}: Props) {
                 size="sm"
               />
               <TextInput
-                label="Demonstrated Steps / Actions"
-                placeholder="1. Open browser 2. Navigate to dashboard 3. Click export"
+                label={
+                  recordedSteps.length > 0
+                    ? `Demonstrated Steps (${recordedSteps.length} actions captured)`
+                    : 'Demonstrated Steps / Actions'
+                }
+                placeholder="Click screen or type below to record actions, or type steps manually"
                 value={teachSteps}
                 onChange={setTeachSteps}
                 size="sm"
@@ -225,11 +254,25 @@ export function AgentComputerDialog({bot, onClose}: Props) {
                   isDisabled={!teachTitle.trim()}
                   onClick={() => void handleSaveTeachTask()}
                 />
+                {recordedSteps.length > 0 ? (
+                  <Button
+                    label="Clear recorded steps"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setRecordedSteps([]);
+                      setTeachSteps('');
+                    }}
+                  />
+                ) : null}
                 <Button
                   label="Cancel"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setShowTeachTask(false)}
+                  onClick={() => {
+                    setShowTeachTask(false);
+                    setRecordedSteps([]);
+                  }}
                 />
               </HStack>
             </VStack>

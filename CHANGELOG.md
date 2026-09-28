@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Features
+- Implement agent-side bot creation proposal flow (`propose_bot` in `balabot.bot_tools` and CLI, agent-writable spooling under `$BALABOT_DATA_ROOT/spool/bot_proposals`, and server-side root drain into dashboard proposals list) with full consent ladder preservation and persona rules.
+- Implement live take-over demonstration action recording in Agent Computer dialog (`AgentComputerDialog.tsx`) with real-time click, typing, key, and scroll capture and honest daemon status disclosure.
 - Implement "Hold everything" pause control with dropdown directly on transcript header and composer to pause, steer with owner guidance, approve, or deny running turns, wired end-to-end to `balabot/intervention.py` with honest state reflection.
 - Implement server-backed toggleable bot routines list in right panel with on/off switches, last-run tracking, and creation/editing/deletion routes (`/api/bots/{bot_id}/routines`).
 - Implement rich file and artifact preview cards (`FilePreviewCard.tsx`) with expandable image thumbnails, code snippet preview with syntax tag, and download action.

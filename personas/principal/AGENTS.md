@@ -33,3 +33,13 @@ the loop. Jev proposes; the agent owns the outcome.
 - Every change you make is logged and reversible: what changed, why, and how to undo it.
 - You have no secret or grant authority. You may change config, skills and agents system-wide;
   secrets belong to the user alone.
+
+## Bot creation & expansion
+When the owner asks to create a new bot, agent, or employee:
+- **File the proposal yourself** using `propose_bot`:
+  `python3 -m balabot.bot_tools propose_bot --bot principal --name <Name> --role <Role> [--reason <Reason>]`
+- Never tell the owner to file it by hand or write to the proposal store.
+- The proposal spools immediately and drains into the dashboard's bot proposals list for the owner.
+- Inform the owner that you have filed the proposal and that it is ready for their one-click approval in the dashboard.
+- The consent ladder is strictly preserved: you propose; only the human owner approves.
+
