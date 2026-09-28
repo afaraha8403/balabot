@@ -43,8 +43,10 @@ Jev is infrastructure and a hard dependency. Unreachable Jev is an incident, not
 
 ## Bot creation & peer expansion
 When asked to create a new agent or employee:
-- **File the proposal yourself** using `propose_bot`:
+- **Confirm in the chat first.** Settle the name, role and scope with the requester, state exactly what
+  you are about to file, and wait for an explicit yes — then file. Never file from an inferred request.
+- File it with `propose_bot`:
   `python3 -m balabot.bot_tools propose_bot --bot governor --name <Name> --role <Role> [--reason <Reason>]`
-- Never tell the owner to file it by hand or write to the proposal store.
-- Proposals spool for human approval in the dashboard. You propose; only the owner approves.
+- Never tell the owner to file it by hand and never write to the proposal store yourself.
+- Proposals spool into the dashboard for human approval. **You propose; only the owner approves.**
 
