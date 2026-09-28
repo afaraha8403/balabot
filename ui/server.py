@@ -594,6 +594,46 @@ async def resolve_intervention_endpoint(resume_token: str, request: Request):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+# ── message queueing (durable per-session message queue) ────────────────────
+def _chat_queue():
+    try:
+        from balabot.queueing import MessageQueue
+        return MessageQueue()
+    except Exception:
+        return None
+
+
+@app.get("/api/queue/{session_id}")
+def get_session_queue(session_id: str):
+    q = _chat_queue()
+    if q is None:
+        return unavailable("message queue store unavailable")
+    try:
+        return {"ok": True, "state": q.queue_state(session_id)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/queue/{session_id}")
+async def enqueue_session_message(session_id: str, request: Request):
+    q = _chat_queue()
+    if q is None:
+        return unavailable("message queue store unavailable")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    content = str(body.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content must be non-empty")
+    message_id = body.get("message_id")
+    try:
+        msg = q.enqueue(session_id, content, message_id=message_id)
+        return {"ok": True, "message": msg, "queue": q.queue_state(session_id)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ── org surfaces: the real registry-backed HTTP layer ────────────────────────
 # Backing store: balabot/orgs.py INSIDE the container (registry + 0600 secret
 # store). The container's /opt/data is a NAMED DOCKER VOLUME (balabot_
@@ -2049,6 +2089,15 @@ async def chat(request: Request):
                           json.dumps({"degraded": True, "reason": reason}) +
                           "\n\n"]
 
+    q = _chat_queue()
+    queued_frames: list[str] = []
+    if q is not None and session_id:
+        try:
+            queued_frames = q.drain_sse_frames(session_id, to_bot=profile)
+            q.mark_busy(session_id)
+        except Exception:
+            pass
+
     url = f"{UPSTREAM}/p/{profile}/v1/chat/completions"
     payload = {"model": profile, "messages": messages, "stream": True}
     headers = {"Authorization": f"Bearer {API_KEY}",
@@ -2059,6 +2108,9 @@ async def chat(request: Request):
             # Jev state frames FIRST, so the carrier line precedes the model's
             # stream: they are visible, stated events in the transcript.
             for frame in carrier_frames:
+                yield frame
+            # Queued messages for this session (balabot.queueing) emitted in FIFO order.
+            for frame in queued_frames:
                 yield frame
             # Pending org requests for this profile are emitted FIRST, as
             # server-side SSE frames in the same grammar as `event: handoff`.
@@ -2090,6 +2142,12 @@ async def chat(request: Request):
         except Exception as exc:  # noqa: BLE001
             yield (f"event: error\ndata: "
                    f"{json.dumps({'message': f'{type(exc).__name__}: {exc}'})}\n\n")
+        finally:
+            if q is not None and session_id:
+                try:
+                    q.mark_idle(session_id)
+                except Exception:
+                    pass
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
