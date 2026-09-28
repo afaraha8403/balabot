@@ -138,3 +138,38 @@ Script: `workspace/susan/scripts/verify_ui_parity.mjs` + `probe_ui_controls.mjs`
 
 **Phase 3 Parity Complete:** The missing pause control has been built and wired end-to-end (`HoldEverythingControl.tsx`, `balabot/intervention.py`, `ui/server.py`). The transcript header and composer area feature the `Hold everything` button with an accessible dropdown to pause, steer with owner guidance, approve & release, or deny & halt a running turn. All states (`pending`, `accepted`, `rejected`, `expired`) are honest and synchronized with the backend. Stale interventions against ended turns expire gracefully. All four partials (`3.7`, `3.9`, `7.5`, `8.4`) and visual reference elements (toggleable routines list, `Teach a task` affordance, collapsible roster categories) are closed and live-verified.
 
+## Phase 5 — Polaris token contract and surface parity (`cf74a91`)
+
+The reference established in `docs/reference/polaris-ui-reference.md` (codename **Polaris**) was used to
+give the UI a real token layer and to align the shell surfaces.
+
+**Landed:** `ui/src/tokens.css` — 115 lines, 76 custom properties covering surfaces, actions,
+`--chat-user`, the full `--sidebar*` block, form/state, `--overlay/--scrollbar`, and the radius scale
+(`--radius` +`-sm|-md|-lg|-xl|-2xl`), with `[data-theme="dark"]` values. Imported in `main.tsx`.
+`balabot.css` and 9 component files now consume tokens instead of literal colours. New
+`MessageHoverMetadata.tsx`. Parity pass over `App`, `CommandPalette`, `Composer`, `DraftCard`,
+`FilePreviewCard`, `AgentComputerDialog`, the `Bot*Dialog` family and `HoldEverythingControl`.
+
+**Live verification (2026-09-28):** build clean; the live surface served the exact bundle hash the
+build produced; `verify_ui_parity.mjs` **8/8 PASS** with zero JS errors; `pytest` **423 passed / 3 skipped**.
+
+| Probe | Result |
+|---|---|
+| Surface loads, roster renders | PASS |
+| `Ctrl+K` command palette | PASS |
+| `/` skill picker | PASS |
+| `@` mention picker | PASS |
+| Pause / "Hold everything" control | PASS |
+| Routines surface | PASS |
+| Pinned/hidden roster sections | PASS |
+| Zero JS errors across all probes | PASS |
+
+**Honest gaps — not at parity yet:**
+1. **Theme switching is not reachable.** The app pins dark via Astryx (`data-astryx-theme`) while the
+   token layer keys off `data-theme`. The dark token values exist but nothing toggles them; a bridge
+   between the two mechanisms is required before a light mode can ship.
+2. **Teach-a-task recording chrome is wired in code but not exercised end-to-end** — it needs a real
+   take-over session in the Agent Computer view, which no probe covers yet.
+3. This is token / structure / behaviour parity, **not** a pixel-for-pixel Tailwind restyle — the UI
+   has no Tailwind by design (see the reference doc's rule 3).
+
