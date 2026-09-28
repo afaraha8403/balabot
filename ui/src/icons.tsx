@@ -41,6 +41,7 @@ import {
   InformationCircleIcon,
   MagnifyingGlassIcon,
   MicrophoneIcon,
+  MoonIcon,
   PaperAirplaneIcon,
   PaperClipIcon,
   PauseIcon,
@@ -53,6 +54,7 @@ import {
   ShieldCheckIcon,
   SparklesIcon,
   SpeakerWaveIcon,
+  SunIcon,
   UserGroupIcon,
   UsersIcon,
   WrenchScrewdriverIcon,
@@ -131,6 +133,10 @@ export const IconDuplicate = wrap(DocumentDuplicateIcon);
 export const IconReveal = wrap(EyeIcon);
 /** Settings gear. */
 export const IconGear = wrap(Cog6ToothIcon);
+/** Light theme icon. */
+export const IconSun = wrap(SunIcon);
+/** Dark theme icon. */
+export const IconMoon = wrap(MoonIcon);
 /** Send message. */
 export const IconSend = wrap(PaperAirplaneIcon);
 /** Microphone / dictation. */

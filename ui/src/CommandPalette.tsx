@@ -20,6 +20,8 @@ import {
   IconOps,
   IconSearch,
   IconSkills,
+  IconSun,
+  IconMoon,
 } from './icons';
 import type {Bot, Group, Session} from './api';
 
@@ -33,6 +35,7 @@ type Props = {
   onSelectGroup: (gid: string) => void;
   onSelectSession: (sid: string, botId: string) => void;
   onAction: (actionId: string) => void;
+  themeMode?: 'light' | 'dark';
 };
 
 type PaletteItem = {
@@ -65,6 +68,7 @@ export function CommandPalette({
   onSelectGroup,
   onSelectSession,
   onAction,
+  themeMode = 'dark',
 }: Props) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -221,10 +225,21 @@ export function CommandPalette({
           onClose();
         },
       },
+      {
+        id: 'action-theme',
+        category: 'Actions',
+        label: `Switch to ${themeMode === 'light' ? 'Dark' : 'Light'} Theme`,
+        subtitle: `Currently in ${themeMode} mode`,
+        icon: themeMode === 'light' ? <IconMoon size="sm" color="accent" /> : <IconSun size="sm" color="accent" />,
+        onExecute: () => {
+          onAction('toggle-theme');
+          onClose();
+        },
+      },
     );
 
     return list;
-  }, [bots, groups, sessions, onSelectBot, onSelectGroup, onSelectSession, onAction, onClose]);
+  }, [bots, groups, sessions, onSelectBot, onSelectGroup, onSelectSession, onAction, onClose, themeMode]);
 
   const filteredItems = useMemo(() => {
     if (!query.trim()) return items;

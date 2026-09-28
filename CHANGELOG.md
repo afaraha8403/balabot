@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Features
+- Bridge Astryx design theme and Polaris CSS custom properties with dynamic light/dark mode switching, zero-flash `localStorage` theme bootstrap, and toggles across top header, Settings panel, and Command Palette.
+- Verify "Teach a task" live demonstration recording end-to-end, validating coordinate click and keystroke action capture into client-side demonstration buffers and persistence to server-backed bot routines.
 - Adopt OpenUI (`@openuidev/react-lang` + `@openuidev/lang-core`) for agent-driven generative interfaces: add bounded component registry (`HireAgentCard`, `Card`, `CardHeader`, `FormField`, `ConfirmButtons`) in `ui/src/openui/library.tsx`, token-mapped styles in `ui/src/openui/openui.css`, dual-mode `OpenUIRenderer.tsx` embedded in the live chat transcript, interactive consent confirmation flow for bot hiring, and agent prompt instruction contracts in `docs/PROJECT-RULES.md`.
 - Implement agent-side bot creation proposal flow (`propose_bot` in `balabot.bot_tools` and CLI, agent-writable spooling under `$BALABOT_DATA_ROOT/spool/bot_proposals`, and server-side root drain into dashboard proposals list) with full consent ladder preservation and persona rules.
 - Implement live take-over demonstration action recording in Agent Computer dialog (`AgentComputerDialog.tsx`) with real-time click, typing, key, and scroll capture and honest daemon status disclosure.
@@ -34,6 +36,7 @@
 - Implement and wire attachments intake: `POST /api/attachments` upload, `GET /api/attachments/{id}/{name}`, Composer UI upload handling, and `/api/chat` context delivery.
 
 ### Fixes
+- Update `ThinkingBlock` and `ThinkingOrb` components to dynamically track active theme mode rather than pinning dark styling.
 - Remove the seeded demo conversation from `ui/src/sessions.ts`: a hardcoded "hire a marketing and SEO expert" exchange with a fabricated OpenUI card appeared in every install with an empty session store. An empty store now yields an empty roster — a conversation exists only because an agent or the owner actually had one.
 - Correct the OpenUI approve handler's error path in `ui/src/App.tsx`, which reported `Proposal created: <error>` — success wording on a failure.
 - Require an explicit chat confirmation before an agent files a bot proposal: `personas/principal/AGENTS.md` and `personas/governor/AGENTS.md` previously instructed agents to file immediately, which is why a request to hire an agent produced a proposal with no name, role or confirmation settled in the conversation.

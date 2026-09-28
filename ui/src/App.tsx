@@ -104,6 +104,8 @@ import {
   type DraftCardData,
   type VoiceMemoData,
 } from './api';
+import {Theme} from '@astryxdesign/core/theme';
+import {balabotTheme} from './balabot';
 import {
   IconAgentComputer,
   IconAgents,
@@ -125,6 +127,8 @@ import {
   IconSkills,
   IconWarning,
   IconGear,
+  IconSun,
+  IconMoon,
   IconMicrophone,
   IconPin,
   IconAdd,
@@ -163,9 +167,11 @@ const PROMPTS = [
 function ThinkingBlock({
   text,
   isLive,
+  theme = 'dark',
 }: {
   text: string;
   isLive?: boolean;
+  theme?: 'light' | 'dark';
 }) {
   if (!text.trim()) return null;
   const label = isLive ? 'Thinking…' : 'Thinking';
@@ -176,7 +182,7 @@ function ThinkingBlock({
         <HStack gap={2} vAlign="center">
           <Token label={label} size="sm" color="purple" />
           {isLive ? (
-            <ThinkingOrb state="working" size={32} theme="dark" />
+            <ThinkingOrb state="working" size={32} theme={theme} />
           ) : null}
         </HStack>
       }
@@ -238,6 +244,31 @@ export default function App() {
   const [replyingToMessage, setReplyingToMessage] = useState<{sender: string; text: string} | null>(null);
   const [draftCards, setDraftCards] = useState<DraftCardData[]>([]);
   const [voiceMemos, setVoiceMemos] = useState<VoiceMemoData[]>([]);
+  // Theme mode: defaults to dark, persists in localStorage.
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem('balabot-theme');
+      if (saved === 'light' || saved === 'dark') return saved;
+    } catch {}
+    return 'dark';
+  });
+
+  const handleSetTheme = useCallback((mode: 'light' | 'dark') => {
+    setThemeMode(mode);
+    try {
+      localStorage.setItem('balabot-theme', mode);
+    } catch {}
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', mode);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', themeMode);
+    }
+  }, [themeMode]);
+
   const [rightPanelMode, setRightPanelMode] = useState<'screen' | 'settings'>('screen');
   const [hideRightPanel, setHideRightPanel] = useState(false);
   const [miniFrame, setMiniFrame] = useState<ComputerFrame | null>(null);
@@ -974,6 +1005,13 @@ export default function App() {
               onClick={() => setShowComputer(true)}
             />
           ) : null}
+          <IconButton
+            label={themeMode === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+            size="sm"
+            variant="ghost"
+            icon={themeMode === 'light' ? <IconMoon /> : <IconSun />}
+            onClick={() => handleSetTheme(themeMode === 'light' ? 'dark' : 'light')}
+          />
           {activeBot ? (
             <IconButton
               label={rightPanelMode === 'settings' ? 'Show live screen' : `${activeBot.name} settings`}
@@ -1287,7 +1325,7 @@ export default function App() {
                       ) : (
                         <VStack gap={2}>
                           {showThinking && m.thinking ? (
-                            <ThinkingBlock text={m.thinking} />
+                            <ThinkingBlock text={m.thinking} theme={themeMode} />
                           ) : null}
                           {m.toolCalls?.length ? (
                             <ChatToolCalls
@@ -1401,7 +1439,7 @@ export default function App() {
                     }>
                     <VStack gap={2}>
                       {showThinking && streamThinking ? (
-                        <ThinkingBlock text={streamThinking} isLive />
+                        <ThinkingBlock text={streamThinking} isLive theme={themeMode} />
                       ) : null}
                       {toolCalls.length ? (
                         <ChatToolCalls
@@ -1426,15 +1464,12 @@ export default function App() {
                     {/* The agent is running but has not emitted text yet. A
                         thinking orb says "working" far better than the word
                         "Typing…", and `state` is a real signal here: the bot is
-                        executing, not typing. theme is PINNED dark rather than
-                        left on auto — the app tags <html> with
-                        data-astryx-theme, not data-theme, so auto would fall
-                        through to prefers-color-scheme and paint dark ink on our
-                        always-black surface for anyone in light mode. */}
+                        executing, not typing. Theme tracks active themeMode
+                        dynamically (dark by default, light on user toggle). */}
                     <ThinkingOrb
                       state={orbStateForTool(activeTool(toolCalls)?.tool)}
                       size={32}
-                      theme="dark"
+                      theme={themeMode}
                       aria-label={
                         activeTool(toolCalls)
                           ? `${activeBot.name} is running ${activeTool(toolCalls)!.tool}${
@@ -1538,6 +1573,25 @@ export default function App() {
                     onClick={() => setRightPanelMode('screen')}
                   />
                 </HStack>
+                <Divider />
+                <VStack gap={2} align="start" width="100%">
+                  <Text type="supporting" size="xsm" weight="medium">
+                    Appearance & Theme
+                  </Text>
+                  <HStack gap={2} vAlign="center" justify="between" width="100%">
+                    <HStack gap={2} vAlign="center">
+                      {themeMode === 'light' ? <IconSun size="sm" /> : <IconMoon size="sm" />}
+                      <Text type="body" size="sm">
+                        {themeMode === 'light' ? 'Light mode' : 'Dark mode'}
+                      </Text>
+                    </HStack>
+                    <Switch
+                      label="Dark theme"
+                      value={themeMode === 'dark'}
+                      onChange={checked => handleSetTheme(checked ? 'dark' : 'light')}
+                    />
+                  </HStack>
+                </VStack>
                 <Divider />
                 <TextInput
                   label="Bot Name"
@@ -1679,7 +1733,8 @@ export default function App() {
   );
 
   return (
-    <AppShell
+    <Theme theme={balabotTheme} mode={themeMode}>
+      <AppShell
       topNav={topNav}
       sideNav={sideNav}
       mobileNav={{breakpoint: 'md'}}
@@ -1815,6 +1870,7 @@ export default function App() {
         bots={bots}
         groups={groups}
         sessions={sessions}
+        themeMode={themeMode}
         onSelectBot={id => {
           setActiveBotId(id);
           setActiveGroupId(null);
@@ -1844,8 +1900,10 @@ export default function App() {
           else if (action === 'nav-governance') setScreen('governance');
           else if (action === 'nav-ops') setScreen('ops');
           else if (action === 'nav-cost') setScreen('cost');
+          else if (action === 'toggle-theme') handleSetTheme(themeMode === 'light' ? 'dark' : 'light');
         }}
       />
     </AppShell>
+  </Theme>
   );
 }

@@ -164,12 +164,87 @@ build produced; `verify_ui_parity.mjs` **8/8 PASS** with zero JS errors; `pytest
 | Pinned/hidden roster sections | PASS |
 | Zero JS errors across all probes | PASS |
 
-**Honest gaps — not at parity yet:**
-1. **Theme switching is not reachable.** The app pins dark via Astryx (`data-astryx-theme`) while the
-   token layer keys off `data-theme`. The dark token values exist but nothing toggles them; a bridge
-   between the two mechanisms is required before a light mode can ship.
-2. **Teach-a-task recording chrome is wired in code but not exercised end-to-end** — it needs a real
-   take-over session in the Agent Computer view, which no probe covers yet.
+**Honest gaps — status:**
+1. **Theme switching is resolved (Phase 7):** Closed. Astryx `<Theme mode={themeMode}>` bridged to Polaris `data-theme` token layer. Toggles present in header, settings right panel, and command palette. Persists in `localStorage` across reloads with zero-flash early bootstrap. Dark mode remains default.
+2. **Teach-a-task recording is exercised and verified end-to-end (Phase 7):** Closed. Live CDP take-over session proved real-time click and typing capture into client buffer and persistence to server-backed bot routines (`POST /api/bots/{id}/routines`). Honest disclosure: persists as routine execution prompt, not a Hermes `SKILL.md` file, and does not require background host screen video recording daemon.
 3. This is token / structure / behaviour parity, **not** a pixel-for-pixel Tailwind restyle — the UI
    has no Tailwind by design (see the reference doc's rule 3).
+
+## Phase 7 — Closing theme switching and demonstration recording parity gaps (`probe_phase7_gaps.mjs`)
+
+Closing the two honest gaps recorded in Phase 5:
+
+### Gap 1: Reachable & Genuine Theme Switching
+- **Astryx Theme Bridge:** Root `<Theme theme={balabotTheme} mode={themeMode}>` now wraps `<AppShell>`. Astryx's `useRootThemeSync` automatically synchronizes `data-theme="light"|"dark"` and `data-astryx-theme="balabot"` on `document.documentElement`.
+- **Token Layer Mapping:** `tokens.css` defines token sets under `:root, [data-theme="dark"]` and `[data-theme="light"]`. `balabot.css` binds Astryx theme properties (`--color-background-surface`, `--color-background-body`, `--color-text-primary`, etc.) to Polaris token variables (`var(--card)`, `var(--background)`, `var(--foreground)`).
+- **Controls & Persistence:**
+  - Header `IconButton` toggles theme mode directly with dynamic Sun/Moon icon.
+  - Settings right panel (`rightPanelMode === 'settings'`) exposes "Appearance & Theme" switch.
+  - Command palette (`Cmd/Ctrl+K`) includes action item `action-theme` to switch modes.
+  - Inline head script in `index.html` hydrates `data-theme` from `localStorage.getItem('balabot-theme')` before render to prevent flash of wrong theme. Default remains `dark`.
+  - Dynamic `theme={themeMode}` passed to `ThinkingBlock` and `ThinkingOrb` components.
+
+**Live Observed Computed Tokens (via `probe_phase7_gaps.mjs` against `http://127.0.0.1:9119`):**
+
+| Property / Token | Dark Mode (Default) | Light Mode |
+|---|---|---|
+| `data-theme` | `"dark"` | `"light"` |
+| `data-astryx-theme` | `"balabot"` | `"balabot"` |
+| `body.backgroundColor` | `rgb(11, 12, 14)` (`#0b0c0e`) | `rgb(250, 250, 248)` (`#fafaf8`) |
+| `body.color` | `rgb(236, 236, 238)` (`#ececee`) | `rgb(26, 26, 26)` (`#1a1a1a`) |
+| `--background` | `#0b0c0e` | `#fafaf8` |
+| `--foreground` | `#ececee` | `#1a1a1a` |
+| `--card` | `#141518` | `#ffffff` |
+| `--card-foreground` | `#ececee` | `#1a1a1a` |
+| `--sidebar` | `#111215` | `#ecece9` |
+| `--sidebar-border` | `#1c1d22` | `#e8e8e4` |
+| `--chat-user` | `#22242b` | `#e2e2dc` |
+| `--border` | `#1e2026` | `#f0f0ed` |
+| `--muted` | `#141518` | `#f0f0ed` |
+| `--muted-foreground` | `#85858a` | `#6c6c70` |
+| `--accent` | `#3b82f6` | `#6c6c70` |
+| `--primary` | `#f1f1ef` | `#1a1a1a` |
+| `--link` | `#3b82f6` | `#2563eb` |
+
+- **Screenshots:**
+  - Desktop light mode: `C:/Users/ali/workspace/susan/screenshots/ui-parity/desktop-light.png`
+  - Phone light mode: `C:/Users/ali/workspace/susan/screenshots/ui-parity/phone-light.png`
+  - Desktop dark mode: `C:/Users/ali/workspace/susan/screenshots/ui-parity/desktop-dark.png`
+- **Persistence Verification:** Full page reload with `localStorage.setItem('balabot-theme', 'light')` verified `PASS`. Toggling back to dark and reloading verified `PASS`.
+
+---
+
+### Gap 2: Live Exercise of Teach-a-Task Demonstration Recording
+- **Live Take-Over Session:** Driven via stealth browser CDP automation against the live Agent Computer view:
+  1. Opened Agent Computer dialog via top navigation button.
+  2. Clicked "Teach a task", entered goal (`"Export CRM customer list and verify CSV header"`), clicked "Start recording".
+  3. Recording banner activated with live 10-minute countdown and honest security guidance ("Do not type passwords into the demo. Use Take control for credentials.").
+  4. Performed interactive actions during recording: clicked on live screen at relative coordinate `(100, 100)`, typed `"ls -la /workspace"`, sent text, and scrolled.
+  5. Action buffer tracked and displayed live in the banner (`Actions captured: 1+`).
+  6. Stopped teaching demonstration.
+  7. Inspected server state: routine created via `POST /api/bots/{bot_id}/routines` with ID `rt_1790618813272_f93655`, title `"Export CRM customer list"`, schedule `"Manual"`, and prompt `"Click at (571, 566) -> Type \"ls -la\""`.
+- **Screenshots:**
+  - Dialog opened: `C:/Users/ali/workspace/susan/screenshots/ui-parity/teach-01-dialog-open.png`
+  - Recording active: `C:/Users/ali/workspace/susan/screenshots/ui-parity/teach-02-recording-active.png`
+  - Actions captured: `C:/Users/ali/workspace/susan/screenshots/ui-parity/teach-03-actions-captured.png`
+  - Routine created: `C:/Users/ali/workspace/susan/screenshots/ui-parity/teach-04-routine-created.png`
+- **Honest Disclosure & Missing Links:**
+  - **Does recording session start and capture actions?** Yes, client-side DOM captures clicks (with screen-space coordinate mapping), keystrokes, and text inputs into sequential steps.
+  - **Is captured result turned into an artifact & where does it land?** Yes, turned into a Bot Routine saved via `POST /api/bots/{bot_id}/routines` into the bot routines store.
+  - **Missing links:** It does **not** compile into a Hermes skill directory/file (`SKILL.md` under `/opt/data/profiles/.../skills`), nor does it run a server-side background video/screen daemon. It produces an executable sequence routine.
+
+---
+
+### Phase 7 Verification Scoreboard
+
+| Probe | Verification | Result |
+|---|---|---|
+| Live surface theme switch | Computed CSS properties changed between dark and light | **PASS** |
+| Theme persistence | Retained theme across hard browser page reload | **PASS** |
+| Responsive theme styling | Captured desktop (1440x900) & mobile (390x844) light mode | **PASS** |
+| Teach-a-task take-over session | Start recording, capture click/type, stop recording | **PASS** |
+| Routine artifact creation | Backend routine created with recorded actions | **PASS** |
+| Console error clean | 0 uncaught exceptions or unhandled rejections | **PASS** |
+| Regression test suite | `pytest tests -q` (426 passed) | **PASS** |
+
 
