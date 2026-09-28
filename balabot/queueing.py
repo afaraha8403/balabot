@@ -204,9 +204,9 @@ class MessageQueue:
                                   "delivered_at": _now_iso()})
         return delivered
 
-    def drain_sse_frames(self, session_id: str, from_bot: str = "user",
-                         to_bot: str = "") -> list[str]:
-        """Drain as ready-to-yield SSE frames the UI already parses.
+    def drain_messages(self, session_id: str, from_bot: str = "user",
+                       to_bot: str = "") -> tuple[list[dict], list[str]]:
+        """Drain undelivered messages for `session_id`, returning (messages, sse_frames).
 
         Frames use the existing `event: handoff` grammar (ui/src/api.ts
         parses {from, to, summary, at}) — no new event type is invented.
@@ -219,6 +219,18 @@ class MessageQueue:
             frames.append(format_handoff_frame(
                 from_bot, to_bot or m["session_id"],
                 summary=m["content"], at=m["enqueued_at"]))
+        return msgs, frames
+
+    def drain_sse_frames(self, session_id: str, from_bot: str = "user",
+                         to_bot: str = "") -> list[str]:
+        """Drain as ready-to-yield SSE frames the UI already parses.
+
+        Frames use the existing `event: handoff` grammar (ui/src/api.ts
+        parses {from, to, summary, at}) — no new event type is invented.
+        Delivery state is committed in the same pass, so draining is
+        at-most-once even across restarts.
+        """
+        _, frames = self.drain_messages(session_id, from_bot=from_bot, to_bot=to_bot)
         return frames
 
     # ── state for the UI ("queued" shown honestly) ────────────────────────

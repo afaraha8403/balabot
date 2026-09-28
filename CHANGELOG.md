@@ -36,6 +36,7 @@
 - Implement and wire attachments intake: `POST /api/attachments` upload, `GET /api/attachments/{id}/{name}`, Composer UI upload handling, and `/api/chat` context delivery.
 
 ### Fixes
+- Inject queued in-flight messages into upstream chat completions payload in `/api/chat`: messages enqueued during active turns were drained into SSE frames but omitted from `messages` sent to the model, dropping user input sent while an agent was busy.
 - Update `ThinkingBlock` and `ThinkingOrb` components to dynamically track active theme mode rather than pinning dark styling.
 - Remove the seeded demo conversation from `ui/src/sessions.ts`: a hardcoded "hire a marketing and SEO expert" exchange with a fabricated OpenUI card appeared in every install with an empty session store. An empty store now yields an empty roster — a conversation exists only because an agent or the owner actually had one.
 - Correct the OpenUI approve handler's error path in `ui/src/App.tsx`, which reported `Proposal created: <error>` — success wording on a failure.

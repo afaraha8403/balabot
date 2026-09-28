@@ -2568,12 +2568,17 @@ async def chat(request: Request):
 
     q = _chat_queue()
     queued_frames: list[str] = []
+    queued_messages: list[dict] = []
     if q is not None and session_id:
         try:
-            queued_frames = q.drain_sse_frames(session_id, to_bot=profile)
+            queued_messages, queued_frames = q.drain_messages(session_id, to_bot=profile)
             q.mark_busy(session_id)
         except Exception:
             pass
+
+    if queued_messages:
+        for q_msg in queued_messages:
+            messages.append({"role": "user", "content": q_msg["content"]})
 
     url = f"{UPSTREAM}/p/{profile}/v1/chat/completions"
     payload = {"model": profile, "messages": messages, "stream": True}

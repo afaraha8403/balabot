@@ -257,3 +257,76 @@ def test_queue_http_endpoints(tmp_path, monkeypatch):
     assert resp.json()["state"]["pending_count"] == 1
     assert resp.json()["state"]["pending"][0]["content"] == "hello while offline"
 
+
+def test_chat_injects_drained_queue_messages_into_upstream_payload(tmp_path, monkeypatch):
+    import asyncio
+    from ui import server
+
+    db = tmp_path / "queue.db"
+    monkeypatch.setenv("BALABOT_QUEUE_DB", str(db))
+    server._QUEUE_SINGLETON = None
+
+    q = server._chat_queue()
+    assert q is not None
+    q.enqueue("sess_chat_test", "in-flight message 1")
+    q.enqueue("sess_chat_test", "in-flight message 2")
+
+    recorded_payloads = []
+
+    class _CaptureStream:
+        async def __aenter__(self):
+            class _R:
+                status_code = 200
+                async def aread(self):
+                    return b""
+                async def aiter_bytes(self):
+                    yield b'event: final\ndata: {"content": "done"}\n\n'
+            return _R()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _CaptureAsyncClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def stream(self, method, url, json=None, headers=None):
+            recorded_payloads.append(json)
+            return _CaptureStream()
+
+    monkeypatch.setattr(server.httpx, "AsyncClient", _CaptureAsyncClient)
+    monkeypatch.setattr(server, "_jev_chat_client", lambda: None)
+    monkeypatch.setattr(server, "_JEV_CHAT_CLIENT", None)
+    monkeypatch.setattr(server, "_JEV_CHAT_REASON", "disabled")
+
+    body = {
+        "bot_id": "principal",
+        "messages": [{"role": "user", "content": "turn text"}],
+        "session_id": "sess_chat_test",
+    }
+
+    async def fake_json():
+        return body
+
+    req = type("R", (), {"json": staticmethod(fake_json)})()
+    resp = asyncio.run(server.chat(req))
+
+    async def drain():
+        async for _ in resp.body_iterator:
+            pass
+
+    asyncio.run(drain())
+
+    assert len(recorded_payloads) == 1
+    sent_messages = recorded_payloads[0]["messages"]
+    sent_contents = [m.get("content") for m in sent_messages if isinstance(m, dict)]
+    assert "in-flight message 1" in sent_contents
+    assert "in-flight message 2" in sent_contents
+
+
