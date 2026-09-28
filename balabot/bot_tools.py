@@ -34,6 +34,10 @@ from pathlib import Path
 
 import httpx
 
+import httpcore
+from httpcore._backends.sync import SyncBackend
+from httpcore._backends.base import NetworkStream
+
 from balabot import orgs
 from balabot.handoffs import HandoffError, enqueue_handoff
 
@@ -58,6 +62,83 @@ _HTTP_TRANSPORT: httpx.BaseTransport | None = None
 
 def _get_http_transport() -> httpx.BaseTransport | None:
     return _HTTP_TRANSPORT
+
+
+class SSRFBlockedError(Exception):
+    """Raised when an outbound connection targets a prohibited address or DNS rebinding is detected."""
+
+
+class _PinnedSyncBackend(SyncBackend):
+    """Network backend pinning the TCP connection to a pre-validated IP.
+
+    Option (a) connection pinning:
+    Prevents DNS rebinding TOCTOU attacks where a hostile resolver answers the initial
+    validation query with a benign public IP but returns a private/loopback IP on
+    connect. We resolve and validate the IP once, then connect directly to that pinned IP
+    while preserving the original hostname in request headers and TLS SNI for certificate
+    validation. Also performs an immediate post-connect verification on the actual socket peer
+    address as belt-and-braces (Option b).
+    """
+
+    def __init__(self, pinned_ip: str):
+        super().__init__()
+        self._pinned_ip = pinned_ip
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options=None,
+    ) -> NetworkStream:
+        # Check if the hostname resolves to a prohibited address at connect time (rebinding detection)
+        try:
+            addr_infos = socket.getaddrinfo(host, port)
+            for *_, sockaddr in addr_infos:
+                ip = ipaddress.ip_address(sockaddr[0])
+                if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
+                    raise SSRFBlockedError(f"SSRF blocked: destination {host} resolves to prohibited address {ip}")
+        except socket.gaierror:
+            pass
+
+        stream = super().connect_tcp(
+            self._pinned_ip,
+            port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+        peer_addr = stream.get_extra_info("server_addr")
+        if peer_addr:
+            peer_ip_str = peer_addr[0]
+            try:
+                ip = ipaddress.ip_address(peer_ip_str)
+                if (
+                    ip.is_loopback
+                    or ip.is_private
+                    or ip.is_link_local
+                    or ip.is_reserved
+                    or ip.is_unspecified
+                    or peer_ip_str != self._pinned_ip
+                ):
+                    stream.close()
+                    raise SSRFBlockedError(f"SSRF blocked: connection peer {peer_ip_str} is prohibited")
+            except ValueError:
+                stream.close()
+                raise SSRFBlockedError(f"SSRF blocked: invalid peer address {peer_ip_str}")
+        return stream
+
+
+def _make_pinned_transport(pinned_ip: str) -> httpx.HTTPTransport:
+    transport = httpx.HTTPTransport(verify=True)
+    transport._pool = httpcore.ConnectionPool(
+        network_backend=_PinnedSyncBackend(pinned_ip),
+        ssl_context=transport._pool._ssl_context,
+        http1=True,
+        http2=False,
+    )
+    return transport
 
 PENDING_KINDS = {"secret_request", "secret_access_request"}
 
@@ -649,6 +730,7 @@ def secret_request(
             "status_code": 400,
         }
 
+    target_ip = None
     try:
         ip = ipaddress.ip_address(hostname)
         if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
@@ -658,6 +740,7 @@ def secret_request(
                 "error": f"SSRF blocked: destination {hostname} is a prohibited address",
                 "status_code": 400,
             }
+        target_ip = str(ip)
     except ValueError:
         # Hostname, not IP literal -> resolve DNS
         try:
@@ -672,6 +755,8 @@ def secret_request(
                         "error": f"SSRF blocked: destination {hostname} resolves to prohibited address {resolved_ip}",
                         "status_code": 400,
                     }
+                if target_ip is None:
+                    target_ip = str(resolved_ip)
         except socket.gaierror:
             pass
 
@@ -694,6 +779,16 @@ def secret_request(
 
     # Execute request
     transport = _get_http_transport()
+    if transport is None:
+        if target_ip is None:
+            _record_secret_audit(bot_id, name, origin, method, "refused", f"SSRF blocked: unable to resolve destination {hostname}")
+            return {
+                "ok": False,
+                "error": f"SSRF blocked: unable to resolve destination {hostname}",
+                "status_code": 400,
+            }
+        transport = _make_pinned_transport(target_ip)
+
     try:
         with httpx.Client(transport=transport, follow_redirects=False, timeout=30.0) as client:
             if isinstance(body, dict):
@@ -702,6 +797,13 @@ def secret_request(
                 resp = client.request(method=method, url=url, headers=req_headers, content=body.encode("utf-8"))
             else:
                 resp = client.request(method=method, url=url, headers=req_headers)
+    except SSRFBlockedError as exc:
+        _record_secret_audit(bot_id, name, origin, method, "refused", str(exc))
+        return {
+            "ok": False,
+            "error": str(exc),
+            "status_code": 400,
+        }
     except Exception as exc:
         _record_secret_audit(bot_id, name, origin, method, "error", f"request failed: {type(exc).__name__}")
         return {

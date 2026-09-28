@@ -198,3 +198,69 @@ def test_secret_request_audit_never_stores_raw_url_or_query_string(org_env, monk
     assert last_audit["status"] == "allowed"
     assert last_audit["response_status"] == 200
 
+
+def test_dns_rebinding_refused(org_env, monkeypatch):
+    """DNS rebinding TOCTOU: a hostname resolving to loopback/private on connect must be refused."""
+    import socket
+    import threading
+
+    orgs.store_secret("REBIND_KEY", "balacode", MOCK_SECRET)
+    orgs.grant("principal", {"kind": "secret", "name": "REBIND_KEY"},
+               subject_org="balacode", scope="bot", access="inject")
+
+    # Start a dummy server on loopback to detect if connection is erroneously made
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    port = srv.getsockname()[1]
+    srv.listen(1)
+
+    received_requests = []
+
+    def handle():
+        try:
+            conn, _ = srv.accept()
+            data = conn.recv(1024)
+            if data:
+                received_requests.append(data)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nPWNED_BY_SSRF")
+            conn.close()
+        except Exception:
+            pass
+
+    t = threading.Thread(target=handle, daemon=True)
+    t.start()
+
+    # Simulate hostile DNS resolver answering first query with public IP and connect query with loopback IP
+    orig_getaddrinfo = socket.getaddrinfo
+    call_count = [0]
+
+    def mock_getaddrinfo(host, p, *args, **kwargs):
+        if host == "rebind.attacker.com":
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", p))]
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+        return orig_getaddrinfo(host, p, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
+
+    try:
+        res = bot_tools.secret_request("principal", "REBIND_KEY", f"http://rebind.attacker.com:{port}/private")
+    finally:
+        srv.close()
+
+    # The request must be refused, not allowed to connect to 127.0.0.1
+    assert res["ok"] is False
+    assert res["status_code"] == 400
+    assert "ssrf" in res["error"].lower() or "blocked" in res["error"].lower() or "prohibited" in res["error"].lower()
+    assert len(received_requests) == 0, "Hostile DNS rebinding allowed connection to internal loopback service!"
+
+    # Must be recorded as refused in the audit log
+    audit_file = org_env / "orgs" / "secret_audit.json"
+    assert audit_file.exists()
+    audits = json.loads(audit_file.read_text(encoding="utf-8"))
+    last_audit = audits[-1]
+    assert last_audit["status"] == "refused"
+    assert "ssrf" in (last_audit.get("reason") or "").lower() or "blocked" in (last_audit.get("reason") or "").lower() or "prohibited" in (last_audit.get("reason") or "").lower()
+
+
