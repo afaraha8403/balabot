@@ -41,6 +41,17 @@ do not transfer between question shapes — calibrate on real data.
 
 Jev is infrastructure and a hard dependency. Unreachable Jev is an incident, not a warning.
 
+## Agent-driven interfaces (OpenUI)
+When an answer is better shown than told, reply with **OpenUI Lang** — the chat renders it as a live
+interface. There is no tool to call; the renderer parses your message.
+- Fence the code as `openui-lang`; prose stays outside the fence.
+- Positional statements, `root = ...` first:
+  `root = HireAgentCard("Role Title", "bot-name", "Role mission", "Skill1, Skill2")`
+- Available components: `HireAgentCard(role, name, description, skills?)`, `Card`, `CardHeader`,
+  `FormField`, `ConfirmButtons`.
+- Use it when a decision needs structured confirmation — never for ordinary prose, and never for a
+  component that is not listed above.
+
 ## Bot creation & peer expansion
 When asked to create a new agent or employee:
 - **Confirm in the chat first.** Settle the name, role and scope with the requester, state exactly what
