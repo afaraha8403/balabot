@@ -51,6 +51,8 @@ import {BotDeleteDialog} from './BotDeleteDialog';
 import {OrphansDialog} from './OrphansDialog';
 import {useMediaQuery} from '@astryxdesign/core/hooks';
 import {useResizable, ResizeHandle} from '@astryxdesign/core/Resizable';
+import {MoreMenu} from '@astryxdesign/core/MoreMenu';
+import {Divider} from '@astryxdesign/core/Divider';
 import {BotRoster} from './screens/BotRoster';
 import {AgentsScreen} from './screens/AgentsScreen';
 import {MemoryScreen} from './screens/MemoryScreen';
@@ -58,7 +60,43 @@ import {DecisionsScreen} from './screens/DecisionsScreen';
 import {GovernanceScreen} from './screens/GovernanceScreen';
 import {OpsScreen} from './screens/OpsScreen';
 import {CostScreen} from './screens/CostScreen';
-import {api, streamChat, checkHealth, getFleet, getSubAgents, getSessions, getServerSession, createServerSession, deleteServerSession, type Bot, type ChatMessage, type Handoff, type JevCarrier, type Session, type SecretCard, type SubAgent, type ToolProgress, type SessionsResponse, type Attachment} from './api';
+import {CommandPalette} from './CommandPalette';
+import {InterventionCard} from './InterventionCard';
+import {DraftCard, parseDraftsFromContent} from './DraftCard';
+import {VoiceMemoCard} from './VoiceMemoCard';
+import {
+  api,
+  streamChat,
+  checkHealth,
+  getFleet,
+  getSubAgents,
+  getSessions,
+  getServerSession,
+  createServerSession,
+  deleteServerSession,
+  getGroups,
+  postGroupTurn,
+  getSkillLibrary,
+  getComputerFrame,
+  updateBot,
+  createBotProposal,
+  type Bot,
+  type ChatMessage,
+  type Handoff,
+  type JevCarrier,
+  type Session,
+  type SecretCard,
+  type SubAgent,
+  type ToolProgress,
+  type SessionsResponse,
+  type Attachment,
+  type Group,
+  type SkillEntry,
+  type ComputerFrame,
+  type InterventionPayload,
+  type DraftCardData,
+  type VoiceMemoData,
+} from './api';
 import {
   IconAgentComputer,
   IconAgents,
@@ -79,8 +117,27 @@ import {
   IconOrphans,
   IconSkills,
   IconWarning,
+  IconGear,
+  IconMicrophone,
+  IconPin,
+  IconAdd,
+  IconSearch,
 } from './icons';
-import {loadSessions, saveSessions, loadLastBot, saveLastBot, newSession, loadShowThinking, saveShowThinking, syncSessionsFromServer} from './sessions';
+import {
+  loadSessions,
+  saveSessions,
+  loadLastBot,
+  saveLastBot,
+  newSession,
+  loadShowThinking,
+  saveShowThinking,
+  loadPinnedBots,
+  savePinnedBots,
+  loadHiddenBots,
+  saveHiddenBots,
+  syncSessionsFromServer,
+} from './sessions';
+
 
 /** Opening suggestions shown on the empty state. */
 const PROMPTS = [
@@ -162,6 +219,23 @@ export default function App() {
   const [deleteBotTarget, setDeleteBotTarget] = useState<Bot | null>(null);
   const [showOrphans, setShowOrphans] = useState(false);
   const [excluded, setExcluded] = useState<string[]>([]);
+  const [pinnedBotIds, setPinnedBotIds] = useState<string[]>(() => loadPinnedBots());
+  const [hiddenBotIds, setHiddenBotIds] = useState<string[]>(() => loadHiddenBots());
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  const [skills, setSkills] = useState<SkillEntry[]>([]);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [interventions, setInterventions] = useState<InterventionPayload[]>([]);
+  const [draftCards, setDraftCards] = useState<DraftCardData[]>([]);
+  const [voiceMemos, setVoiceMemos] = useState<VoiceMemoData[]>([]);
+  const [rightPanelMode, setRightPanelMode] = useState<'screen' | 'settings'>('screen');
+  const [hideRightPanel, setHideRightPanel] = useState(false);
+  const [miniFrame, setMiniFrame] = useState<ComputerFrame | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editTitle, setEditTitle] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [savingSettings, setSavingSettings] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   // Live sub-agent rows (real spawn ledger). Polled so the roster reflects
   // spawns as they start and stop; never invented client-side.
   const [subagents, setSubagents] = useState<SubAgent[]>([]);
@@ -180,6 +254,7 @@ export default function App() {
   // Jev USER-message carriers emitted during THIS turn's stream. Cleared at
   // send, collected during streaming, attached to the final assistant message.
   const jevCarriersRef = useRef<JevCarrier[]>([]);
+
 
   // Astryx's responsive contract: above 1024px the third region (the rosters and
   // detail panels) has room; below it, it is dropped rather than squeezed, and
@@ -240,15 +315,167 @@ export default function App() {
     [reloadBots],
   );
 
-  // After a delete, refresh the roster. reloadBots re-selects: if the deleted
-  // bot was active, its id is no longer in the list and the fallback picks the
-  // first remaining bot, so the chat selection is always valid.
+  // After a delete, refresh the roster.
   const onBotDeleted = useCallback(
     (_result: {deleted: boolean; bot_id: string}) => {
       void reloadBots();
     },
     [reloadBots],
   );
+
+  const onTogglePin = useCallback((bot: Bot) => {
+    setPinnedBotIds(prev => {
+      const next = prev.includes(bot.id) ? prev.filter(id => id !== bot.id) : [...prev, bot.id];
+      savePinnedBots(next);
+      return next;
+    });
+  }, []);
+
+  const onToggleHide = useCallback((bot: Bot) => {
+    setHiddenBotIds(prev => {
+      const next = prev.includes(bot.id) ? prev.filter(id => id !== bot.id) : [...prev, bot.id];
+      saveHiddenBots(next);
+      return next;
+    });
+  }, []);
+
+  const onDuplicateBot = useCallback(async (bot: Bot) => {
+    try {
+      await createBotProposal({
+        name: `${bot.name} copy`,
+        role: bot.title || bot.description || 'Specialist bot',
+      });
+      setBanner(`Proposal created for "${bot.name} copy" — opening Create Bot dialog.`);
+      setShowBotCreation(true);
+    } catch (err) {
+      setBanner(`Could not duplicate bot: ${(err as Error).message}`);
+    }
+  }, []);
+
+  const reloadGroups = useCallback(async () => {
+    try {
+      const res = await getGroups();
+      if (res.available !== false) setGroups(res.groups ?? []);
+    } catch {
+      /* transient */
+    }
+  }, []);
+
+  const reloadSkills = useCallback(async () => {
+    try {
+      const res = await getSkillLibrary();
+      if (res.available !== false) {
+        setSkills([...(res.learned ?? []), ...(res.brought ?? [])]);
+      }
+    } catch {
+      /* transient */
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadGroups();
+    void reloadSkills();
+  }, [reloadGroups, reloadSkills]);
+
+  // Poll live Agent Computer mini screen frame for the active bot
+  useEffect(() => {
+    if (!activeBotId || isNarrow || hideRightPanel) return;
+    let live = true;
+    const fetchFrame = async () => {
+      try {
+        const f = await getComputerFrame(activeBotId);
+        if (live && f.ok) setMiniFrame(f);
+      } catch {
+        /* transient */
+      }
+    };
+    void fetchFrame();
+    const iv = window.setInterval(fetchFrame, 4000);
+    return () => {
+      live = false;
+      window.clearInterval(iv);
+    };
+  }, [activeBotId, isNarrow, hideRightPanel]);
+
+  // Global GrokBot keyboard navigation shortcuts
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Cmd/Ctrl+K: Command Palette
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowCommandPalette(prev => !prev);
+      }
+      // Cmd/Ctrl+Shift+F: Search Bots
+      else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+      // Cmd/Ctrl+N: New Bot / new chat
+      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !e.shiftKey) {
+        e.preventDefault();
+        setShowBotCreation(true);
+      }
+      // Cmd/Ctrl+B: Compact sidebar toggle
+      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b' && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        if (roster.isCollapsed) roster.expand();
+        else roster.collapse();
+      }
+      // Cmd/Ctrl+Shift+M or W: Skill library / Marketplace
+      else if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        (e.key.toLowerCase() === 'm' || e.key.toLowerCase() === 'w')
+      ) {
+        e.preventDefault();
+        setShowSkills(true);
+      }
+      // Cmd/Ctrl+1..9: Jump to sidebar bot
+      else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9') {
+        const idx = parseInt(e.key, 10) - 1;
+        const visibleBots = bots.filter(b => !hiddenBotIds.includes(b.id));
+        if (visibleBots[idx]) {
+          e.preventDefault();
+          setActiveBotId(visibleBots[idx].id);
+          setActiveGroupId(null);
+          setActiveSessionId(null);
+        }
+      }
+      // Alt+Up / Alt+Down: Previous / Next bot
+      else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        const visibleBots = bots.filter(b => !hiddenBotIds.includes(b.id));
+        if (visibleBots.length > 0) {
+          e.preventDefault();
+          const curIdx = visibleBots.findIndex(b => b.id === activeBotId);
+          const nextIdx =
+            e.key === 'ArrowDown'
+              ? (curIdx + 1) % visibleBots.length
+              : (curIdx - 1 + visibleBots.length) % visibleBots.length;
+          setActiveBotId(visibleBots[nextIdx].id);
+          setActiveGroupId(null);
+          setActiveSessionId(null);
+        }
+      }
+      // Control+Tab / Control+Shift+Tab: Cycle bots
+      else if (e.ctrlKey && e.key === 'Tab') {
+        const visibleBots = bots.filter(b => !hiddenBotIds.includes(b.id));
+        if (visibleBots.length > 0) {
+          e.preventDefault();
+          const curIdx = visibleBots.findIndex(b => b.id === activeBotId);
+          const nextIdx = e.shiftKey
+            ? (curIdx - 1 + visibleBots.length) % visibleBots.length
+            : (curIdx + 1) % visibleBots.length;
+          setActiveBotId(visibleBots[nextIdx].id);
+          setActiveGroupId(null);
+          setActiveSessionId(null);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [bots, hiddenBotIds, activeBotId, roster]);
+
 
   // Poll the real spawn ledger via /api/subagents. An empty list is a real
   // answer (nothing spawned); a failed fetch just leaves the last state.
@@ -289,6 +516,14 @@ export default function App() {
   }, [sessions]);
 
   const activeBot = bots.find(b => b.id === activeBotId) ?? null;
+
+  useEffect(() => {
+    if (activeBot) {
+      setEditName(activeBot.name);
+      setEditTitle(activeBot.title || '');
+      setEditDesc(activeBot.description || '');
+    }
+  }, [activeBot]);
 
   const activeSession = useMemo(() => {
     if (!activeBotId) return null;
@@ -416,16 +651,26 @@ export default function App() {
         },
         session.id,
         attachments,
+        (i: InterventionPayload) => {
+          setInterventions(prev => [...prev, i]);
+        },
       );
+      const parsedDrafts = parseDraftsFromContent(finalText);
       const finalMsg: ChatMessage = {
         role: 'assistant',
-        content: finalText,
+        content: parsedDrafts.cleanContent,
         at: Date.now(),
         toolCalls: toolCallsRef.current.length ? toolCallsRef.current : undefined,
         thinking: thinkingRef.current || undefined,
         jevCarriers: jevCarriersRef.current.length ? jevCarriersRef.current : undefined,
+        interventions: interventions.length ? interventions : undefined,
+        drafts: parsedDrafts.drafts.length ? parsedDrafts.drafts : undefined,
+        voiceMemos: voiceMemos.length ? voiceMemos : undefined,
       };
       patchSession(session.id, s => ({...s, messages: [...s.messages, finalMsg]}));
+      setInterventions([]);
+      setDraftCards([]);
+      setVoiceMemos([]);
     } catch (err) {
       const aborted = controller.signal.aborted;
       const partial = streamTextRef.current;
@@ -540,6 +785,13 @@ export default function App() {
       }
       endContent={
         <HStack gap={2} vAlign="center">
+          <Button
+            label="Jump (Ctrl+K)"
+            size="sm"
+            variant="ghost"
+            icon={<IconSearch />}
+            onClick={() => setShowCommandPalette(true)}
+          />
           {/* Diagnosis toggle: reveals the agent's reasoning stream. Off by
               default; the choice is persisted so it survives a reload. */}
           <Switch
@@ -602,6 +854,27 @@ export default function App() {
               onClick={() => setShowComputer(true)}
             />
           ) : null}
+          {activeBot ? (
+            <IconButton
+              label={rightPanelMode === 'settings' ? 'Show live screen' : `${activeBot.name} settings`}
+              size="sm"
+              variant={rightPanelMode === 'settings' ? 'primary' : 'ghost'}
+              icon={<IconGear />}
+              onClick={() => {
+                setRightPanelMode(prev => (prev === 'settings' ? 'screen' : 'settings'));
+                setHideRightPanel(false);
+              }}
+            />
+          ) : null}
+          {activeBot ? (
+            <IconButton
+              label={hideRightPanel ? 'Expand right panel' : 'Collapse right panel'}
+              size="sm"
+              variant="ghost"
+              icon={hideRightPanel ? <IconExpandPanel /> : <IconCollapsePanel />}
+              onClick={() => setHideRightPanel(prev => !prev)}
+            />
+          ) : null}
         </HStack>
       }
     />
@@ -631,38 +904,76 @@ export default function App() {
               </VStack>
             ) : (
               <VStack gap={2} height="100%">
-                <HStack gap={1} vAlign="center">
+                <HStack gap={1} vAlign="center" justify="between">
                   <TextInput
+                    ref={searchInputRef}
                     label="Search bots"
                     isLabelHidden
-                    placeholder="Search bots…"
+                    placeholder="Search bots… (Ctrl+Shift+F)"
                     value={rosterQuery}
                     onChange={setRosterQuery}
                     size="sm"
-                    width={`${Math.max(120, roster.size - 60)}px`}
+                    width={`${Math.max(100, roster.size - 90)}px`}
                   />
-                  <IconButton
-                    label="Collapse bot list"
+                  <HStack gap={1} vAlign="center">
+                    <IconButton
+                      label="New bot or group"
+                      size="sm"
+                      variant="ghost"
+                      icon={<IconCreateBot />}
+                      onClick={() => setShowBotCreation(true)}
+                    />
+                    <IconButton
+                      label="Collapse bot list"
+                      size="sm"
+                      variant="ghost"
+                      icon={<IconCollapsePanel />}
+                      onClick={() => roster.collapse()}
+                    />
+                  </HStack>
+                </HStack>
+                <div style={{flex: 1, minHeight: 0, overflowY: 'auto'}}>
+                  <BotRoster
+                    bots={filteredBots}
+                    activeBotId={activeGroupId ? null : activeBotId}
+                    sessions={sessions}
+                    isStreaming={isStreaming}
+                    subagents={subagents}
+                    pinnedBotIds={pinnedBotIds}
+                    hiddenBotIds={hiddenBotIds}
+                    groups={groups}
+                    activeGroupId={activeGroupId}
+                    onSelect={id => {
+                      setActiveBotId(id);
+                      setActiveGroupId(null);
+                      setActiveSessionId(null);
+                      setScreen('chat');
+                    }}
+                    onSelectGroup={gid => {
+                      setActiveGroupId(gid);
+                      setShowGroups(true);
+                    }}
+                    onTogglePin={onTogglePin}
+                    onToggleHide={onToggleHide}
+                    onDuplicateBot={onDuplicateBot}
+                    onEditBot={setEditBot}
+                    onDeleteBot={setDeleteBotTarget}
+                  />
+                </div>
+                <Divider />
+                <HStack gap={2} vAlign="center" justify="between" paddingBlock={1}>
+                  <Button
+                    label="Plugins"
                     size="sm"
                     variant="ghost"
-                    icon={<IconCollapsePanel />}
-                    onClick={() => roster.collapse()}
+                    icon={<IconSkills />}
+                    onClick={() => setShowSkills(true)}
                   />
+                  <HStack gap={1} vAlign="center">
+                    <Avatar name="Ali" size="sm" tooltip={false} />
+                    <Text type="supporting" size="sm" weight="medium">Ali</Text>
+                  </HStack>
                 </HStack>
-                <BotRoster
-                  bots={filteredBots}
-                  activeBotId={activeBotId}
-                  sessions={sessions}
-                  isStreaming={isStreaming}
-                  subagents={subagents}
-                  onSelect={id => {
-                    setActiveBotId(id);
-                    setActiveSessionId(null);
-                    setScreen('chat');
-                  }}
-                  onEditBot={setEditBot}
-                  onDeleteBot={setDeleteBotTarget}
-                />
               </VStack>
             )}
           </LayoutPanel>
@@ -690,6 +1001,13 @@ export default function App() {
                 isStreaming={isStreaming}
                 onSubmit={(text, attachments) => void send(text, attachments)}
                 onStop={stop}
+                botName={activeBot.name}
+                bots={bots}
+                groups={groups}
+                skills={skills}
+                onStartVoiceChat={() => {
+                  setBanner('Voice chat: GrokBot voice channel activated. Speak now.');
+                }}
               />
             }
             emptyState={
@@ -780,6 +1098,31 @@ export default function App() {
                               }))}
                             />
                           ) : null}
+                          {m.interventions?.map((iv, idx) => (
+                            <InterventionCard
+                              key={iv.resume_token || idx}
+                              intervention={iv}
+                              onOpenComputer={() => setShowComputer(true)}
+                              onResolved={() => {
+                                setBanner('Intervention resolved — bot resuming.');
+                              }}
+                            />
+                          ))}
+                          {m.drafts?.map(draft => (
+                            <DraftCard
+                              key={draft.id}
+                              draft={draft}
+                              onSend={updated => {
+                                setBanner(`${updated.kind === 'email' ? 'Email' : 'Slack message'} sent!`);
+                              }}
+                              onDiscard={id => {
+                                setBanner('Draft discarded.');
+                              }}
+                            />
+                          ))}
+                          {m.voiceMemos?.map(memo => (
+                            <VoiceMemoCard key={memo.id} memo={memo} />
+                          ))}
                           <Markdown isStreaming={false}>{m.content}</Markdown>
                         </VStack>
                       )}
@@ -873,6 +1216,34 @@ export default function App() {
                   }}
                 />
               ))}
+              {interventions.map((iv, idx) => (
+                <InterventionCard
+                  key={iv.resume_token || idx}
+                  intervention={iv}
+                  onOpenComputer={() => setShowComputer(true)}
+                  onResolved={() => {
+                    setBanner('Intervention resolved — bot resuming.');
+                    setInterventions(prev => prev.filter(item => item.resume_token !== iv.resume_token));
+                  }}
+                />
+              ))}
+              {draftCards.map(draft => (
+                <DraftCard
+                  key={draft.id}
+                  draft={draft}
+                  onSend={updated => {
+                    setBanner(`${updated.kind === 'email' ? 'Email' : 'Slack message'} sent!`);
+                    setDraftCards(prev => prev.filter(d => d.id !== draft.id));
+                  }}
+                  onDiscard={id => {
+                    setBanner('Draft discarded.');
+                    setDraftCards(prev => prev.filter(d => d.id !== id));
+                  }}
+                />
+              ))}
+              {voiceMemos.map(memo => (
+                <VoiceMemoCard key={memo.id} memo={memo} />
+              ))}
             </ChatMessageList>
             </ChatLayout>
           </HStack>
@@ -884,50 +1255,177 @@ export default function App() {
         // Responsive contract (>1024: nav | roster | thread | live panel;
         // <=1024: the live panel is dropped, not squeezed — its content opens on
         // demand from the top-bar "Agent computer" button.
-        isNarrow ? undefined : activeBot ? (
-          <LayoutPanel width={300} hasDivider label="Live screen" padding={4}>
-            <VStack gap={3}>
-              <HStack gap={2} vAlign="center">
-                <Avatar name={activeBot.name} size="sm" tooltip={false} />
-                <Text type="body" weight="semibold">
-                  {activeBot.name}
-                </Text>
-                <StatusDot
-                  variant={isStreaming ? 'warning' : 'success'}
-                  label={isStreaming ? 'Thinking' : 'Idle'}
-                  isPulsing={isStreaming}
-                />
-              </HStack>
-              {/* Placeholder live-screen preview — the real desktop feed is
-                  wired through AgentComputerDialog today. */}
-              <Card variant="muted" padding={4} minHeight={160}>
-                <VStack gap={2} align="start">
-                  <Text type="supporting">
-                    Live screen preview — placeholder. Open the full view:
-                  </Text>
-                  <Button
-                    label="Open agent computer"
+        isNarrow || hideRightPanel ? undefined : activeBot ? (
+          <LayoutPanel
+            width={320}
+            hasDivider
+            label={rightPanelMode === 'settings' ? `${activeBot.name} settings` : "Live screen"}
+            padding={3}
+          >
+            {rightPanelMode === 'settings' ? (
+              <VStack gap={3}>
+                <HStack gap={2} vAlign="center" justify="between">
+                  <HStack gap={2} vAlign="center">
+                    <Avatar name={activeBot.name} size="sm" tooltip={false} />
+                    <Text type="body" weight="semibold">
+                      Bot Settings
+                    </Text>
+                  </HStack>
+                  <IconButton
+                    label="Back to screen"
                     size="sm"
-                    variant="secondary"
-                    onClick={() => setShowComputer(true)}
+                    variant="ghost"
+                    icon={<IconClose />}
+                    onClick={() => setRightPanelMode('screen')}
+                  />
+                </HStack>
+                <Divider />
+                <TextInput
+                  label="Bot Name"
+                  value={editName}
+                  onChange={setEditName}
+                  size="sm"
+                />
+                <TextInput
+                  label="Title / Role"
+                  value={editTitle}
+                  onChange={setEditTitle}
+                  size="sm"
+                />
+                <VStack gap={1} align="start" width="100%">
+                  <Text type="supporting" size="xsm" weight="medium">
+                    Description & Instructions
+                  </Text>
+                  <textarea
+                    value={editDesc}
+                    onChange={e => setEditDesc(e.target.value)}
+                    rows={6}
+                    style={{
+                      width: '100%',
+                      padding: '8px',
+                      fontFamily: 'inherit',
+                      fontSize: '13px',
+                      backgroundColor: 'var(--surface-sunken, rgba(255, 255, 255, 0.05))',
+                      color: 'inherit',
+                      border: '1px solid var(--border-default, rgba(255, 255, 255, 0.15))',
+                      borderRadius: 'var(--radius-md, 6px)',
+                      resize: 'vertical',
+                    }}
                   />
                 </VStack>
-              </Card>
-              <Button
-                label="Create Routine"
-                variant="primary"
-                onClick={() => {
-                  // Placeholder — routines are a named object in the product
-                  // plan; the create action is wired when the API exists.
-                  window.setTimeout(() => {
-                    window.console.info('[placeholder] Create Routine requested');
-                  }, 0);
-                }}
-              />
-              <Text type="supporting">
-                {activeBot.description}
-              </Text>
-            </VStack>
+                <HStack gap={2}>
+                  <Button
+                    label={savingSettings ? "Saving…" : "Save changes"}
+                    variant="primary"
+                    size="sm"
+                    isDisabled={savingSettings}
+                    onClick={async () => {
+                      setSavingSettings(true);
+                      try {
+                        await updateBot(activeBot.id, {
+                          name: editName.trim() || activeBot.name,
+                          title: editTitle.trim(),
+                          description: editDesc.trim(),
+                        });
+                        await reloadBots();
+                        setBanner(`Saved settings for ${editName.trim() || activeBot.name}`);
+                        setRightPanelMode('screen');
+                      } catch (err) {
+                        setBanner(`Failed to save settings: ${(err as Error).message}`);
+                      } finally {
+                        setSavingSettings(false);
+                      }
+                    }}
+                  />
+                  <Button
+                    label="Cancel"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setRightPanelMode('screen')}
+                  />
+                </HStack>
+              </VStack>
+            ) : (
+              <VStack gap={3}>
+                <HStack gap={2} vAlign="center" justify="between">
+                  <HStack gap={2} vAlign="center">
+                    <Avatar name={activeBot.name} size="sm" tooltip={false} />
+                    <Text type="body" weight="semibold">
+                      {activeBot.name}&apos;s screen
+                    </Text>
+                  </HStack>
+                  <StatusDot
+                    variant={isStreaming ? 'warning' : 'success'}
+                    label={isStreaming ? 'Working' : 'Idle'}
+                    isPulsing={isStreaming}
+                  />
+                </HStack>
+
+                {/* GrokBot Live Screen Preview Card */}
+                <Card variant="muted" padding={2} minHeight={150}>
+                  <VStack gap={2} align="center">
+                    {miniFrame?.b64 ? (
+                      <img
+                        src={`data:image/png;base64,${miniFrame.b64}`}
+                        alt={`${activeBot.name} screen thumbnail`}
+                        style={{
+                          width: '100%',
+                          height: 'auto',
+                          borderRadius: 'var(--radius-sm, 4px)',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => setShowComputer(true)}
+                      />
+                    ) : (
+                      <VStack gap={2} paddingBlock={3} align="center">
+                        <IconAgentComputer size="md" color="secondary" />
+                        <Text type="supporting" size="xsm">
+                          {miniFrame?.note || "Agent computer ready"}
+                        </Text>
+                      </VStack>
+                    )}
+                    <Button
+                      label="Open Agent Computer"
+                      size="sm"
+                      variant="secondary"
+                      icon={<IconAgentComputer />}
+                      onClick={() => setShowComputer(true)}
+                    />
+                  </VStack>
+                </Card>
+
+                {/* GrokBot Routines Section */}
+                <Divider />
+                <HStack gap={2} vAlign="center" justify="between">
+                  <Text type="body" weight="semibold">
+                    Routines
+                  </Text>
+                  <Button
+                    label="+"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setBanner(`Routine builder for ${activeBot.name}: configure schedules via cron or routines.`);
+                    }}
+                  />
+                </HStack>
+                <Card variant="default" padding={2}>
+                  <Text type="supporting" size="xsm" color="secondary">
+                    No scheduled routines. Click + to add an automated workflow.
+                  </Text>
+                </Card>
+
+                <Divider />
+                <VStack gap={1} align="start">
+                  <Text type="supporting" weight="semibold" size="xsm">
+                    Role & Bio
+                  </Text>
+                  <Text type="supporting" size="xsm">
+                    {activeBot.description || activeBot.title}
+                  </Text>
+                </VStack>
+              </VStack>
+            )}
           </LayoutPanel>
         ) : null
       }
@@ -1033,6 +1531,7 @@ export default function App() {
       {showGroups ? (
         <GroupChatDialog
           bots={bots}
+          initialGroupId={activeGroupId}
           onClose={() => setShowGroups(false)}
           onFleetsChanged={() => void reloadBots()}
         />
@@ -1064,6 +1563,43 @@ export default function App() {
           onFleetChanged={() => void reloadBots()}
         />
       ) : null}
+      <CommandPalette
+        isOpen={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        bots={bots}
+        groups={groups}
+        sessions={sessions}
+        onSelectBot={id => {
+          setActiveBotId(id);
+          setActiveGroupId(null);
+          setActiveSessionId(null);
+          setScreen('chat');
+        }}
+        onSelectGroup={gid => {
+          setActiveGroupId(gid);
+          setShowGroups(true);
+        }}
+        onSelectSession={(sid, botId) => {
+          setActiveBotId(botId);
+          setActiveGroupId(null);
+          setActiveSessionId(sid);
+          setScreen('chat');
+        }}
+        onAction={action => {
+          if (action === 'new-bot') setShowBotCreation(true);
+          else if (action === 'new-group') {
+            setActiveGroupId(null);
+            setShowGroups(true);
+          } else if (action === 'open-skills') setShowSkills(true);
+          else if (action === 'open-computer') setShowComputer(true);
+          else if (action === 'nav-agents') setScreen('agents');
+          else if (action === 'nav-memory') setScreen('memory');
+          else if (action === 'nav-decisions') setScreen('decisions');
+          else if (action === 'nav-governance') setScreen('governance');
+          else if (action === 'nav-ops') setScreen('ops');
+          else if (action === 'nav-cost') setScreen('cost');
+        }}
+      />
     </AppShell>
   );
 }

@@ -1,32 +1,25 @@
 import {Avatar} from '@astryxdesign/core/Avatar';
 import {Badge} from '@astryxdesign/core/Badge';
+import {Collapsible} from '@astryxdesign/core/Collapsible';
+import {Divider} from '@astryxdesign/core/Divider';
 import {HStack} from '@astryxdesign/core/Stack';
 import {List} from '@astryxdesign/core/List';
 import {ListItem} from '@astryxdesign/core/List';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
-import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {ThinkingOrb} from 'thinking-orbs';
 import {BotRowMenu} from '../BotRowMenu';
-import type {Bot, Session, SubAgent} from '../api';
+import {IconConceal, IconGroupChat, IconPin} from '../icons';
+import type {Bot, Group, Session, SubAgent} from '../api';
 
-// Messenger-style roster rows: avatar · bold name · one-line preview · timestamp.
-//
-// Every field here is derived from real state — this roster previously rendered
-// a hardcoded `canned` array indexed by position, so bot #2 read "Typing…"
-// forever and each bot showed a conversation that did not exist. A preview you
-// can click through to but never find is worse than no preview: it reads as a
-// broken feature rather than absent data. So: the preview is the bot's actual
-// last message, the timestamp is that message's real time, and "typing" appears
-// only while a stream for that bot is genuinely in flight.
 export type RosterEntry = {
   bot: Bot;
   preview: string;
   when: string;
   isTyping: boolean;
   hasMessages: boolean;
-  isGroup?: boolean;
-  members?: string[];
+  isPinned: boolean;
+  isHidden: boolean;
 };
 
 /** Compact recency label: time today, "Yesterday", weekday this week, else a date. */
@@ -34,7 +27,9 @@ function formatWhen(at: number): string {
   const d = new Date(at);
   const now = new Date();
   const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
 
   if (sameDay(d, now)) {
     return d.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
@@ -68,34 +63,47 @@ export function BotRoster({
   sessions,
   isStreaming,
   subagents,
+  pinnedBotIds = [],
+  hiddenBotIds = [],
+  groups = [],
+  activeGroupId = null,
   onSelect,
+  onSelectGroup,
+  onTogglePin,
+  onToggleHide,
+  onDuplicateBot,
   onEditBot,
   onDeleteBot,
 }: {
   bots: Bot[];
   activeBotId: string | null;
   sessions: Session[];
-  /** True while the active bot is streaming — the only honest source of "typing". */
   isStreaming: boolean;
-  /**
-   * Live sub-agent rows read from the container's real spawn ledger
-   * (undefined while loading). Nested under their parent bot; only genuinely
-   * running spawns appear — the ledger + /proc liveness is the sole source.
-   */
   subagents?: SubAgent[];
+  pinnedBotIds?: string[];
+  hiddenBotIds?: string[];
+  groups?: Group[];
+  activeGroupId?: string | null;
   onSelect: (id: string) => void;
-  /** Open the edit dialog (never called for shipped bots). */
+  onSelectGroup?: (gid: string) => void;
+  onTogglePin?: (bot: Bot) => void;
+  onToggleHide?: (bot: Bot) => void;
+  onDuplicateBot?: (bot: Bot) => void;
   onEditBot?: (bot: Bot) => void;
-  /** Open the delete-confirm dialog (never called for shipped bots). */
   onDeleteBot?: (bot: Bot) => void;
 }) {
-  const entries: RosterEntry[] = bots.map(bot => {
+  const pinnedSet = new Set(pinnedBotIds);
+  const hiddenSet = new Set(hiddenBotIds);
+
+  const makeEntry = (bot: Bot): RosterEntry => {
     const last = lastMessageFor(sessions, bot.id);
     const isTyping = isStreaming && activeBotId === bot.id;
     return {
       bot,
       isTyping,
       hasMessages: last !== null,
+      isPinned: pinnedSet.has(bot.id),
+      isHidden: hiddenSet.has(bot.id),
       preview: isTyping
         ? 'Typing…'
         : last
@@ -103,87 +111,200 @@ export function BotRoster({
           : 'No messages yet',
       when: last ? formatWhen(last.at) : '',
     };
-  });
+  };
 
-  return (
-    <List density="compact">
-      {entries.map(e => (
-        <ListItem
-          key={e.bot.id}
-          label={e.bot.name}
-          isSelected={e.bot.id === activeBotId}
-          onClick={() => onSelect(e.bot.id)}
-          description={
-            <VStack gap={1} align="start">
-              <Text
-                type="supporting"
-                maxLines={1}
-                color={e.isTyping ? 'accent' : 'secondary'}
-              >
-                {e.preview}
-              </Text>
-              {/* Live sub-agents, nested under their parent. `subagents` comes
-                  from /api/subagents (the container's spawn ledger + /proc
-                  liveness), so a row here means a process genuinely running.
-                  The parent's own spawn (e.g. a bot running the dashboard)
-                  is attributed by profile; others nest under main-hermes. */}
-              {(subagents ?? [])
-                .filter(s => s.parent === e.bot.id)
-                .map(s => (
-                  <HStack key={s.id} gap={2} vAlign="center">
-                    <ThinkingOrb
-                      state="working"
-                      size={20}
-                      theme="dark"
-                      aria-label={`${s.title} is working`}
-                    />
-                    <Text type="supporting" size="xsm" color="accent">
-                      sub-agent · {s.title}
-                      {s.age ? ` · up ${s.age}` : ''}
-                    </Text>
-                  </HStack>
-                ))}
-            </VStack>
-          }
-          startContent={
-            <Avatar name={e.bot.name} size="md" tooltip={false} />
-          }
-          endContent={
-            <VStack gap={1} align="end">
-              <HStack gap={1} vAlign="center">
-                <Text type="supporting" size="xsm">
-                  {e.when}
-                </Text>
-                {onEditBot && onDeleteBot ? (
-                  <BotRowMenu
-                    bot={e.bot}
-                    onEdit={onEditBot}
-                    onDelete={onDeleteBot}
-                  />
-                ) : null}
-              </HStack>
-              {e.isTyping ? (
-                // Same signal as the in-thread orb, at the inline-text preset.
-                // Replaces a pulsing StatusDot: the roster and the thread now
-                // speak the same visual language for "this bot is working".
+  const pinnedEntries = bots.filter(b => pinnedSet.has(b.id) && !hiddenSet.has(b.id)).map(makeEntry);
+  const mainEntries = bots.filter(b => !pinnedSet.has(b.id) && !hiddenSet.has(b.id)).map(makeEntry);
+  const hiddenEntries = bots.filter(b => hiddenSet.has(b.id)).map(makeEntry);
+
+  const renderBotItem = (e: RosterEntry) => (
+    <ListItem
+      key={e.bot.id}
+      label={e.bot.name}
+      isSelected={e.bot.id === activeBotId && !activeGroupId}
+      onClick={() => onSelect(e.bot.id)}
+      description={
+        <VStack gap={1} align="start">
+          <Text
+            type="supporting"
+            maxLines={1}
+            color={e.isTyping ? 'accent' : 'secondary'}
+          >
+            {e.preview}
+          </Text>
+          {(subagents ?? [])
+            .filter(s => s.parent === e.bot.id)
+            .map(s => (
+              <HStack key={s.id} gap={2} vAlign="center">
                 <ThinkingOrb
                   state="working"
                   size={20}
                   theme="dark"
-                  aria-label={`${e.bot.name} is working`}
+                  aria-label={`${s.title} is working`}
                 />
-              ) : e.isGroup ? (
-                <Badge label={`${e.members?.length ?? 2}`} variant="neutral" />
-              ) : null}
-            </VStack>
-          }
-        />
-      ))}
-      {entries.length === 0 ? (
-        <HStack gap={2} padding={2}>
-          <Text type="supporting">No bots in the roster yet.</Text>
-        </HStack>
+                <Text type="supporting" size="xsm" color="accent">
+                  sub-agent · {s.title}
+                  {s.age ? ` · up ${s.age}` : ''}
+                </Text>
+              </HStack>
+            ))}
+        </VStack>
+      }
+      startContent={
+        <Avatar name={e.bot.name} size="md" tooltip={false} />
+      }
+      endContent={
+        <VStack gap={1} align="end">
+          <HStack gap={1} vAlign="center">
+            {e.isPinned ? <IconPin size="sm" color="secondary" /> : null}
+            <Text type="supporting" size="xsm">
+              {e.when}
+            </Text>
+            <BotRowMenu
+              bot={e.bot}
+              isPinned={e.isPinned}
+              isHidden={e.isHidden}
+              onTogglePin={onTogglePin}
+              onToggleHide={onToggleHide}
+              onDuplicate={onDuplicateBot}
+              onEdit={onEditBot}
+              onDelete={onDeleteBot}
+            />
+          </HStack>
+          {e.isTyping ? (
+            <ThinkingOrb
+              state="working"
+              size={20}
+              theme="dark"
+              aria-label={`${e.bot.name} is working`}
+            />
+          ) : null}
+        </VStack>
+      }
+    />
+  );
+
+  return (
+    <VStack gap={3} height="100%" justify="between">
+      <VStack gap={2} style={{flex: 1, minHeight: 0, overflowY: 'auto'}}>
+        {/* Pinned Bots */}
+        {pinnedEntries.length > 0 ? (
+          <VStack gap={1}>
+            <HStack paddingInline={2} paddingBlock={1}>
+              <Text type="supporting" size="xsm" weight="semibold" color="secondary">
+                PINNED
+              </Text>
+            </HStack>
+            <List density="compact">
+              {pinnedEntries.map(renderBotItem)}
+            </List>
+            <Divider />
+          </VStack>
+        ) : null}
+
+        {/* Main Bots */}
+        {mainEntries.length > 0 ? (
+          <VStack gap={1}>
+            {pinnedEntries.length > 0 ? (
+              <HStack paddingInline={2} paddingBlock={1}>
+                <Text type="supporting" size="xsm" weight="semibold" color="secondary">
+                  BOTS
+                </Text>
+              </HStack>
+            ) : null}
+            <List density="compact">
+              {mainEntries.map(renderBotItem)}
+            </List>
+          </VStack>
+        ) : pinnedEntries.length === 0 ? (
+          <HStack gap={2} padding={2}>
+            <Text type="supporting">
+              {hiddenEntries.length > 0
+                ? 'All bots are currently hidden.'
+                : 'No bots in the roster yet.'}
+            </Text>
+          </HStack>
+        ) : null}
+
+        {/* Group Chats */}
+        {groups.length > 0 ? (
+          <VStack gap={1}>
+            <Divider />
+            <HStack paddingInline={2} paddingBlock={1}>
+              <Text type="supporting" size="xsm" weight="semibold" color="secondary">
+                GROUP CHATS
+              </Text>
+            </HStack>
+            <List density="compact">
+              {groups.map(g => {
+                const last = g.transcript?.[g.transcript.length - 1];
+                const preview = last ? `${last.from}: ${last.text}` : 'Group created';
+                const when = last?.at ? formatWhen(new Date(last.at).getTime()) : '';
+                return (
+                  <ListItem
+                    key={g.id}
+                    label={g.name}
+                    isSelected={activeGroupId === g.id}
+                    onClick={() => onSelectGroup?.(g.id)}
+                    description={
+                      <Text type="supporting" maxLines={1} color="secondary">
+                        {preview}
+                      </Text>
+                    }
+                    startContent={
+                      <Avatar name={g.name} size="md" tooltip={false} />
+                    }
+                    endContent={
+                      <VStack gap={1} align="end">
+                        <Text type="supporting" size="xsm">
+                          {when}
+                        </Text>
+                        <Badge label={`${g.members.length} bots`} variant="neutral" />
+                      </VStack>
+                    }
+                  />
+                );
+              })}
+            </List>
+          </VStack>
+        ) : null}
+      </VStack>
+
+      {/* Hidden Bots Drawer */}
+      {hiddenEntries.length > 0 ? (
+        <VStack gap={1} paddingBlock={2}>
+          <Divider />
+          <Collapsible
+            defaultIsOpen={false}
+            trigger={
+              <HStack
+                gap={2}
+                vAlign="center"
+                justify="between"
+                width="100%"
+                paddingBlock={1}
+                paddingInline={2}
+                style={{cursor: 'pointer'}}
+              >
+                <HStack gap={1} vAlign="center">
+                  <IconConceal size="sm" color="secondary" />
+                  <Text type="supporting" size="sm" weight="medium">
+                    {mainEntries.length === 0 && pinnedEntries.length === 0
+                      ? 'Show Hidden Bots'
+                      : 'Hidden Bots'}
+                  </Text>
+                </HStack>
+                <Badge label={`${hiddenEntries.length}`} variant="neutral" />
+              </HStack>
+            }
+          >
+            <List density="compact">
+              {hiddenEntries.map(renderBotItem)}
+            </List>
+          </Collapsible>
+        </VStack>
       ) : null}
-    </List>
+    </VStack>
   );
 }
+

@@ -19,6 +19,7 @@ import {Icon, type IconProps} from '@astryxdesign/core/Icon';
 import {
   ArrowPathIcon,
   ArrowUpTrayIcon,
+  BookmarkIcon,
   ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   CheckIcon,
@@ -27,15 +28,23 @@ import {
   CircleStackIcon,
   ClipboardDocumentCheckIcon,
   ClockIcon,
+  Cog6ToothIcon,
   CommandLineIcon,
   CurrencyDollarIcon,
+  DocumentDuplicateIcon,
   DocumentIcon,
+  EnvelopeIcon,
   ExclamationTriangleIcon,
+  EyeIcon,
   EyeSlashIcon,
   FolderIcon,
   InformationCircleIcon,
   MagnifyingGlassIcon,
+  MicrophoneIcon,
+  PaperAirplaneIcon,
   PaperClipIcon,
+  PauseIcon,
+  PlayIcon,
   PlusIcon,
   PlusCircleIcon,
   PowerIcon,
@@ -43,6 +52,7 @@ import {
   ServerStackIcon,
   ShieldCheckIcon,
   SparklesIcon,
+  SpeakerWaveIcon,
   UserGroupIcon,
   UsersIcon,
   WrenchScrewdriverIcon,
@@ -113,6 +123,27 @@ export const IconExpandPanel = wrap(ChevronDoubleRightIcon);
 /** Unregistered (orphan) profiles — a folder the roster cannot see. */
 export const IconOrphans = wrap(FolderIcon);
 
+/** Pin a bot to top. */
+export const IconPin = wrap(BookmarkIcon);
+/** Duplicate a bot. */
+export const IconDuplicate = wrap(DocumentDuplicateIcon);
+/** Reveal / visible. */
+export const IconReveal = wrap(EyeIcon);
+/** Settings gear. */
+export const IconGear = wrap(Cog6ToothIcon);
+/** Send message. */
+export const IconSend = wrap(PaperAirplaneIcon);
+/** Microphone / dictation. */
+export const IconMicrophone = wrap(MicrophoneIcon);
+/** Play media. */
+export const IconPlay = wrap(PlayIcon);
+/** Pause media. */
+export const IconPause = wrap(PauseIcon);
+/** Draft email or message. */
+export const IconDraft = wrap(EnvelopeIcon);
+/** Voice memo. */
+export const IconVoiceMemo = wrap(SpeakerWaveIcon);
+
 /**
  * A secret request: concealment when it is an ACCESS request, the warning
  * triangle otherwise. One helper so the two states stay visually distinct
@@ -122,3 +153,4 @@ export function IconConcealOrWarning({isAccess, ...rest}: IconPropsLite & {isAcc
   const Glyph = isAccess ? EyeSlashIcon : ExclamationTriangleIcon;
   return <Icon icon={Glyph} {...rest} />;
 }
+

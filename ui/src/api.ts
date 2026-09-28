@@ -44,6 +44,31 @@ export type Attachment = {
   path?: string;
 };
 
+export type InterventionPayload = {
+  bot: string;
+  reason: string;
+  hint?: string;
+  url?: string;
+  resume_token: string;
+  status?: 'pending' | 'approved' | 'denied';
+};
+
+export type DraftCardData = {
+  id: string;
+  kind: 'email' | 'slack';
+  to: string;
+  subjectOrChannel: string;
+  body: string;
+  status: 'draft' | 'sent' | 'discarded';
+};
+
+export type VoiceMemoData = {
+  id: string;
+  durationSec: number;
+  transcript: string;
+  audioUrl?: string;
+};
+
 export type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -57,7 +82,14 @@ export type ChatMessage = {
   jevCarriers?: JevCarrier[];
   /** File attachments associated with this message. */
   attachments?: Attachment[];
+  /** Intervention requests raised by the bot for sensitive human take-over. */
+  interventions?: InterventionPayload[];
+  /** Editable drafts (email or Slack) prepared by the bot. */
+  drafts?: DraftCardData[];
+  /** Voice memo replies sent by the bot. */
+  voiceMemos?: VoiceMemoData[];
 };
+
 
 export type Session = {
   id: string;
@@ -352,6 +384,8 @@ export async function streamChat(
   sessionId?: string,
   /** Uploaded or referenced attachments for this user message. */
   attachments?: Attachment[],
+  /** Human take-over intervention raised by the bot. */
+  onIntervention?: (i: InterventionPayload) => void,
 ): Promise<string> {
   const payload: Record<string, unknown> = {bot_id: botId, messages};
   if (sessionId) payload.session_id = sessionId;
@@ -419,7 +453,26 @@ export async function streamChat(
           at: h.at ? Date.parse(h.at) || Date.now() : Date.now(),
         });
       }
+    } else if (eventName === 'intervention') {
+      const inv = payload as {
+        bot?: string;
+        reason?: string;
+        hint?: string;
+        url?: string;
+        resume_token?: string;
+      };
+      if (onIntervention && inv.resume_token) {
+        onIntervention({
+          bot: inv.bot ?? botId,
+          reason: inv.reason ?? 'Human take-over requested',
+          hint: inv.hint,
+          url: inv.url,
+          resume_token: inv.resume_token,
+          status: 'pending',
+        });
+      }
     } else if (eventName === 'secret_request' || eventName === 'secret_access_request') {
+
       // A bot is asking for a secret. Only the NAME travels through the stream —
       // the value (if any) is entered by the human directly into the card form
       // and POSTed straight to the backend; it never re-enters the chat.
@@ -514,6 +567,22 @@ export async function sendComputerAction(
     body: JSON.stringify(action),
   });
 }
+
+/**
+ * POST /api/intervention/{resume_token}/resolve — release a paused bot turn
+ * after human take-over on the agent computer (CAPTCHA, 2FA, password).
+ */
+export async function resolveIntervention(
+  token: string,
+  action: 'approve' | 'deny' = 'approve',
+  note = '',
+): Promise<{ok: boolean; record: unknown}> {
+  return api(`/api/intervention/${encodeURIComponent(token)}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify({action, note}),
+  });
+}
+
 
 export async function getFleet(): Promise<Fleet> {
   return api<Fleet>('/api/fleet');

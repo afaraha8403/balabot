@@ -6,6 +6,8 @@ const KEY = 'balabot.sessions.v1';
 const LAST_KEY = 'balabot.lastBot.v1';
 /** User preference: reveal the agent's reasoning ("thinking") stream. Hidden by default. */
 const SHOW_THINKING_KEY = 'balabot.showThinking.v1';
+const PINNED_BOTS_KEY = 'balabot.pinnedBots.v1';
+const HIDDEN_BOTS_KEY = 'balabot.hiddenBots.v1';
 
 export function loadShowThinking(): boolean {
   try {
@@ -22,6 +24,42 @@ export function saveShowThinking(value: boolean) {
     /* ignore */
   }
 }
+
+export function loadPinnedBots(): string[] {
+
+  try {
+    const raw = localStorage.getItem(PINNED_BOTS_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function savePinnedBots(ids: string[]) {
+  try {
+    localStorage.setItem(PINNED_BOTS_KEY, JSON.stringify(ids));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadHiddenBots(): string[] {
+  try {
+    const raw = localStorage.getItem(HIDDEN_BOTS_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveHiddenBots(ids: string[]) {
+  try {
+    localStorage.setItem(HIDDEN_BOTS_KEY, JSON.stringify(ids));
+  } catch {
+    /* ignore */
+  }
+}
+
 
 /**
  * Add a server session row into the local Session[] surface. The server is

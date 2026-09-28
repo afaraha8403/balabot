@@ -19,6 +19,7 @@ import {ThinkingOrb} from 'thinking-orbs';
 import {
   createGroup,
   getGroup,
+  getGroups,
   postGroupTurn,
   type Bot,
   type Group,
@@ -30,6 +31,7 @@ const MAX_MEMBERS = 6;
 
 type Props = {
   bots: Bot[];
+  initialGroupId?: string | null;
   onClose: () => void;
   /** Fires after a group is created or a bot is added — lets App refresh. */
   onFleetsChanged?: () => void;
@@ -52,8 +54,8 @@ const botSource = (bots: Bot[]): SearchSource =>
  * chat view shows the shared transcript; the round counter and per-member
  * session sizes are read from the backend — never invented client-side.
  */
-export function GroupChatDialog({bots, onClose, onFleetsChanged}: Props) {
-  const [mode, setMode] = useState<ViewMode>('setup');
+export function GroupChatDialog({bots, initialGroupId, onClose, onFleetsChanged}: Props) {
+  const [mode, setMode] = useState<ViewMode>(initialGroupId ? 'chat' : 'setup');
   const [groups, setGroups] = useState<Group[]>([]);
   const [active, setActive] = useState<Group | null>(null);
   const [members, setMembers] = useState<SearchableItem[]>([]);
@@ -65,10 +67,29 @@ export function GroupChatDialog({bots, onClose, onFleetsChanged}: Props) {
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const loadGroups = useCallback(async () => {
-    const {getGroups} = await import('./api');
     const res = await getGroups();
-    if (res.available !== false) setGroups(res.groups ?? []);
-  }, []);
+    if (res.available !== false) {
+      setGroups(res.groups ?? []);
+      if (initialGroupId) {
+        const found = (res.groups ?? []).find(g => g.id === initialGroupId);
+        if (found) {
+          try {
+            const detail = await getGroup(initialGroupId);
+            if (detail.available !== false && detail.group) {
+              setActive(detail.group);
+              setMode('chat');
+            } else {
+              setActive(found);
+              setMode('chat');
+            }
+          } catch {
+            setActive(found);
+            setMode('chat');
+          }
+        }
+      }
+    }
+  }, [initialGroupId]);
 
   useEffect(() => {
     void loadGroups();
