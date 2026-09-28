@@ -460,3 +460,27 @@ def test_delegate_config_copies_rather_than_aliases():
     assert normalised is not raw
     normalised["db_path"] = "/tmp/other.db"
     assert raw["db_path"] == "/tmp/store.db"
+
+
+def test_prefetch_invokes_relevance_ladder(monkeypatch):
+    """The relevance ladder call site: prefetch over a session with recalled
+    decisions runs run_relevance_ladder and formats kept candidates."""
+    from balabot.memory_relevance import Candidate, RelevanceResult
+    provider, store = make_provider()
+    provider.initialize("sess-ladder", hermes_home="/tmp/hh", platform="cli")
+    store.create_session("sess-ladder", "principal", "ship feature")
+    store.record_decision("sess-ladder", "deploy on Tuesdays only", "gov", at="2026-09-27T00:00:00Z")
+
+    calls = []
+    def fake_ladder(jev, query, candidates, *, threshold=0.75, **kw):
+        calls.append((query, candidates))
+        return RelevanceResult(kept=candidates, scores={"m1": 0.9}, threshold=threshold, no_relevant_memory=False, reason="relevant")
+
+    import balabot.memory_relevance as mr
+    monkeypatch.setattr(mr, "run_relevance_ladder", fake_ladder)
+    out = provider.prefetch("deploy schedule", session_id="sess-ladder")
+    assert calls, "relevance ladder was not invoked by prefetch"
+    assert calls[0][0] == "deploy schedule"
+    assert "[Jev-ranked memory for: deploy schedule]" in out
+    assert "deploy on Tuesdays only" in out
+

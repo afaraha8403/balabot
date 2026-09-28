@@ -8,4 +8,5 @@
 - Implement and wire agent intervention flow (`balabot.intervention`): bot pause on wall, `request_intervention` tool, `event: intervention` SSE stream emission, and `/api/intervention/{token}/resolve` routes.
 - Implement and wire durable per-session message queueing (`balabot.queueing`): `GET/POST /api/queue/{session_id}` routes and FIFO draining at the top of `/api/chat` turns with busy/idle state tracking.
 - Wire skill library management routes: `POST /api/org/skills/pin`, `POST /api/org/skills/promote`, and `POST /api/org/skills/curate` to `balabot.skills_registry`.
+- Wire Jev memory relevance ladder into Hermes balabot-jev memory prefetch with candidate re-ranking.
 
