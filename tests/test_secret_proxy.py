@@ -157,3 +157,44 @@ def test_secret_request_ssrf_blocked(org_env):
         res = bot_tools.secret_request("principal", "KEY", bad_url)
         assert res["ok"] is False
         assert "ssrf" in res["error"].lower() or "blocked" in res["error"].lower()
+
+
+def test_secret_request_audit_never_stores_raw_url_or_query_string(org_env, monkeypatch):
+    """Audit records must never record raw URLs or query strings to prevent credential leaks."""
+    orgs.store_secret("API_KEY", "balacode", MOCK_SECRET)
+    orgs.grant("principal", {"kind": "secret", "name": "API_KEY"},
+               subject_org="balacode", scope="bot", access="inject")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b'{"ok": true}')
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(bot_tools, "_get_http_transport", lambda: transport)
+
+    url_with_query = "https://api.stripe.com/v1/charges?customer_id=cus_999&token=query_leak_val#frag"
+    res = bot_tools.secret_request("principal", "API_KEY", url_with_query)
+    assert res["ok"] is True
+
+    audit_file = org_env / "orgs" / "secret_audit.json"
+    assert audit_file.exists()
+    audit_text = audit_file.read_text(encoding="utf-8")
+    audits = json.loads(audit_text)
+    last_audit = audits[-1]
+
+    # Hard rule: query strings, fragments, and full URL must NEVER appear in the audit trail
+    assert "url" not in last_audit
+    assert "customer_id" not in audit_text
+    assert "cus_999" not in audit_text
+    assert "query_leak_val" not in audit_text
+    assert "frag" not in audit_text
+    assert url_with_query not in audit_text
+    assert MOCK_SECRET not in audit_text
+
+    # Origin and standard triage fields must be present
+    assert last_audit["origin"] == "https://api.stripe.com"
+    assert last_audit["bot"] == "principal"
+    assert last_audit["secret_name"] == "API_KEY"
+    assert last_audit["method"] == "GET"
+    assert last_audit["status"] == "allowed"
+    assert last_audit["response_status"] == 200
+

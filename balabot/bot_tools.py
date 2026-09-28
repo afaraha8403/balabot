@@ -539,7 +539,6 @@ def _secret_audit_path() -> Path:
 def _record_secret_audit(
     bot: str,
     secret_name: str,
-    url: str,
     origin: str,
     method: str,
     status: str,
@@ -548,13 +547,13 @@ def _record_secret_audit(
 ) -> None:
     """Record an audit trail entry for every secret_request invocation.
 
-    Hard rule: The audit trail must NEVER record the secret value.
+    Hard rule: The audit trail must NEVER record the secret value, nor the raw URL
+    which can leak query strings, tokens, credentials, or sensitive path fragments.
     """
     entry = {
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "bot": bot,
         "secret_name": secret_name,
-        "url": url,
         "origin": origin,
         "method": method.upper(),
         "status": status,
@@ -603,22 +602,22 @@ def secret_request(
     method = (method or "GET").upper()
 
     parsed = urllib.parse.urlsplit(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else (parsed.scheme or "")
     if parsed.scheme not in ("http", "https"):
-        _record_secret_audit(bot_id, name, url, parsed.netloc or "", method, "refused", "invalid URL scheme")
+        _record_secret_audit(bot_id, name, origin, method, "refused", "invalid URL scheme")
         return {
             "ok": False,
             "error": f"invalid scheme {parsed.scheme!r}; only http/https allowed",
             "status_code": 400,
         }
 
-    origin = f"{parsed.scheme}://{parsed.netloc}"
     hostname = parsed.hostname or ""
 
     # Verify active grant for bot
     grants = orgs.grants_for(bot_id, kind="secret")
     grant = next((g for g in grants if g.get("resource", {}).get("name") == name), None)
     if grant is None:
-        _record_secret_audit(bot_id, name, url, origin, method, "refused", f"bot {bot_id!r} has no grant for secret {name!r}")
+        _record_secret_audit(bot_id, name, origin, method, "refused", f"bot {bot_id!r} has no grant for secret {name!r}")
         return {
             "ok": False,
             "error": f"bot {bot_id!r} has no grant for secret {name!r}",
@@ -634,7 +633,7 @@ def secret_request(
     allowed_origins = (sec_meta or {}).get("allowed_origins")
     if allowed_origins:
         if origin not in allowed_origins and hostname not in allowed_origins:
-            _record_secret_audit(bot_id, name, url, origin, method, "refused", "origin not in allowed_origins")
+            _record_secret_audit(bot_id, name, origin, method, "refused", "origin not in allowed_origins")
             return {
                 "ok": False,
                 "error": f"origin {origin!r} not in allowed origins for secret {name!r}",
@@ -643,7 +642,7 @@ def secret_request(
 
     # SSRF protection: reject loopback, link-local, private networks
     if hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-        _record_secret_audit(bot_id, name, url, origin, method, "refused", "SSRF blocked: loopback address")
+        _record_secret_audit(bot_id, name, origin, method, "refused", "SSRF blocked: loopback address")
         return {
             "ok": False,
             "error": f"SSRF blocked: destination {hostname} is a loopback address",
@@ -653,7 +652,7 @@ def secret_request(
     try:
         ip = ipaddress.ip_address(hostname)
         if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
-            _record_secret_audit(bot_id, name, url, origin, method, "refused", f"SSRF blocked: {ip}")
+            _record_secret_audit(bot_id, name, origin, method, "refused", f"SSRF blocked: {ip}")
             return {
                 "ok": False,
                 "error": f"SSRF blocked: destination {hostname} is a prohibited address",
@@ -667,7 +666,7 @@ def secret_request(
             for family, socktype, proto, canonname, sockaddr in addr_infos:
                 resolved_ip = ipaddress.ip_address(sockaddr[0])
                 if resolved_ip.is_loopback or resolved_ip.is_private or resolved_ip.is_link_local or resolved_ip.is_reserved or resolved_ip.is_unspecified:
-                    _record_secret_audit(bot_id, name, url, origin, method, "refused", f"SSRF blocked: {resolved_ip}")
+                    _record_secret_audit(bot_id, name, origin, method, "refused", f"SSRF blocked: {resolved_ip}")
                     return {
                         "ok": False,
                         "error": f"SSRF blocked: destination {hostname} resolves to prohibited address {resolved_ip}",
@@ -679,7 +678,7 @@ def secret_request(
     # Retrieve and decrypt secret
     secret_val = orgs.read_secret_value(resource_org, name)
     if secret_val is None:
-        _record_secret_audit(bot_id, name, url, origin, method, "refused", "secret decryption failed or missing")
+        _record_secret_audit(bot_id, name, origin, method, "refused", "secret decryption failed or missing")
         return {
             "ok": False,
             "error": f"secret {name!r} could not be retrieved or decrypted",
@@ -704,7 +703,7 @@ def secret_request(
             else:
                 resp = client.request(method=method, url=url, headers=req_headers)
     except Exception as exc:
-        _record_secret_audit(bot_id, name, url, origin, method, "error", f"request failed: {type(exc).__name__}")
+        _record_secret_audit(bot_id, name, origin, method, "error", f"request failed: {type(exc).__name__}")
         return {
             "ok": False,
             "error": f"request failed: {type(exc).__name__}",
@@ -722,7 +721,7 @@ def secret_request(
             v = v.replace(secret_val, "[REDACTED_SECRET]")
         scrubbed_headers[k] = v
 
-    _record_secret_audit(bot_id, name, url, origin, method, "allowed", response_status=resp.status_code)
+    _record_secret_audit(bot_id, name, origin, method, "allowed", response_status=resp.status_code)
 
     return {
         "ok": resp.is_success,
