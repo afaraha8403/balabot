@@ -53,6 +53,7 @@ Verified 2026-09-27 against the repo (call-site greps excluding `tests/` and the
 | Computer recovery / reset controls | SHIPPED | `balabot/computer.py:reset`, route `POST /api/computer/{bot_id}/reset` (`ui/server.py:709-722`), `AgentComputerDialog.tsx` Reset button |
 | Teach a task demonstration affordance | SHIPPED | `ui/src/AgentComputerDialog.tsx` Teach a Task affordance with honest daemon recording gap disclosure |
 | Mobile share sheet intake | SHIPPED | `ui/public/manifest.webmanifest` `share_target` registration with query param ingestion (`title`, `text`, `url`) into `ui/src/App.tsx` and composer |
+| OpenUI Generative UI (interactive cards) | SHIPPED | Bounded component registry (`HireAgentCard`, `Card`, `CardHeader`, `FormField`, `ConfirmButtons`) in `ui/src/openui/library.tsx`; runtime `@openuidev/react-lang@0.3.0` + Zod 4; in-chat renderer `OpenUIRenderer.tsx` wired into `ui/src/App.tsx:1335/1416`; consent confirmation flow for bot hiring |
 
 ## Known false claims this table corrects
 

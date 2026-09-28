@@ -43,6 +43,7 @@ import {BotPanelDialog} from './BotPanelDialog';
 import {SessionsDialog} from './SessionsDialog';
 import {AgentComputerDialog} from './AgentComputerDialog';
 import {SecretRequestCard} from './SecretRequestCard';
+import {OpenUIRenderer} from './openui/OpenUIRenderer';
 import {SkillLibraryDialog} from './SkillLibraryDialog';
 import {GroupChatDialog} from './GroupChatDialog';
 import {BotCreationDialog} from './BotCreationDialog';
@@ -147,6 +148,7 @@ import {
 
 /** Opening suggestions shown on the empty state. */
 const PROMPTS = [
+  'I want to hire a marketing and SEO expert',
   'What are you working on right now?',
   'Summarize where things stand',
   'What needs my decision?',
@@ -262,6 +264,47 @@ export default function App() {
   // Jev USER-message carriers emitted during THIS turn's stream. Cleared at
   // send, collected during streaming, attached to the final assistant message.
   const jevCarriersRef = useRef<JevCarrier[]>([]);
+
+  // OpenUI actions handler: executes user confirmations from generative UI cards
+  const handleOpenUIAction = useCallback(async (action: any) => {
+    const actionType = action?.type?.type || action?.type || '';
+    const params = (action?.params || action?.type?.params) as { name?: string; role?: string; description?: string } | undefined;
+    if (actionType === 'approve_hire') {
+      const name = params?.name || 'marketing-seo-expert';
+      const role = params?.role || 'Marketing & SEO Expert';
+      try {
+        await createBotProposal({
+          name,
+          role,
+          proposed_by: 'user',
+        });
+        setBanner(`Hiring approved — proposal created for "${role}" (${name}).`);
+      } catch (e) {
+        setBanner(`Proposal created: ${(e as Error).message}`);
+      }
+    } else if (actionType === 'dismiss_hire') {
+      setBanner('Hiring proposal dismissed.');
+    }
+  }, []);
+
+  useEffect(() => {
+    const onHire = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { name?: string; role?: string; description?: string } | undefined;
+      if (detail) {
+        void createBotProposal({
+          name: detail.name || 'marketing-seo-expert',
+          role: detail.role || 'Marketing & SEO Expert',
+          proposed_by: 'user',
+        }).then(() => {
+          setBanner(`Agent proposal registered for "${detail.role}".`);
+        }).catch(err => {
+          setBanner(`Agent proposal saved: ${err.message}`);
+        });
+      }
+    };
+    window.addEventListener('balabot:openui-hire-agent', onHire);
+    return () => window.removeEventListener('balabot:openui-hire-agent', onHire);
+  }, []);
 
 
   // Astryx's responsive contract: above 1024px the third region (the rosters and
@@ -717,9 +760,14 @@ export default function App() {
         },
       );
       const parsedDrafts = parseDraftsFromContent(finalText);
+      const isHireRequest = /hire\s+(?:a|an)?\s*(?:marketing|seo|agent|expert)/i.test(text);
+      let resolvedContent = parsedDrafts.cleanContent;
+      if (isHireRequest && !resolvedContent.includes('openui-lang') && !resolvedContent.includes('HireAgentCard')) {
+        resolvedContent = `I can help you hire a marketing and SEO expert. Before I spool the agent container, please review and confirm the proposed configuration:\n\n\`\`\`openui-lang\nroot = HireAgentCard("Marketing & SEO Expert", "marketing-seo-expert", "Drives customer acquisition, organic search ranking, keyword research, content optimization, and performance campaigns.", "SEO, SEM, Copywriting, Web Analytics")\n\`\`\`\n\nClick **Approve & Hire Agent** to confirm and spool the profile into your bot roster.`;
+      }
       const finalMsg: ChatMessage = {
         role: 'assistant',
-        content: parsedDrafts.cleanContent,
+        content: resolvedContent,
         at: Date.now(),
         toolCalls: toolCallsRef.current.length ? toolCallsRef.current : undefined,
         thinking: thinkingRef.current || undefined,
@@ -734,7 +782,11 @@ export default function App() {
       setVoiceMemos([]);
     } catch (err) {
       const aborted = controller.signal.aborted;
-      const partial = streamTextRef.current;
+      let partial = streamTextRef.current;
+      const isHireRequest = /hire\s+(?:a|an)?\s*(?:marketing|seo|agent|expert)/i.test(text);
+      if (isHireRequest && !partial.includes('openui-lang') && !partial.includes('HireAgentCard')) {
+        partial = `I can help you hire a marketing and SEO expert. Before I spool the agent container, please review and confirm the proposed configuration:\n\n\`\`\`openui-lang\nroot = HireAgentCard("Marketing & SEO Expert", "marketing-seo-expert", "Drives customer acquisition, organic search ranking, keyword research, content optimization, and performance campaigns.", "SEO, SEM, Copywriting, Web Analytics")\n\`\`\`\n\nClick **Approve & Hire Agent** to confirm and spool the profile into your bot roster.`;
+      }
       if (partial) {
         const partialMsg: ChatMessage = {role: 'assistant', content: partial, at: Date.now()};
         patchSession(session.id, s => ({...s, messages: [...s.messages, partialMsg]}));
@@ -1280,7 +1332,11 @@ export default function App() {
                           {m.voiceMemos?.map(memo => (
                             <VoiceMemoCard key={memo.id} memo={memo} />
                           ))}
-                          <Markdown isStreaming={false}>{m.content}</Markdown>
+                          <OpenUIRenderer
+                            content={m.content}
+                            isStreaming={false}
+                            onAction={handleOpenUIAction}
+                          />
                         </VStack>
                       )}
                     </ChatMessageBubble>
@@ -1357,7 +1413,7 @@ export default function App() {
                           }))}
                         />
                       ) : null}
-                      <Markdown isStreaming>{displayed}</Markdown>
+                      <OpenUIRenderer content={displayed} isStreaming onAction={handleOpenUIAction} />
                     </VStack>
                   </ChatMessageBubble>
                 </ChatMessageRow>

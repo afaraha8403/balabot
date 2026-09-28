@@ -130,21 +130,48 @@ export async function syncSessionsFromServer(
   }
 }
 
+export const DEFAULT_OPENUI_SESSION: Session = {
+  id: 's_hire_marketing_seo_expert',
+  botId: 'principal',
+  title: 'Hire Marketing & SEO Expert',
+  purpose: 'Agent hiring and role confirmation',
+  createdAt: 1727500000000,
+  messages: [
+    {
+      role: 'user',
+      content: 'I want to hire a marketing and SEO expert',
+      at: 1727500001000,
+    },
+    {
+      role: 'assistant',
+      content:
+        'I found the right profile for this role. Before I spool the agent container, please review and confirm the proposed configuration:\n\n```openui-lang\nroot = HireAgentCard("Marketing & SEO Expert", "marketing-seo-expert", "Drives customer acquisition, organic search ranking, keyword research, content optimization, and performance campaigns.", "SEO, SEM, Copywriting, Web Analytics")\n```\n\nClick **Approve & Hire Agent** to confirm and spool the profile into your bot roster.',
+      at: 1727500005000,
+    },
+  ],
+  handoffs: [],
+};
+
 export function loadSessions(): Session[] {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
+    if (!raw) return [DEFAULT_OPENUI_SESSION];
     const parsed = JSON.parse(raw) as Session[];
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed) || parsed.length === 0) return [DEFAULT_OPENUI_SESSION];
     // Older sessions predate handoffs; backfill so rendering never crashes.
-    return parsed
+    const mapped = parsed
       .map(s => ({...s, handoffs: s.handoffs ?? []}))
       // Purge ghost sessions: a session with no botId can never match the
       // per-bot filter, so it is unreachable — invisible and undeletable.
       // Only message-less ghosts are dropped; nothing with content is discarded.
       .filter(s => !!s.botId || (s.messages?.length ?? 0) > 0);
+    // If no session with messages exists for principal, ensure default demo is present
+    if (!mapped.some(s => s.botId === 'principal' && (s.messages?.length ?? 0) > 0)) {
+      return [DEFAULT_OPENUI_SESSION, ...mapped];
+    }
+    return mapped;
   } catch {
-    return [];
+    return [DEFAULT_OPENUI_SESSION];
   }
 }
 

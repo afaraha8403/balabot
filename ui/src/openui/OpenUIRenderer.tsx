@@ -1,0 +1,92 @@
+import React from 'react';
+import { Renderer } from '@openuidev/react-lang';
+import type { ActionEvent } from '@openuidev/lang-core';
+import { Markdown } from '@astryxdesign/core/Markdown';
+import { balabotLibrary } from './library';
+import './openui.css';
+
+interface Props {
+  content: string;
+  isStreaming?: boolean;
+  onAction?: (event: ActionEvent) => void;
+}
+
+interface ParsedMessageParts {
+  hasOpenUI: boolean;
+  before: string;
+  openuiCode: string;
+  after: string;
+}
+
+/**
+ * Extracts OpenUI Lang code from message content.
+ * Supports triple-backtick fences (```openui-lang ... ``` or ```openui ... ```)
+ * as well as raw openui statements (root = ...).
+ */
+export function extractOpenUI(content: string): ParsedMessageParts {
+  if (!content) {
+    return { hasOpenUI: false, before: '', openuiCode: '', after: '' };
+  }
+
+  // Look for ```openui-lang or ```openui fence
+  const fenceRegex = /```(?:openui-lang|openui)\s*\n?([\s\S]*?)(?:```|$)/i;
+  const match = content.match(fenceRegex);
+
+  if (match && match.index !== undefined) {
+    const before = content.slice(0, match.index).trim();
+    const openuiCode = match[1].trim();
+    const after = content.slice(match.index + match[0].length).trim();
+    return {
+      hasOpenUI: openuiCode.length > 0,
+      before,
+      openuiCode,
+      after,
+    };
+  }
+
+  // Raw OpenUI Lang without markdown fences (e.g. root = ...)
+  const trimmed = content.trim();
+  if (trimmed.startsWith('root =') || trimmed.startsWith('root=')) {
+    return {
+      hasOpenUI: true,
+      before: '',
+      openuiCode: trimmed,
+      after: '',
+    };
+  }
+
+  return { hasOpenUI: false, before: content, openuiCode: '', after: '' };
+}
+
+/**
+ * OpenUIRenderer: Dual-mode renderer that renders standard chat Markdown
+ * and seamlessly embeds interactive OpenUI components inside chat messages.
+ */
+export function OpenUIRenderer({ content, isStreaming = false, onAction }: Props) {
+  const parts = extractOpenUI(content);
+
+  if (!parts.hasOpenUI) {
+    return <Markdown isStreaming={isStreaming}>{content}</Markdown>;
+  }
+
+  return (
+    <div className="openui-bubble-container">
+      {parts.before ? (
+        <Markdown isStreaming={false}>{parts.before}</Markdown>
+      ) : null}
+
+      <div style={{ margin: '8px 0' }}>
+        <Renderer
+          library={balabotLibrary}
+          response={parts.openuiCode}
+          isStreaming={isStreaming}
+          onAction={onAction}
+        />
+      </div>
+
+      {parts.after ? (
+        <Markdown isStreaming={isStreaming}>{parts.after}</Markdown>
+      ) : null}
+    </div>
+  );
+}

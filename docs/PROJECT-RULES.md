@@ -122,3 +122,45 @@ for docs: surface an untruth rather than writing around it.
 
 - Commit only your own paths — never sweep a sibling's in-flight edits into your commit.
 - `docs/kb/` mirrors an external bundle; when the bundle changes, re-sync it deliberately.
+
+## 13. OpenUI Generative UI (all agents)
+
+When an agent needs human consent, parameters, or structured review (e.g. hiring an agent, creating a proposal, selecting configuration, or executing irreversible operations), the agent **must not monologue or execute silently**. It must emit an interactive **OpenUI Lang** card in the chat transcript.
+
+Agents run in **Inline Mode**: normal conversation is plain markdown outside of code fences; structured UI is emitted inside a triple-backtick `openui-lang` fence:
+
+````markdown
+```openui-lang
+root = HireAgentCard("Marketing & SEO Expert", "marketing-seo-expert", "Drives customer acquisition, organic search ranking, keyword research, content optimization, and performance campaigns.", "SEO, SEM, Copywriting, Web Analytics")
+```
+````
+
+### Prompt Instructions for All Agents
+
+The following instruction block is generated directly from the OpenUI component library (`@openuidev/react-lang` + `balabotLibrary.prompt({ inlineMode: true })`):
+
+```text
+You are an AI assistant that responds using openui-lang, a declarative UI language. When user input, approval, or structured presentation is required, emit openui-lang inside triple-backtick fences.
+
+## Syntax Rules
+1. Each statement is on its own line: `identifier = Expression`
+2. `root` is the entry point — every program must define `root = HireAgentCard(...)` (or another allowed root component).
+3. Expressions are: strings ("..."), numbers, booleans (true/false), null, arrays ([...]), objects ({...}), or component calls TypeName(arg1, arg2, ...)
+4. Use references for readability: define `name = ...` on one line, then use `name` later.
+5. EVERY variable (except root) MUST be referenced by at least one other variable. Unreferenced variables are silently dropped and will NOT render.
+6. Arguments are POSITIONAL (order matters, not names). Write `SomeComp(arg1, arg2)` NOT `SomeComp(name: arg1, title: arg2)`.
+7. Optional arguments can be omitted from the end. Strings use double quotes with backslash escaping.
+
+## Component Signatures
+- HireAgentCard(role: string, name: string, description: string, skills?: string) — Interactive confirmation card for creating and hiring a new agent into the bot fleet.
+- Card(title: string, content?: string) — General container card for structured content.
+- CardHeader(title: string, subtitle?: string) — Card header element with title and subtitle.
+- FormField(label: string, value: string, placeholder?: string) — A labeled input field for data collection.
+- ConfirmButtons(confirmLabel: string, cancelLabel: string) — A pair of confirm and cancel action buttons.
+
+## Inline Mode Rules
+- When the user asks for actions/proposals, output conversational text followed by the openui-lang code in a ```openui-lang``` block.
+- When the user asks a simple question or engages in conversation, respond with text only — NO code.
+- Always ask for confirmation before spooling or creating persistent resources.
+```
+
