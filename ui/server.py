@@ -2908,7 +2908,7 @@ if not sets:
                       'detail': 'at least one of purpose is required',
                       'status': 400}))
     raise SystemExit(0)
-conn = sqlite3.connect(DEFAULT_DB_PATH)
+conn = sqlite3.connect(db)
 args.append(payload['session_id'])
 cur = conn.execute('UPDATE sessions SET ' + ', '.join(sets) +
                    ' WHERE session_id = ?', args)

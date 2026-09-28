@@ -451,3 +451,33 @@ def test_chat_turn_persists_transcript_to_server_store(client, monkeypatch):
     assert messages[1]["content"] == "I am BalaBot."
 
 
+def test_sessions_patch_respects_continuity_db_override(client, monkeypatch, tmp_path):
+    """P1-3: PATCH /api/sessions/{id} must respect BALABOT_CONTINUITY_DB override."""
+    import sqlite3
+    custom_db = tmp_path / "custom_continuity.db"
+    monkeypatch.setenv("BALABOT_CONTINUITY_DB", str(custom_db))
+
+    # Create session in custom_db
+    create_res = client.post("/api/sessions", json={
+        "id": "s_custom_patch",
+        "botId": "principal",
+        "purpose": "original purpose",
+    })
+    assert create_res.status_code == 200
+
+    # Patch session purpose
+    patch_res = client.patch("/api/sessions/s_custom_patch", json={
+        "purpose": "updated custom purpose",
+    })
+    assert patch_res.status_code == 200
+    assert patch_res.json()["updated"] is True
+
+    # Verify that custom_db was updated
+    conn = sqlite3.connect(str(custom_db))
+    row = conn.execute("SELECT purpose FROM sessions WHERE session_id = ?", ("s_custom_patch",)).fetchone()
+    conn.close()
+    assert row is not None
+    assert row[0] == "updated custom purpose"
+
+
+
