@@ -323,8 +323,60 @@ def test_cron_protection_rechecked_at_apply_time(reg):
     assert sr.get_record("late-cron")["state"] == "active"
 
 
-def test_no_secret_values_anywhere(reg):
     _org_fixture(reg)
     sr.install_skill("s", origin="learned", scope="org", source="authored")
     blob = json.dumps(sr._load_records()) + json.dumps(sr.load_usage_ledger())
     assert "STRIPE" not in blob and "secret_value" not in blob
+
+
+# ── HTTP endpoints integration ───────────────────────────────────────────────
+
+def test_skills_http_pin_promote_curate(reg, monkeypatch):
+    from fastapi.testclient import TestClient
+    from ui import server
+
+    monkeypatch.setattr(server, "DASHBOARD_PASSWORD", "pw")
+    monkeypatch.setattr(server, "container_ok", lambda: True)
+
+    def _fake_org_run(snippet, payload=None, timeout=30.0):
+        import io, contextlib, os
+        if payload is not None:
+            os.environ["_BALABOT_ORG_PAYLOAD"] = json.dumps(payload)
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                exec(compile(snippet, "<test>", "exec"), {})
+        finally:
+            os.environ.pop("_BALABOT_ORG_PAYLOAD", None)
+        printed = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
+        return json.loads(printed[-1])
+
+    monkeypatch.setattr(server, "_org_run", _fake_org_run)
+    client = TestClient(server.app)
+    client.headers.update({"Authorization": "Basic YWxpOnB3"})  # ali:pw
+
+    # 1. Pin a skill
+    resp = client.post("/api/org/skills/pin", json={"name": "test-skill", "pinned": True})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["record"]["name"] == "test-skill"
+    assert data["record"]["pinned"] is True
+
+    # 2. Unpin the skill
+    resp = client.post("/api/org/skills/pin", json={"name": "test-skill", "pinned": False})
+    assert resp.status_code == 200
+    assert resp.json()["record"]["pinned"] is False
+
+    # 3. Promote a skill
+    resp = client.post("/api/org/skills/promote", json={"name": "test-quarantined", "share": "org"})
+    assert resp.status_code == 200
+    assert resp.json()["record"]["scope"] == "org"
+    assert resp.json()["record"]["quarantined"] is False
+
+    # 4. Curate skills
+    resp = client.post("/api/org/skills/curate", json={"dry_run": True})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert "applied" in resp.json()["report"]
+

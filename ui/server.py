@@ -1027,14 +1027,99 @@ async def org_requests_enqueue(request: Request):
     return {"queued": True, "request": item}
 
 
-# Legacy skills stub: /api/skills/library (below) is the real route;
-# the org-scoped pin/promote actions are still honest stubs until wave 6
-# lands the skills registry.
-@app.api_route("/api/org/skills/pin", methods=["POST"])
-@app.api_route("/api/org/skills/promote", methods=["POST"])
-async def org_skills_stubs(request: Request):
-    return unavailable("org skills (pin/promote) are not wired yet — the "
-                       "skills registry is build-order step 6")
+_SKILLS_PIN_SNIPPET = '''\
+from balabot import skills_registry
+name = payload.get("name")
+unpin = payload.get("unpin", False)
+try:
+    if skills_registry.get_record(name) is None:
+        skills_registry.install_skill(name, origin="brought", scope="org")
+    if unpin:
+        rec = skills_registry.unpin(name)
+    else:
+        rec = skills_registry.pin(name)
+    print(json.dumps({"ok": True, "record": rec}))
+except Exception as exc:
+    print(json.dumps({"ok": False, "reason": str(exc)}))
+'''
+
+_SKILLS_PROMOTE_SNIPPET = '''\
+from balabot import skills_registry
+name = payload.get("name")
+share = payload.get("share", "org")
+scope = "org-selected" if isinstance(share, list) else "org"
+try:
+    rec = skills_registry.get_record(name)
+    if rec is None:
+        rec = skills_registry.install_third_party(name, source="skills.sh")
+    rec = skills_registry.approve(name, scope=scope)
+    print(json.dumps({"ok": True, "record": rec}))
+except Exception as exc:
+    print(json.dumps({"ok": False, "reason": str(exc)}))
+'''
+
+_SKILLS_CURATE_SNIPPET = '''\
+from balabot import skills_registry
+dry_run = payload.get("dry_run", False)
+try:
+    report = skills_registry.curate(dry_run=dry_run)
+    print(json.dumps({"ok": True, "report": report}))
+except Exception as exc:
+    print(json.dumps({"ok": False, "reason": str(exc)}))
+'''
+
+
+@app.post("/api/org/skills/pin")
+async def org_skills_pin(request: Request):
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot pin skills")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    name = body.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    unpin = False
+    if "pinned" in body:
+        unpin = not bool(body["pinned"])
+    res = _org_run(_wrap(_SKILLS_PIN_SNIPPET, True), payload={"name": name, "unpin": unpin})
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "could not pin skill"))
+    return {"ok": True, "record": res.get("record")}
+
+
+@app.post("/api/org/skills/promote")
+async def org_skills_promote(request: Request):
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot promote skills")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    name = body.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    share = body.get("share", "org")
+    res = _org_run(_wrap(_SKILLS_PROMOTE_SNIPPET, True), payload={"name": name, "share": share})
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "could not promote skill"))
+    return {"ok": True, "record": res.get("record")}
+
+
+@app.post("/api/org/skills/curate")
+async def org_skills_curate(request: Request):
+    if not container_ok():
+        return unavailable("balabot container is not running — cannot curate skills")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    dry_run = bool(body.get("dry_run", False))
+    res = _org_run(_wrap(_SKILLS_CURATE_SNIPPET, True), payload={"dry_run": dry_run})
+    if not res.get("ok"):
+        return unavailable(res.get("reason", "curator pass failed"))
+    return {"ok": True, "report": res.get("report")}
 
 
 def _skill_rows(profile: str) -> list[dict] | None:
