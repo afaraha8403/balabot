@@ -264,3 +264,94 @@ def test_dns_rebinding_refused(org_env, monkeypatch):
     assert "ssrf" in (last_audit.get("reason") or "").lower() or "blocked" in (last_audit.get("reason") or "").lower() or "prohibited" in (last_audit.get("reason") or "").lower()
 
 
+def test_secret_key_rotation_roundtrip(org_env, monkeypatch):
+    """Encrypt -> rotate key -> decrypt succeeds with new key; old key fails to open records."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    secret_name = "ROTATING_SECRET"
+    secret_value = "top-secret-pre-rotation-val-987"
+    orgs.store_secret(secret_name, "balacode", secret_value)
+
+    old_key = orgs._get_master_key()
+    assert orgs.read_secret_value("balacode", secret_name) == secret_value
+
+    new_key = os.urandom(32)
+    assert new_key != old_key
+
+    # Execute atomic key rotation
+    result = orgs.rotate_master_key(new_key=new_key)
+    assert result["ok"] is True
+    assert result["rotated_count"] >= 1
+    assert "backup_path" in result
+    assert Path(result["backup_path"]).is_dir()
+    assert "new_key_id" in result
+
+    # Verify encrypted blob on disk contains key identifier and starts with BALABOT_ENC_V2:
+    secret_path = org_env / ".secrets" / "balacode" / secret_name
+    blob = secret_path.read_bytes()
+    assert blob.startswith(orgs.ENC_PREFIX_V2)
+    assert result["new_key_id"].encode("ascii") in blob
+    assert secret_value.encode("utf-8") not in blob
+
+    # Read and decrypt with the new active key succeeds
+    assert orgs.read_secret_value("balacode", secret_name) == secret_value
+
+    # Attempting to decrypt the new blob with the OLD key fails
+    header_len = len(orgs.ENC_PREFIX_V2)
+    colon_pos = blob.find(b":", header_len)
+    enc_body = blob[colon_pos + 1:]
+    nonce = enc_body[:12]
+    ciphertext = enc_body[12:]
+    aad = f"balacode:{secret_name}".encode("utf-8")
+    with pytest.raises(Exception):
+        AESGCM(old_key).decrypt(nonce, ciphertext, aad)
+
+    # When BALABOT_SECRETS_KEY points to old key, read_secret_value fails gracefully (returns None, never crashes)
+    monkeypatch.setenv("BALABOT_SECRETS_KEY", old_key.hex())
+    assert orgs.read_secret_value("balacode", secret_name) is None
+
+
+def test_system_resilience_when_store_cannot_be_decrypted(org_env, monkeypatch):
+    """System boots and functions gracefully even when secret store cannot be decrypted."""
+    orgs.store_secret("KEY", "balacode", MOCK_SECRET)
+    orgs.grant("principal", {"kind": "secret", "name": "KEY"},
+               subject_org="balacode", scope="bot", access="inject")
+
+    # Corrupt or supply wrong key
+    wrong_key = os.urandom(32).hex()
+    monkeypatch.setenv("BALABOT_SECRETS_KEY", wrong_key)
+
+    # Reading secret returns None without exception
+    assert orgs.read_secret_value("balacode", "KEY") is None
+
+    # secret_request fails with 404 and clear error, never crashes
+    res = bot_tools.secret_request("principal", "KEY", "https://api.example.com/test")
+    assert res["ok"] is False
+    assert res["status_code"] == 404
+    assert "decrypted" in res["error"].lower() or "retrieved" in res["error"].lower()
+
+
+def test_backup_secrets_and_integrity_check(org_env):
+    """Backup drill creates intact backup and integrity check confirms store validity."""
+    orgs.store_secret("CHECK_KEY", "balacode", MOCK_SECRET)
+
+    # Integrity check on valid store passes
+    report = orgs.verify_secrets_integrity()
+    assert report["ok"] is True
+    assert report["checked"] >= 1
+    assert report["errors"] == []
+
+    # Standalone backup drill
+    backup_path = orgs.backup_secrets()
+    assert backup_path.is_dir()
+    assert (backup_path / ".secrets" / "master.key").exists()
+    assert (backup_path / ".secrets" / "balacode" / "CHECK_KEY").exists()
+    assert (backup_path / "registry.json").exists()
+
+    # CLI test for backup and verify
+    assert orgs.main(["verify"]) == 0
+    assert orgs.main(["backup"]) == 0
+
+
+
+

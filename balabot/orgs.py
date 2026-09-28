@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sys
 import tempfile
 import uuid
@@ -32,6 +33,9 @@ __all__ = [
     "ORG_ROOT",
     "REGISTRY_PATH",
     "SECRETS_ROOT",
+    "ENC_PREFIX",
+    "ENC_PREFIX_V1",
+    "ENC_PREFIX_V2",
     "fingerprint",
     "load",
     "save",
@@ -43,6 +47,9 @@ __all__ = [
     "store_secret",
     "read_secret_value",
     "migrate_secrets",
+    "rotate_master_key",
+    "backup_secrets",
+    "verify_secrets_integrity",
     "grant",
     "revoke",
     "grants_for",
@@ -210,7 +217,31 @@ def register_secret(name: str, org: str, *, description: str = "") -> dict:
     return dict(existing)
 
 
-ENC_PREFIX = b"BALABOT_ENC_V1:"
+ENC_PREFIX_V1 = b"BALABOT_ENC_V1:"
+ENC_PREFIX_V2 = b"BALABOT_ENC_V2:"
+ENC_PREFIX = ENC_PREFIX_V1
+
+
+def _key_identifier(key: bytes) -> str:
+    """Return an 8-hex-char identifier for the key (SHA-256 fingerprint)."""
+    return hashlib.sha256(key).hexdigest()[:8]
+
+
+def _resolve_key(key: bytes | str | None) -> bytes | None:
+    if key is None:
+        return None
+    if isinstance(key, bytes):
+        if len(key) >= 32:
+            return key[:32]
+        return None
+    if isinstance(key, str):
+        if len(key) == 64:
+            try:
+                return bytes.fromhex(key)
+            except ValueError:
+                pass
+        return hashlib.sha256(key.encode("utf-8")).digest()
+    return None
 
 
 def _get_master_key() -> bytes:
@@ -258,9 +289,13 @@ def _get_master_key() -> bytes:
     return key
 
 
-def store_secret(name: str, org: str, value: str, *, allowed_origins: list[str] | None = None) -> dict:
+def store_secret(name: str, org: str, value: str, *, allowed_origins: list[str] | None = None, key_version: int = 1) -> dict:
     """Encrypt the value with AES-256-GCM, write to SECRETS_ROOT/<org>/<NAME> (0600),
-    update registry metadata, and return the record WITH fingerprint. NEVER the value."""
+    update registry metadata, and return the record WITH fingerprint. NEVER the value.
+
+    key_version=1: writes legacy V1 header BALABOT_ENC_V1:
+    key_version=2: writes V2 header with key identifier BALABOT_ENC_V2:<key_id>:
+    """
     if not isinstance(value, str) or value == "":
         raise ValueError("secret value must be a non-empty string")
     reg = load()
@@ -275,7 +310,12 @@ def store_secret(name: str, org: str, value: str, *, allowed_origins: list[str] 
     nonce = os.urandom(12)
     aad = f"{org}:{name}".encode("utf-8")
     ciphertext = aesgcm.encrypt(nonce, value.encode("utf-8"), aad)
-    payload = ENC_PREFIX + nonce + ciphertext
+
+    if key_version == 2:
+        key_id = _key_identifier(key)
+        payload = ENC_PREFIX_V2 + key_id.encode("ascii") + b":" + nonce + ciphertext
+    else:
+        payload = ENC_PREFIX_V1 + nonce + ciphertext
 
     fd = os.open(str(value_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as fh:
@@ -302,12 +342,55 @@ def store_secret(name: str, org: str, value: str, *, allowed_origins: list[str] 
     return {k: v for k, v in record.items() if k != "value"}
 
 
+def _decrypt_secret_bytes(data: bytes, org: str, name: str, key: bytes) -> str | None:
+    """Decrypt raw secret file bytes using AES-256-GCM.
+
+    Supports both:
+    - V2 format: BALABOT_ENC_V2:<key_id>:<nonce><ciphertext>
+    - V1 format: BALABOT_ENC_V1:<nonce><ciphertext>
+    Never leaks secret value on decryption failures.
+    """
+    if data.startswith(ENC_PREFIX_V2):
+        header_len = len(ENC_PREFIX_V2)
+        colon_pos = data.find(b":", header_len)
+        if colon_pos == -1:
+            return None
+        enc_body = data[colon_pos + 1:]
+        if len(enc_body) < 28:
+            return None
+        nonce = enc_body[:12]
+        ciphertext = enc_body[12:]
+        aesgcm = AESGCM(key)
+        aad = f"{org}:{name}".encode("utf-8")
+        try:
+            return aesgcm.decrypt(nonce, ciphertext, aad).decode("utf-8")
+        except Exception:
+            return None
+
+    if data.startswith(ENC_PREFIX_V1):
+        enc_body = data[len(ENC_PREFIX_V1):]
+        if len(enc_body) < 28:
+            return None
+        nonce = enc_body[:12]
+        ciphertext = enc_body[12:]
+        aesgcm = AESGCM(key)
+        aad = f"{org}:{name}".encode("utf-8")
+        try:
+            return aesgcm.decrypt(nonce, ciphertext, aad).decode("utf-8")
+        except Exception:
+            return None
+
+    return None
+
+
 def read_secret_value(org: str, name: str) -> str | None:
     """Read and decrypt the secret value from disk.
 
-    If the secret file on disk is legacy plaintext (unencrypted), it is
-    automatically migrated and encrypted in place on read.
-    Returns the decrypted plaintext string, or None if not found or corrupted.
+    Supports both V1 and V2 encryption envelopes. If the secret file on disk
+    is legacy plaintext (unencrypted), it is automatically migrated and
+    encrypted in place on read.
+    Returns the decrypted plaintext string, or None if not found, corrupted,
+    or key cannot decrypt.
     NEVER leaks secret values in exceptions or logs.
     """
     path = _secrets_root() / org / name
@@ -318,20 +401,14 @@ def read_secret_value(org: str, name: str) -> str | None:
     except OSError:
         return None
 
-    if data.startswith(ENC_PREFIX):
-        enc_body = data[len(ENC_PREFIX):]
-        if len(enc_body) < 28:
-            return None
-        nonce = enc_body[:12]
-        ciphertext = enc_body[12:]
-        key = _get_master_key()
-        aesgcm = AESGCM(key)
-        aad = f"{org}:{name}".encode("utf-8")
-        try:
-            plaintext_bytes = aesgcm.decrypt(nonce, ciphertext, aad)
-            return plaintext_bytes.decode("utf-8")
-        except Exception:
-            return None
+    key = _get_master_key()
+    decrypted = _decrypt_secret_bytes(data, org, name, key)
+    if decrypted is not None:
+        return decrypted
+
+    if data.startswith(ENC_PREFIX_V1) or data.startswith(ENC_PREFIX_V2):
+        # Authenticated encryption failed with active key (wrong key or corrupted blob)
+        return None
 
     # Legacy plaintext file — transparent in-place migration
     try:
@@ -365,13 +442,185 @@ def migrate_secrets() -> list[dict]:
                 continue
             try:
                 data = sec_file.read_bytes()
-                if not data.startswith(ENC_PREFIX):
+                if not data.startswith(ENC_PREFIX_V1) and not data.startswith(ENC_PREFIX_V2):
                     val = data.decode("utf-8")
                     store_secret(sec_file.name, org, val)
                     migrated.append({"org": org, "name": sec_file.name})
             except Exception:
                 pass
     return migrated
+
+
+def rotate_master_key(
+    new_key: bytes | str | None = None,
+    old_key: bytes | str | None = None,
+) -> dict:
+    """Re-encrypt every stored secret under a new key atomically.
+
+    RECOVERY & RESILIENCE STORY:
+    - Master key location: The master encryption key lives at <data_root>/.secrets/master.key
+      (or BALABOT_SECRETS_KEY / BALABOT_SECRETS_KEY_PATH).
+    - Rotation command: Run `python -m balabot.orgs rotate-key` or call `rotate_master_key()`.
+    - Lost key consequence: If the master key is lost, encrypted secrets cannot be recovered.
+      AES-256-GCM is mathematically infeasible to decrypt without the key. Keep secure backups.
+    - System resilience: When the secret store cannot be decrypted (e.g. key lost or corrupted),
+      the rest of BalaBot still boots and functions normally. Reading secrets returns None, and
+      secret_request returns 404 refused without crashing the container or host process.
+
+    Safety:
+    - Writes a timestamped backup of the store before rotation starts.
+    - Stages re-encrypted secrets in a temporary staging directory to guarantee atomicity.
+      A crash mid-rotation never leaves a half-encrypted store.
+    - Blobs are re-encrypted in V2 format including the new key identifier:
+      BALABOT_ENC_V2:<key_id>:<nonce><ciphertext>
+    - Atomically updates master.key and secret metadata 'rotated_at' timestamps.
+    """
+    root = _secrets_root()
+    resolved_old_key = _resolve_key(old_key) or _get_master_key()
+    resolved_new_key = _resolve_key(new_key) or os.urandom(32)
+
+    new_key_id = _key_identifier(resolved_new_key)
+
+    # 1. Atomic backup of existing store before starting
+    now_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup_dir = root.parent / f".secrets_backup_{now_ts}_{uuid.uuid4().hex[:6]}"
+    if root.exists():
+        shutil.copytree(str(root), str(backup_dir))
+    else:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+    reg_path = _registry_path()
+    if reg_path.exists():
+        shutil.copy2(str(reg_path), str(backup_dir / "registry.json"))
+
+    # 2. Stage new encrypted secrets in a temporary directory
+    staging_dir = root.parent / f".secrets_staging_{uuid.uuid4().hex[:8]}"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    rotated_names = []
+    try:
+        # Write new master.key in staging
+        staging_key_path = staging_dir / "master.key"
+        fd = os.open(str(staging_key_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(resolved_new_key)
+        try:
+            os.chmod(staging_key_path, 0o600)
+        except OSError:
+            pass
+
+        # Re-encrypt all secrets across all orgs
+        if root.is_dir():
+            for org_dir in root.iterdir():
+                if not org_dir.is_dir():
+                    continue
+                org = org_dir.name
+                staging_org_dir = staging_dir / org
+                staging_org_dir.mkdir(parents=True, exist_ok=True)
+                for sec_file in org_dir.iterdir():
+                    if not sec_file.is_file() or sec_file.name == "master.key":
+                        continue
+                    sec_name = sec_file.name
+                    data = sec_file.read_bytes()
+                    val = _decrypt_secret_bytes(data, org, sec_name, resolved_old_key)
+                    if val is None:
+                        # Attempt legacy plaintext
+                        try:
+                            val = data.decode("utf-8")
+                        except UnicodeDecodeError:
+                            val = None
+                    if val is None:
+                        raise ValueError(f"failed to decrypt secret {org}/{sec_name} with old key")
+
+                    # Re-encrypt under new key with V2 header and key identifier
+                    aesgcm = AESGCM(resolved_new_key)
+                    nonce = os.urandom(12)
+                    aad = f"{org}:{sec_name}".encode("utf-8")
+                    ciphertext = aesgcm.encrypt(nonce, val.encode("utf-8"), aad)
+                    new_payload = ENC_PREFIX_V2 + new_key_id.encode("ascii") + b":" + nonce + ciphertext
+
+                    out_path = staging_org_dir / sec_name
+                    fd = os.open(str(out_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                    with os.fdopen(fd, "wb") as fh:
+                        fh.write(new_payload)
+                    try:
+                        os.chmod(out_path, 0o600)
+                    except OSError:
+                        pass
+                    rotated_names.append((org, sec_name))
+
+        # 3. Atomically swap staging_dir into root
+        if root.exists():
+            temp_old = root.parent / f".secrets_old_{uuid.uuid4().hex[:8]}"
+            os.rename(root, temp_old)
+            os.rename(staging_dir, root)
+            shutil.rmtree(temp_old, ignore_errors=True)
+        else:
+            os.rename(staging_dir, root)
+    except Exception:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+
+    # 4. Update registry metadata timestamps atomically
+    reg = load()
+    now_str = _now()
+    for sec_entry in reg.get("secrets", []):
+        for o, n in rotated_names:
+            if sec_entry.get("org") == o and sec_entry.get("name") == n:
+                sec_entry["rotated_at"] = now_str
+    save(reg)
+
+    return {
+        "ok": True,
+        "rotated_count": len(rotated_names),
+        "backup_path": str(backup_dir),
+        "new_key_id": new_key_id,
+    }
+
+
+def backup_secrets(dest_dir: str | Path | None = None) -> Path:
+    """Create a standalone backup of .secrets and orgs/registry.json."""
+    root = _secrets_root()
+    if dest_dir is None:
+        now_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        target = root.parent / f".secrets_backup_{now_ts}"
+    else:
+        target = Path(dest_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    if root.exists():
+        shutil.copytree(str(root), str(target / ".secrets"), dirs_exist_ok=True)
+    reg_path = _registry_path()
+    if reg_path.exists():
+        shutil.copy2(str(reg_path), str(target / "registry.json"))
+    return target
+
+
+def verify_secrets_integrity() -> dict:
+    """Check integrity of the secrets store against the org registry.
+
+    Verifies master key existence, decodability, and that every registered
+    secret can be decrypted and its fingerprint matches metadata.
+    """
+    errors = []
+    checked = 0
+    key = _get_master_key()
+    if not key or len(key) != 32:
+        return {"ok": False, "checked": 0, "errors": ["invalid or missing master key"]}
+
+    reg = load()
+    for s in reg.get("secrets", []):
+        org = s.get("org")
+        name = s.get("name")
+        checked += 1
+        val = read_secret_value(org, name)
+        if val is None:
+            errors.append(f"secret {org}/{name} missing or could not be decrypted")
+            continue
+        fp = fingerprint(val)
+        if s.get("fingerprint") and fp != s.get("fingerprint"):
+            errors.append(f"secret {org}/{name} fingerprint mismatch: expected {s.get('fingerprint')} got {fp}")
+
+    return {"ok": len(errors) == 0, "checked": checked, "errors": errors}
 
 
 def grant(subject_bot: str, resource: dict, *, subject_org: str, scope: str = "bot",
@@ -541,10 +790,30 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_grants(bot)
     if argv[:2] == ["show"] and len(argv) == 3:
         return _cmd_show(argv[2])
-    print("usage: python -m balabot.orgs list | grants [--bot X] | show <org>",
+    if argv[:1] == ["rotate-key"]:
+        new_k, old_k = None, None
+        for i, arg in enumerate(argv):
+            if arg == "--new-key" and i + 1 < len(argv):
+                new_k = argv[i + 1]
+            elif arg == "--old-key" and i + 1 < len(argv):
+                old_k = argv[i + 1]
+        res = rotate_master_key(new_key=new_k, old_key=old_k)
+        print(json.dumps(res, indent=2))
+        return 0
+    if argv[:1] == ["backup"]:
+        dest = argv[2] if len(argv) > 2 and argv[1] == "--dest" else None
+        p = backup_secrets(dest)
+        print(json.dumps({"ok": True, "backup_path": str(p)}, indent=2))
+        return 0
+    if argv[:1] == ["verify"]:
+        res = verify_secrets_integrity()
+        print(json.dumps(res, indent=2))
+        return 0 if res["ok"] else 1
+    print("usage: python -m balabot.orgs list | grants [--bot X] | show <org> | rotate-key [--new-key K] [--old-key K] | backup [--dest D] | verify",
           file=sys.stderr)
     return 2
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
