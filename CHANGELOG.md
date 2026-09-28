@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Features
+- Add deterministic offline model emulator for testing: implement a lightweight loopback HTTP server (`tests/model_emulator.py`) emitting synthetic OpenAI-compatible SSE chunk streams and completion payloads with support for streaming text, tool calls, error states, and non-streaming responses; includes assertion callbacks to verify request payloads, rejects unexpected or unconsumed steps to guarantee tests fail on real regressions, and exposes a `make_model_emulator` pytest fixture in `tests/conftest.py` without requiring live model credentials.
 - Implement server-authoritative conversation transcript persistence in SQLite: add `messages` table to `SessionStore` (`balabot/sessions.py`) with `record_message` and `messages` query accessors; commit user and streaming assistant turns to SQLite in `/api/chat`; expose `GET /api/sessions/{session_id}/messages` and `POST /api/sessions/{session_id}/messages` routes for cross-device transcript retrieval and synchronization without mutating frozen UI assets.
 - Bridge Astryx design theme and Polaris CSS custom properties with dynamic light/dark mode switching, zero-flash `localStorage` theme bootstrap, and toggles across top header, Settings panel, and Command Palette.
 - Verify "Teach a task" live demonstration recording end-to-end, validating coordinate click and keystroke action capture into client-side demonstration buffers and persistence to server-backed bot routines.

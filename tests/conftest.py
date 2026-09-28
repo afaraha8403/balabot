@@ -178,3 +178,21 @@ def http_responses(monkeypatch):
 
     monkeypatch.setattr("requests.Session.post", fake_post)
     return _queue, recorded
+
+
+@pytest.fixture
+def make_model_emulator():
+    """Factory fixture for offline model emulators (P2-1). Automatically closed."""
+    from tests.model_emulator import ModelEmulator, start_model_emulator
+
+    emulators: list[ModelEmulator] = []
+
+    def _factory(steps=None, model_id="offline-fixture"):
+        emu = start_model_emulator(steps=steps, model_id=model_id)
+        emulators.append(emu)
+        return emu
+
+    yield _factory
+    for emu in emulators:
+        emu.close()
+
