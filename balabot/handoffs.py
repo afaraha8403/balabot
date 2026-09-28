@@ -29,7 +29,10 @@ function and in the commit message, not here.
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
 __all__ = [
     "HandoffError",
@@ -73,9 +76,40 @@ def format_handoff_frame(from_bot: str, to_bot: str, summary: str = "",
 
 
 # Pending handoff frames, per profile, drained by that profile's /api/chat SSE
-# stream at the top of the turn — the same pattern ui/server.py documents for
-# the org-request queue.
+# stream at the top of the turn. Storage is backed by a durable SQLite table
+# at BALABOT_HANDOFFS_DB (<BALABOT_DATA_ROOT>/handoffs/handoffs.db) so
+# handoffs enqueued in CLI subprocesses or separate containers persist across
+# process restarts.
 _pending_handoffs: dict[str, list[str]] = {}
+
+
+def _db_path() -> Path:
+    env = os.environ.get("BALABOT_HANDOFFS_DB")
+    if env:
+        return Path(env)
+    root = os.environ.get("BALABOT_DATA_ROOT", "/opt/data")
+    return Path(root) / "handoffs" / "handoffs.db"
+
+
+def _get_conn() -> sqlite3.Connection | None:
+    try:
+        p = _db_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(p), timeout=30.0)
+        with conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS handoff_frames (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    to_bot       TEXT NOT NULL,
+                    from_bot     TEXT NOT NULL,
+                    frame        TEXT NOT NULL,
+                    enqueued_at  TEXT NOT NULL,
+                    delivered_at TEXT
+                );
+            """)
+        return conn
+    except Exception:
+        return None
 
 
 def enqueue_handoff(from_bot: str, to_bot: str, summary: str = "") -> str:
@@ -88,23 +122,65 @@ def enqueue_handoff(from_bot: str, to_bot: str, summary: str = "") -> str:
             "handoff as the owner")
     frame = format_handoff_frame(from_bot, to_bot, summary)
     _pending_handoffs.setdefault(to_bot.strip(), []).append(frame)
+    conn = _get_conn()
+    if conn is not None:
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO handoff_frames (to_bot, from_bot, frame, enqueued_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (to_bot.strip(), from_bot.strip(), frame, _now_iso()),
+                )
+            conn.close()
+        except Exception:
+            pass
     return frame
 
 
 def drain_handoff_frames(profile: str) -> list[str]:
-    """Pop queued handoff frames for `profile` as ready-to-yield SSE frames.
-
-    PARENT INTEGRATION (ui/server.py is owned elsewhere this wave): inside the
-    `stream()` generator of the /api/chat route, alongside the existing
-    `_drain_org_request_frames(profile)` loop, add:
-
-        from balabot.handoffs import drain_handoff_frames
-        for frame in drain_handoff_frames(profile):
-            yield frame
-    """
-    return _pending_handoffs.pop(profile, [])
+    """Pop queued handoff frames for `profile` as ready-to-yield SSE frames."""
+    mem_frames = _pending_handoffs.pop(profile, [])
+    conn = _get_conn()
+    if conn is None:
+        return mem_frames
+    try:
+        with conn:
+            rows = conn.execute(
+                "SELECT id, frame FROM handoff_frames "
+                "WHERE to_bot = ? AND delivered_at IS NULL "
+                "ORDER BY id ASC",
+                (profile,),
+            ).fetchall()
+            if not rows:
+                conn.close()
+                return mem_frames
+            ids = [r[0] for r in rows]
+            db_frames = [r[1] for r in rows]
+            now = _now_iso()
+            placeholders = ",".join("?" for _ in ids)
+            conn.execute(
+                f"UPDATE handoff_frames SET delivered_at = ? WHERE id IN ({placeholders})",
+                [now] + ids,
+            )
+        conn.close()
+        return db_frames
+    except Exception:
+        return mem_frames
 
 
 def pending_handoff_count(profile: str) -> int:
     """Test/diagnostic peek — how many frames are queued for `profile`."""
-    return len(_pending_handoffs.get(profile, []))
+    conn = _get_conn()
+    if conn is None:
+        return len(_pending_handoffs.get(profile, []))
+    try:
+        with conn:
+            (count,) = conn.execute(
+                "SELECT count(*) FROM handoff_frames "
+                "WHERE to_bot = ? AND delivered_at IS NULL",
+                (profile,),
+            ).fetchone()
+        conn.close()
+        return count
+    except Exception:
+        return len(_pending_handoffs.get(profile, []))

@@ -180,3 +180,26 @@ def test_no_network_used(fleet_env):
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imported.add(node.module.split(".")[0])
     assert not imported & {"socket", "http", "urllib", "requests", "httpx"}
+
+
+def test_handoff_survives_process_restart(fleet_env, monkeypatch):
+    """P1-4: An inter-bot handoff queued in a separate subprocess persists and can be drained by the host process."""
+    import subprocess
+    import sys
+
+    handoffs_db = fleet_env / "handoffs" / "handoffs.db"
+    env = dict(os.environ, BALABOT_DATA_ROOT=str(fleet_env), BALABOT_HANDOFFS_DB=str(handoffs_db))
+    monkeypatch.setenv("BALABOT_DATA_ROOT", str(fleet_env))
+    monkeypatch.setenv("BALABOT_HANDOFFS_DB", str(handoffs_db))
+
+    cmd = [
+        sys.executable, "-m", "balabot.bot_tools",
+        "message_agent", "--from", "principal", "--to", "scout", "--message", "Subprocess handoff notice",
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert res.returncode == 0, res.stderr
+
+    frames = handoffs.drain_handoff_frames("scout")
+    assert len(frames) == 1, "Handoff frame lost across subprocess boundary"
+    assert "Subprocess handoff notice" in frames[0]
+
