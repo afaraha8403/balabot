@@ -29,7 +29,9 @@ $BALABOT_DASHBOARD_PASSWORD. Never logged.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
+import inspect
 import json
 import mimetypes
 import os
@@ -1051,6 +1053,23 @@ def _org_run(snippet: str, payload: dict | None = None,
     return {"ok": True, "data": parsed}
 
 
+async def _org_run_async(snippet: str, payload: dict | None = None,
+                         timeout: float = 30.0) -> dict:
+    """Non-blocking asynchronous execution of container snippets.
+
+    Dispatches to _org_run via asyncio.to_thread so long-running container
+    operations do not block the FastAPI asyncio event loop.
+    Respects monkeypatched server._org_run in tests.
+    """
+    runner = globals().get("_org_run", _org_run)
+    if inspect.iscoroutinefunction(runner):
+        return await runner(snippet, payload=payload, timeout=timeout)
+    res = await asyncio.to_thread(runner, snippet, payload=payload, timeout=timeout)
+    if inspect.isawaitable(res):
+        return await res
+    return res
+
+
 # ── container-side snippets (run via _org_run; see its contract) ─────────────
 # The snippet bodies are STATIC. Data (including the secret VALUE) arrives as
 # JSON via the _BALABOT_ORG_PAYLOAD environment variable and is parsed inside
@@ -1284,7 +1303,7 @@ async def org_secret_save(request: Request):
         return unavailable("balabot container is not running — cannot store secrets")
     # The value arrives via stdin JSON (payload), never argv and never
     # interpolated into a shell command line.
-    res = _org_run(_wrap(_ORGS_SAVE_SNIPPET, True), payload={
+    res = await _org_run_async(_wrap(_ORGS_SAVE_SNIPPET, True), payload={
         "name": name, "org": org, "value": value, "share_scope": share_scope,
         "bots": bots, "target_org": target_org,
         "description": body.get("description") or "",
@@ -1329,7 +1348,7 @@ async def org_grants_create(request: Request):
     resource = body.get("resource") or {}
     if not container_ok():
         return unavailable("balabot container is not running — cannot create grants")
-    res = _org_run(_wrap(_ORGS_GRANT_CREATE_SNIPPET, True), payload={
+    res = await _org_run_async(_wrap(_ORGS_GRANT_CREATE_SNIPPET, True), payload={
         "subject_bot": body.get("subject_bot"),
         "subject_org": body.get("subject_org"), "resource": resource,
         "scope": body.get("scope"), "access": body.get("access"),
@@ -1444,7 +1463,7 @@ async def org_skills_pin(request: Request):
     unpin = False
     if "pinned" in body:
         unpin = not bool(body["pinned"])
-    res = _org_run(_wrap(_SKILLS_PIN_SNIPPET, True), payload={"name": name, "unpin": unpin})
+    res = await _org_run_async(_wrap(_SKILLS_PIN_SNIPPET, True), payload={"name": name, "unpin": unpin})
     if not res.get("ok"):
         return unavailable(res.get("reason", "could not pin skill"))
     return {"ok": True, "record": res.get("record")}
@@ -1462,7 +1481,7 @@ async def org_skills_promote(request: Request):
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
     share = body.get("share", "org")
-    res = _org_run(_wrap(_SKILLS_PROMOTE_SNIPPET, True), payload={"name": name, "share": share})
+    res = await _org_run_async(_wrap(_SKILLS_PROMOTE_SNIPPET, True), payload={"name": name, "share": share})
     if not res.get("ok"):
         return unavailable(res.get("reason", "could not promote skill"))
     return {"ok": True, "record": res.get("record")}
@@ -1477,7 +1496,7 @@ async def org_skills_curate(request: Request):
     except Exception:
         body = {}
     dry_run = bool(body.get("dry_run", False))
-    res = _org_run(_wrap(_SKILLS_CURATE_SNIPPET, True), payload={"dry_run": dry_run})
+    res = await _org_run_async(_wrap(_SKILLS_CURATE_SNIPPET, True), payload={"dry_run": dry_run})
     if not res.get("ok"):
         return unavailable(res.get("reason", "curator pass failed"))
     return {"ok": True, "report": res.get("report")}
@@ -1686,7 +1705,7 @@ async def groups_create(request: Request):
         raise HTTPException(status_code=400, detail="name and members are required")
     if not container_ok():
         return unavailable("balabot container is not running — cannot create groups")
-    res = _org_run(_wrap(_GROUPS_CREATE_SNIPPET, True), payload={
+    res = await _org_run_async(_wrap(_GROUPS_CREATE_SNIPPET, True), payload={
         "name": name, "members": members,
         "computer_agent": body.get("computer_agent"),
         "known_bots": _fleet_bot_ids(),
@@ -1742,7 +1761,7 @@ async def groups_turn(gid: str, request: Request):
     if not container_ok():
         return unavailable("balabot container is not running — no group turns")
 
-    res = _org_run(_wrap(_GROUPS_GET_SNIPPET, True), payload={"gid": gid})
+    res = await _org_run_async(_wrap(_GROUPS_GET_SNIPPET, True), payload={"gid": gid})
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -1770,7 +1789,7 @@ async def groups_turn(gid: str, request: Request):
             results.append({"bot": bot, "error": True,
                             "detail": f"{type(exc).__name__}: {exc}"})
 
-    apply_res = _org_run(_wrap(_GROUPS_APPLY_SNIPPET, True), payload={
+    apply_res = await _org_run_async(_wrap(_GROUPS_APPLY_SNIPPET, True), payload={
         "gid": gid, "text": text, "results": results})
     if not apply_res.get("ok"):
         if apply_res.get("status"):
@@ -1976,7 +1995,7 @@ async def bot_proposals_create(request: Request):
                             detail=f"unknown proposing bot {proposed_by!r}")
     if not container_ok():
         return unavailable("balabot container is not running — cannot file proposals")
-    res = _org_run(_wrap(_PROPOSE_SNIPPET, True), payload={
+    res = await _org_run_async(_wrap(_PROPOSE_SNIPPET, True), payload={
         "name": name, "role": role, "proposed_by": proposed_by,
         "reason": body.get("reason") or "",
         "model": body.get("model")})
@@ -2853,14 +2872,14 @@ def _session_public(row: dict, bot: str) -> dict:
 
 
 @app.get("/api/sessions")
-def sessions_list(bot: str = ""):
+async def sessions_list(bot: str = ""):
     """All server-backed sessions for one bot, with their purpose record."""
     if not bot:
         raise HTTPException(status_code=400, detail="bot is required")
     if not container_ok():
         return unavailable("balabot container is not running — no conversation store")
-    res = _org_run(_wrap(_SESSIONS_LIST_SNIPPET, True),
-                   payload={"bot_id": bot})
+    res = await _org_run_async(_wrap(_SESSIONS_LIST_SNIPPET, True),
+                               payload={"bot_id": bot})
     if not res.get("ok"):
         return unavailable(res.get("reason", "could not read the session store"))
     rows = [_session_public(r, bot) for r in (res.get("sessions") or [])]
@@ -2889,7 +2908,7 @@ async def sessions_create(request: Request):
                   f"{secrets.token_hex(3)}").strip()
     if not container_ok():
         return unavailable("balabot container is not running — cannot create conversations")
-    res = _org_run(_wrap(_SESSIONS_CREATE_SNIPPET, True), payload={
+    res = await _org_run_async(_wrap(_SESSIONS_CREATE_SNIPPET, True), payload={
         "session_id": session_id, "bot_id": bot_id, "purpose": purpose})
     if not res.get("ok"):
         if res.get("status"):
@@ -2902,7 +2921,7 @@ async def sessions_create(request: Request):
 
 
 @app.get("/api/sessions/{session_id}")
-def sessions_get(session_id: str, bot: str = ""):
+async def sessions_get(session_id: str, bot: str = ""):
     """One session incl. its purpose + topic spans + decisions. The spans are
     the 'this session is responsible for something' record: topic A over
     msgs 1-40, topic B over 41-90 — addressable, not merged."""
@@ -2910,7 +2929,7 @@ def sessions_get(session_id: str, bot: str = ""):
         raise HTTPException(status_code=400, detail="bot is required")
     if not container_ok():
         return unavailable("balabot container is not running — no conversation store")
-    res = _org_run(_wrap(_SESSIONS_GET_SNIPPET, True), payload={
+    res = await _org_run_async(_wrap(_SESSIONS_GET_SNIPPET, True), payload={
         "session_id": session_id, "bot_id": bot})
     if not res.get("ok"):
         if res.get("status"):
@@ -2933,13 +2952,13 @@ def sessions_get(session_id: str, bot: str = ""):
 
 
 @app.delete("/api/sessions/{session_id}")
-def sessions_delete(session_id: str):
+async def sessions_delete(session_id: str):
     """Delete a conversation and its topic spans + decisions (the whole
     record — leaving orphaned spans behind would be worse than none)."""
     if not container_ok():
         return unavailable("balabot container is not running — cannot delete conversations")
-    res = _org_run(_wrap(_SESSIONS_DELETE_SNIPPET, True),
-                   payload={"session_id": session_id})
+    res = await _org_run_async(_wrap(_SESSIONS_DELETE_SNIPPET, True),
+                               payload={"session_id": session_id})
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -2963,7 +2982,7 @@ async def sessions_update(session_id: str, request: Request):
     purpose = (body.get("purpose") or body.get("title") or "").strip()
     if not container_ok():
         return unavailable("balabot container is not running — cannot update conversations")
-    res = _org_run(_wrap(_SESSIONS_PATCH_SNIPPET, True), payload={
+    res = await _org_run_async(_wrap(_SESSIONS_PATCH_SNIPPET, True), payload={
         "session_id": session_id, "fields": {"purpose": purpose}})
     if not res.get("ok"):
         if res.get("status"):

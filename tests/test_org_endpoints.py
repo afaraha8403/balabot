@@ -271,3 +271,49 @@ def test_secret_helper_delivery_grant_scoping(client):
     _save_secret(client)
     assert secret_helper.secret_lines_for("principal") == []
     assert secret_helper.secret_lines_for("governor") == []
+
+
+@pytest.mark.asyncio
+async def test_org_run_non_blocking_concurrency(monkeypatch):
+    """P1-1: Slow container execution in _org_run must not block the asyncio event loop."""
+    import asyncio
+    import time
+    import httpx
+
+    monkeypatch.setattr(server, "DASHBOARD_PASSWORD", "pw")
+
+    def slow_org_run(snippet, payload=None, timeout=30.0):
+        time.sleep(0.3)
+        return {"ok": True, "orgs": []}
+
+    monkeypatch.setattr(server, "_org_run", slow_org_run)
+    monkeypatch.setattr(server, "container_ok", lambda: True)
+
+    transport = httpx.ASGITransport(app=server.app)
+    headers = {"Authorization": "Basic YWxpOnB3"}
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", headers=headers) as async_client:
+        t0 = time.time()
+        fast_done_time = None
+        slow_done_time = None
+
+        async def run_slow():
+            nonlocal slow_done_time
+            payload = {"sessionId": "s-test", "botId": "principal", "purpose": "testing"}
+            res = await async_client.post("/api/sessions", json=payload)
+            slow_done_time = time.time()
+            return res
+
+        async def run_fast():
+            nonlocal fast_done_time
+            await asyncio.sleep(0.05)
+            res = await async_client.get("/healthz")
+            fast_done_time = time.time()
+            return res
+
+        slow_res, fast_res = await asyncio.gather(run_slow(), run_fast())
+        assert slow_res.status_code == 200
+        assert fast_res.status_code == 200
+        assert fast_done_time < slow_done_time
+        assert (fast_done_time - t0) < 0.2
+
+
