@@ -1,0 +1,31 @@
+{
+  "schema": 2,
+  "rules": [
+    "base",
+    "changelog",
+    "comments",
+    "release",
+    "testing"
+  ],
+  "skills": [],
+  "agents": [
+    "claude-code",
+    "copilot",
+    "gemini-cli",
+    "kilocode",
+    "opencode"
+  ],
+  "surfaces": [
+    ".cursor/rules/base.mdc",
+    ".cursor/rules/changelog.mdc",
+    ".cursor/rules/comments.mdc",
+    ".cursor/rules/release.mdc",
+    ".cursor/rules/testing.mdc",
+    "AGENTS.md",
+    "CLAUDE.md"
+  ],
+  "mentalTooling": null,
+  "mentalDataPolicy": null,
+  "updatedAt": "2026-09-28T01:42:34.309Z",
+  "version": "1.20.1"
+}

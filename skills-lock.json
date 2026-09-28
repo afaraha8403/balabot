@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "skills": {
+    "authoring-skills-and-rules": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/authoring-skills-and-rules/SKILL.md",
+      "computedHash": "adc27db21e03a9146169c107839fbd2ef2aff233dd5b7e1164c087430bd99569"
+    },
+    "blinded-eval": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/blinded-eval/SKILL.md",
+      "computedHash": "f79c91e797cfd434e338c65ca6f07b2f319d098e855613510cd80700872c0478"
+    },
+    "deep-deliberation": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/deep-deliberation/SKILL.md",
+      "computedHash": "bacd3daa65fb83a156d81431355483961f0da01c51ee1fa85c472e63c96e1ea0"
+    },
+    "design-rationale": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/design-rationale/SKILL.md",
+      "computedHash": "483d30acad02e6537704b90c1f55cda358664c94a342e067fe6cafaacb602aba"
+    },
+    "dissect": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/dissect/SKILL.md",
+      "computedHash": "28e1239f69b444dcfe46b92baa83b3c153e60d6c3ed11a8f09675c8da1d18aca"
+    },
+    "documentation-writer": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/documentation-writer/SKILL.md",
+      "computedHash": "8d963010cac3dfe610363f3c322e7dafac6dd84ee4a6b724a6e5ac6150873c19"
+    },
+    "execute": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/execute/SKILL.md",
+      "computedHash": "a21b634e616c54b0b5e80153260e84b2ba26361c0ecdd11778bdc157664e7e41"
+    },
+    "generating-app-verify": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/generating-app-verify/SKILL.md",
+      "computedHash": "7c0928e96553450a0566cb8a3d35f638f1f1eb110fdcc27a0e4a092144d328cf"
+    },
+    "inception": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/inception/SKILL.md",
+      "computedHash": "69c5c1fa36275dc7495321bf15dad89395e32706db5cea0353fcbfdea029fc49"
+    },
+    "kit-workflows": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/kit-workflows/SKILL.md",
+      "computedHash": "2f6b034fc4d14fae48110d4c630130d798efe634e935ed965d576d343d2ebff4"
+    },
+    "opinion": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/opinion/SKILL.md",
+      "computedHash": "feb7f6c0e528951481c49df08dffb1dea0adcee3746bb75453706a18d0b132b0"
+    },
+    "proving-change-safety": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/proving-change-safety/SKILL.md",
+      "computedHash": "6d304a2f560eb5a65351b58c12a47627ef0c575d9100da5ca03565ca107dc425"
+    },
+    "refreshing-app-verify": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/refreshing-app-verify/SKILL.md",
+      "computedHash": "133f5e0546add5d96a2a29ef1f77956b4a95bafb857495eef2880ed088653a38"
+    },
+    "release-deploy": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/release-deploy/SKILL.md",
+      "computedHash": "2104a7f5de81b29ff24cf417da7133f2a6cbacb4c742acf6daebea3e9c72e40a"
+    },
+    "subsystem-walkthrough": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/subsystem-walkthrough/SKILL.md",
+      "computedHash": "476182ca4831f949ab650c1f2b6320d522f12d327a208b51d25869079295a9e8"
+    },
+    "unmatched-workflow": {
+      "source": "afaraha8403/balakit",
+      "sourceType": "github",
+      "skillPath": "skills/unmatched-workflow/SKILL.md",
+      "computedHash": "4bb98e734c20c337087e807d939bac4955698722494920a7c228d700d9d9a929"
+    }
+  }
+}
