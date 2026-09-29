@@ -1,4 +1,4 @@
-import {useMemo} from 'react';
+import {useMemo, useState} from 'react';
 import {Avatar} from '@astryxdesign/core/Avatar';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Collapsible} from '@astryxdesign/core/Collapsible';
@@ -10,6 +10,7 @@ import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 import {ThinkingOrb} from 'thinking-orbs';
 import {BotRowMenu} from '../BotRowMenu';
+import {BotContextMenu, type ContextMenuPosition} from '../BotContextMenu';
 import {BotAvatar} from '../BotAvatar';
 import {GroupAvatar} from '../GroupAvatar';
 import {IconConceal, IconGroupChat, IconPin} from '../icons';
@@ -24,6 +25,7 @@ export type RosterEntry = {
   hasMessages: boolean;
   isPinned: boolean;
   isHidden: boolean;
+  isUnread: boolean;
 };
 
 /** Compact recency label: time today, "Yesterday", weekday this week, else a date. */
@@ -69,6 +71,7 @@ export function BotRoster({
   subagents,
   pinnedBotIds = [],
   hiddenBotIds = [],
+  unreadBotIds = [],
   groups = [],
   activeGroupId = null,
   sections = DEFAULT_BOT_SECTIONS,
@@ -78,8 +81,13 @@ export function BotRoster({
   onSelectGroup,
   onTogglePin,
   onToggleHide,
+  onToggleUnread,
+  onMoveToSection,
+  onCreateSection,
   onDuplicateBot,
   onEditBot,
+  onClearConversation,
+  onArchiveBot,
   onDeleteBot,
   onToggleSection,
   onRenameSection,
@@ -91,6 +99,7 @@ export function BotRoster({
   subagents?: SubAgent[];
   pinnedBotIds?: string[];
   hiddenBotIds?: string[];
+  unreadBotIds?: string[];
   groups?: Group[];
   activeGroupId?: string | null;
   sections?: BotSection[];
@@ -100,15 +109,22 @@ export function BotRoster({
   onSelectGroup?: (gid: string) => void;
   onTogglePin?: (bot: Bot) => void;
   onToggleHide?: (bot: Bot) => void;
+  onToggleUnread?: (bot: Bot) => void;
+  onMoveToSection?: (botId: string, sectionId: string | null) => void;
+  onCreateSection?: (bot: Bot) => void;
   onDuplicateBot?: (bot: Bot) => void;
   onEditBot?: (bot: Bot) => void;
+  onClearConversation?: (bot: Bot) => void;
+  onArchiveBot?: (bot: Bot) => void;
   onDeleteBot?: (bot: Bot) => void;
   onToggleSection?: (sectionId: string) => void;
   onRenameSection?: (section: BotSection) => void;
 }) {
   const pinnedSet = new Set(pinnedBotIds);
   const hiddenSet = new Set(hiddenBotIds);
+  const unreadSet = new Set(unreadBotIds);
   const collapsedSet = useMemo(() => new Set(collapsedSections), [collapsedSections]);
+  const [contextBot, setContextBot] = useState<{ bot: Bot; pos: ContextMenuPosition } | null>(null);
 
   const makeEntry = (bot: Bot): RosterEntry => {
     const last = lastMessageFor(sessions, bot.id);
@@ -119,6 +135,7 @@ export function BotRoster({
       hasMessages: last !== null,
       isPinned: pinnedSet.has(bot.id),
       isHidden: hiddenSet.has(bot.id),
+      isUnread: unreadSet.has(bot.id),
       preview: isTyping
         ? 'Typing…'
         : last
@@ -177,75 +194,117 @@ export function BotRoster({
   }, [sections, mainEntries, sectionAssignments]);
 
   const renderBotItem = (e: RosterEntry) => (
-    <ListItem
+    <div
       key={e.bot.id}
-      label={e.bot.name}
-      isSelected={e.bot.id === activeBotId && !activeGroupId}
-      onClick={() => onSelect(e.bot.id)}
-      description={
-        <VStack gap={1} align="start">
-          <Text
-            type="supporting"
-            maxLines={1}
-            color={e.isTyping ? 'accent' : 'secondary'}
-          >
-            {e.preview}
-          </Text>
-          {(subagents ?? [])
-            .filter(s => s.parent === e.bot.id)
-            .map(s => (
-              <HStack key={s.id} gap={2} vAlign="center">
-                <ThinkingOrb
-                  state="working"
-                  size={20}
-                  theme="dark"
-                  aria-label={`${s.title} is working`}
-                />
-                <Text type="supporting" size="xsm" color="accent">
-                  sub-agent · {s.title}
-                  {s.age ? ` · up ${s.age}` : ''}
-                </Text>
-              </HStack>
-            ))}
-        </VStack>
-      }
-      startContent={
-        <BotAvatar
-          identity={e.bot.id}
-          color={e.bot.color}
-          size={38}
-          status={e.isTyping ? 'working' : undefined}
-        />
-      }
-      endContent={
-        <VStack gap={1} align="end">
-          <HStack gap={1} vAlign="center">
-            {e.isPinned ? <IconPin size="sm" color="secondary" /> : null}
-            <Text type="supporting" size="xsm">
-              {e.when}
+      onContextMenu={event => {
+        event.preventDefault();
+        setContextBot({
+          bot: e.bot,
+          pos: { x: event.clientX, y: event.clientY },
+        });
+      }}
+      style={{ width: '100%' }}
+    >
+      <ListItem
+        label={e.bot.name}
+        isSelected={e.bot.id === activeBotId && !activeGroupId}
+        onClick={() => onSelect(e.bot.id)}
+        description={
+          <VStack gap={1} align="start">
+            <Text
+              type="supporting"
+              maxLines={1}
+              color={e.isTyping ? 'accent' : e.isUnread ? 'primary' : 'secondary'}
+              weight={e.isUnread ? 'semibold' : undefined}
+            >
+              {e.preview}
             </Text>
-            <BotRowMenu
-              bot={e.bot}
-              isPinned={e.isPinned}
-              isHidden={e.isHidden}
-              onTogglePin={onTogglePin}
-              onToggleHide={onToggleHide}
-              onDuplicate={onDuplicateBot}
-              onEdit={onEditBot}
-              onDelete={onDeleteBot}
-            />
-          </HStack>
-          {e.isTyping ? (
-            <ThinkingOrb
-              state="working"
-              size={20}
-              theme="dark"
-              aria-label={`${e.bot.name} is working`}
-            />
-          ) : null}
-        </VStack>
-      }
-    />
+            {(subagents ?? [])
+              .filter(s => s.parent === e.bot.id)
+              .map(s => (
+                <HStack key={s.id} gap={2} vAlign="center">
+                  <ThinkingOrb
+                    state="working"
+                    size={20}
+                    theme="dark"
+                    aria-label={`${s.title} is working`}
+                  />
+                  <Text type="supporting" size="xsm" color="accent">
+                    sub-agent · {s.title}
+                    {s.age ? ` · up ${s.age}` : ''}
+                  </Text>
+                </HStack>
+              ))}
+          </VStack>
+        }
+        startContent={
+          <BotAvatar
+            identity={e.bot.id}
+            color={e.bot.color}
+            size={38}
+            status={e.isTyping ? 'working' : undefined}
+          />
+        }
+        endContent={
+          <VStack gap={1} align="end">
+            <HStack gap={1} vAlign="center">
+              {e.isUnread ? (
+                <span
+                  aria-hidden="true"
+                  className="polaris-unread-dot"
+                  title="Unread"
+                  style={{
+                    display: 'inline-block',
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '9999px',
+                    backgroundColor: 'var(--foreground)',
+                    marginRight: '2px',
+                  }}
+                />
+              ) : null}
+              {e.isPinned ? <IconPin size="sm" color="secondary" /> : null}
+              <Text type="supporting" size="xsm">
+                {e.when}
+              </Text>
+              <BotRowMenu
+                bot={e.bot}
+                isPinned={e.isPinned}
+                isHidden={e.isHidden}
+                isUnread={e.isUnread}
+                sections={sections}
+                onTogglePin={onTogglePin}
+                onToggleHide={onToggleHide}
+                onToggleUnread={onToggleUnread}
+                onMoveToSection={secId => onMoveToSection?.(e.bot.id, secId)}
+                onCreateSection={() => onCreateSection?.(e.bot)}
+                onRenameSection={
+                  onRenameSection
+                    ? secId => {
+                        const sec = sections.find(s => s.id === secId);
+                        if (sec) onRenameSection(sec);
+                      }
+                    : undefined
+                }
+                onDuplicate={onDuplicateBot}
+                onEdit={onEditBot}
+                onClear={onClearConversation}
+                onArchive={onArchiveBot}
+                onDelete={onDeleteBot}
+              />
+            </HStack>
+            {e.isTyping ? (
+              <ThinkingOrb
+                state="working"
+                size={20}
+                theme="dark"
+                aria-label={`${e.bot.name} is working`}
+              />
+            ) : null}
+          </VStack>
+        }
+      />
+    </div>
   );
 
   return (
@@ -407,6 +466,36 @@ export function BotRoster({
           </List>
         </Collapsible>
       </VStack>
+
+      {contextBot ? (
+        <BotContextMenu
+          bot={{
+            ...contextBot.bot,
+            pinned: pinnedSet.has(contextBot.bot.id),
+            unread: unreadSet.has(contextBot.bot.id),
+          }}
+          position={contextBot.pos}
+          sections={sections}
+          onClose={() => setContextBot(null)}
+          onTogglePinned={onTogglePin ? () => onTogglePin(contextBot.bot) : undefined}
+          onMoveToSection={secId => onMoveToSection?.(contextBot.bot.id, secId)}
+          onCreateSection={() => onCreateSection?.(contextBot.bot)}
+          onRenameSection={
+            onRenameSection
+              ? secId => {
+                  const sec = sections.find(s => s.id === secId);
+                  if (sec) onRenameSection(sec);
+                }
+              : undefined
+          }
+          onToggleUnread={onToggleUnread ? () => onToggleUnread(contextBot.bot) : undefined}
+          onEdit={onEditBot ? () => onEditBot(contextBot.bot) : undefined}
+          onDuplicate={onDuplicateBot ? () => onDuplicateBot(contextBot.bot) : undefined}
+          onClear={onClearConversation ? () => onClearConversation(contextBot.bot) : undefined}
+          onArchive={onArchiveBot ? () => onArchiveBot(contextBot.bot) : undefined}
+          onDelete={onDeleteBot ? () => onDeleteBot(contextBot.bot) : undefined}
+        />
+      ) : null}
     </VStack>
   );
 }

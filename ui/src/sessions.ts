@@ -60,6 +60,25 @@ export function saveHiddenBots(ids: string[]) {
   }
 }
 
+const UNREAD_BOTS_KEY = 'balabot.unreadBots.v1';
+
+export function loadUnreadBots(): string[] {
+  try {
+    const raw = localStorage.getItem(UNREAD_BOTS_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveUnreadBots(ids: string[]) {
+  try {
+    localStorage.setItem(UNREAD_BOTS_KEY, JSON.stringify(ids));
+  } catch {
+    /* ignore */
+  }
+}
+
 
 /**
  * Add a server session row into the local Session[] surface. The server is

@@ -134,6 +134,8 @@ import {
   savePinnedBots,
   loadHiddenBots,
   saveHiddenBots,
+  loadUnreadBots,
+  saveUnreadBots,
   syncSessionsFromServer,
 } from './sessions';
 
@@ -224,6 +226,7 @@ export default function App() {
   const [, setExcluded] = useState<string[]>([]);
   const [pinnedBotIds, setPinnedBotIds] = useState<string[]>(() => loadPinnedBots());
   const [hiddenBotIds, setHiddenBotIds] = useState<string[]>(() => loadHiddenBots());
+  const [unreadBotIds, setUnreadBotIds] = useState<string[]>(() => loadUnreadBots());
   const [botSections, setBotSections] = useState<BotSection[]>(() => loadBotSections());
   const [sectionAssignments, setSectionAssignments] = useState<Record<string, string | null>>(() => loadBotSectionAssignments());
   const [collapsedSections, setCollapsedSections] = useState<string[]>(() => loadCollapsedSections());
@@ -480,6 +483,31 @@ export default function App() {
       return next;
     });
   }, []);
+
+  const onToggleUnread = useCallback((bot: Bot) => {
+    setUnreadBotIds(prev => {
+      const next = prev.includes(bot.id) ? prev.filter(id => id !== bot.id) : [...prev, bot.id];
+      saveUnreadBots(next);
+      return next;
+    });
+  }, []);
+
+  const onMoveToSection = useCallback((botId: string, sectionId: string | null) => {
+    saveBotSectionAssignment(botId, sectionId);
+    setSectionAssignments(loadBotSectionAssignments());
+  }, []);
+
+  const onClearConversation = useCallback((bot: Bot) => {
+    setSessions(prev =>
+      prev.map(s => (s.botId === bot.id ? {...s, messages: []} : s))
+    );
+    setBanner(`Cleared conversation with ${bot.name}.`);
+  }, []);
+
+  const onArchiveBot = useCallback((bot: Bot) => {
+    onToggleHide(bot);
+    setBanner(`Archived ${bot.name} from sidebar.`);
+  }, [onToggleHide]);
 
   const onDuplicateBot = useCallback(async (bot: Bot) => {
     try {
@@ -976,6 +1004,7 @@ export default function App() {
               subagents={subagents}
               pinnedBotIds={pinnedBotIds}
               hiddenBotIds={hiddenBotIds}
+              unreadBotIds={unreadBotIds}
               groups={groups}
               activeGroupId={activeGroupId}
               onSelect={id => {
@@ -983,6 +1012,14 @@ export default function App() {
                 setActiveGroupId(null);
                 setActiveSessionId(null);
                 setScreen('chat');
+                setUnreadBotIds(prev => {
+                  if (prev.includes(id)) {
+                    const next = prev.filter(x => x !== id);
+                    saveUnreadBots(next);
+                    return next;
+                  }
+                  return prev;
+                });
                 navigateTo(`/app/${encodeURIComponent(id)}`);
                 setMobileSidebarOpen(false);
               }}
@@ -994,7 +1031,12 @@ export default function App() {
               }}
               onTogglePin={onTogglePin}
               onToggleHide={onToggleHide}
+              onToggleUnread={onToggleUnread}
+              onMoveToSection={onMoveToSection}
+              onCreateSection={setNewSectionBot}
               onDuplicateBot={onDuplicateBot}
+              onClearConversation={onClearConversation}
+              onArchiveBot={onArchiveBot}
               sections={botSections}
               sectionAssignments={sectionAssignments}
               collapsedSections={collapsedSections}
