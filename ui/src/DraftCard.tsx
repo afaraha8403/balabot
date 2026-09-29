@@ -1,12 +1,4 @@
 import {useState} from 'react';
-import {Card} from '@astryxdesign/core/Card';
-import {HStack} from '@astryxdesign/core/Stack';
-import {VStack} from '@astryxdesign/core/VStack';
-import {Text} from '@astryxdesign/core/Text';
-import {TextInput} from '@astryxdesign/core/TextInput';
-import {Button} from '@astryxdesign/core/Button';
-import {Badge} from '@astryxdesign/core/Badge';
-import {IconCheck, IconDraft, IconSend} from './icons';
 import type {DraftCardData} from './api';
 
 type Props = {
@@ -16,7 +8,7 @@ type Props = {
 };
 
 /**
- * Editable draft card for email and Slack messages (GrokBot spec):
+ * Editable draft card for email and Slack messages (Polaris card tokens):
  * When a Bot prepares an external message, it surfaces this editable card.
  * The human inspects and can edit recipients, subject/channel, and body,
  * then explicitly clicks "Send email" / "Send message" or "Discard".
@@ -49,97 +41,238 @@ export function DraftCard({draft, onSend, onDiscard}: Props) {
 
   if (status === 'sent') {
     return (
-      <Card variant="muted" padding={3}>
-        <HStack gap={2} vAlign="center">
-          <IconCheck size="sm" color="success" />
-          <Text type="supporting" color="secondary">
-            {isEmail ? `Email sent to ${to}` : `Message sent to ${subjectOrChannel}`}
-          </Text>
-        </HStack>
-      </Card>
+      <div
+        data-testid="draft-card-sent"
+        style={{
+          border: '1px solid var(--border)',
+          backgroundColor: 'var(--muted)',
+          borderRadius: '16px',
+          padding: '12px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '13px',
+          color: 'var(--foreground)',
+          maxWidth: '520px',
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+        <span style={{color: 'var(--muted-foreground)'}}>
+          {isEmail ? `Email sent to ${to}` : `Message sent to ${subjectOrChannel}`}
+        </span>
+      </div>
     );
   }
 
   if (status === 'discarded') {
     return (
-      <Card variant="muted" padding={3}>
-        <HStack gap={2} vAlign="center">
-          <Text type="supporting" color="secondary">
-            {title} draft discarded.
-          </Text>
-        </HStack>
-      </Card>
+      <div
+        data-testid="draft-card-discarded"
+        style={{
+          border: '1px solid var(--border)',
+          backgroundColor: 'var(--muted)',
+          borderRadius: '16px',
+          padding: '12px 16px',
+          fontSize: '13px',
+          color: 'var(--muted-foreground)',
+          maxWidth: '520px',
+        }}
+      >
+        {title} draft discarded.
+      </div>
     );
   }
 
   return (
-    <Card variant="default" padding={4}>
-      <VStack gap={3}>
-        <HStack gap={2} vAlign="center" justify="between">
-          <HStack gap={2} vAlign="center">
-            <IconDraft size="md" color="accent" />
-            <Text type="body" weight="semibold">
-              {title}
-            </Text>
-          </HStack>
-          <Badge label="Editable Draft" variant="neutral" />
-        </HStack>
+    <div
+      data-testid="draft-card"
+      style={{
+        width: '100%',
+        maxWidth: '520px',
+        borderRadius: '20px',
+        border: '1px solid var(--border)',
+        backgroundColor: 'var(--card)',
+        color: 'var(--card-foreground)',
+        padding: '16px',
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px',
+        margin: '8px 0',
+      }}
+    >
+      {/* Header */}
+      <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px'}}>
+        <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '28px',
+              height: '28px',
+              borderRadius: '8px',
+              backgroundColor: 'var(--accent)',
+              color: 'var(--foreground)',
+            }}
+          >
+            {isEmail ? (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect width="20" height="16" x="2" y="4" rx="2" />
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+              </svg>
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2v5Z" />
+                <path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
+              </svg>
+            )}
+          </span>
+          <span style={{fontSize: '14px', fontWeight: 600, color: 'var(--foreground)'}}>
+            {title}
+          </span>
+        </div>
+        <span
+          style={{
+            backgroundColor: 'var(--accent)',
+            color: 'var(--accent-foreground)',
+            padding: '2px 8px',
+            borderRadius: '9999px',
+            fontSize: '11px',
+            fontWeight: 500,
+          }}
+        >
+          Editable Draft
+        </span>
+      </div>
 
-        <TextInput
-          label={isEmail ? 'To' : 'Channel / User'}
-          value={to}
-          onChange={setTo}
-          size="sm"
-          placeholder={isEmail ? 'recipient@example.com' : '#channel-name'}
-        />
+      {/* Inputs */}
+      <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+        <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
+          <label style={{fontSize: '12px', fontWeight: 500, color: 'var(--muted-foreground)'}}>
+            {isEmail ? 'To' : 'Channel / User'}
+          </label>
+          <input
+            type="text"
+            value={to}
+            onChange={e => setTo(e.target.value)}
+            placeholder={isEmail ? 'recipient@example.com' : '#channel-name'}
+            style={{
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: 'var(--radius-md, 8px)',
+              border: '1px solid var(--border)',
+              backgroundColor: 'var(--input)',
+              color: 'var(--foreground)',
+              fontSize: '12.5px',
+              outline: 'none',
+              boxSizing: 'border-box',
+              fontFamily: 'inherit',
+            }}
+          />
+        </div>
 
-        <TextInput
-          label={isEmail ? 'Subject' : 'Topic / Thread'}
-          value={subjectOrChannel}
-          onChange={setSubjectOrChannel}
-          size="sm"
-          placeholder={isEmail ? 'Email subject line' : 'Topic or thread key'}
-        />
+        <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
+          <label style={{fontSize: '12px', fontWeight: 500, color: 'var(--muted-foreground)'}}>
+            {isEmail ? 'Subject' : 'Topic / Thread'}
+          </label>
+          <input
+            type="text"
+            value={subjectOrChannel}
+            onChange={e => setSubjectOrChannel(e.target.value)}
+            placeholder={isEmail ? 'Email subject line' : 'Topic or thread key'}
+            style={{
+              width: '100%',
+              padding: '7px 10px',
+              borderRadius: 'var(--radius-md, 8px)',
+              border: '1px solid var(--border)',
+              backgroundColor: 'var(--input)',
+              color: 'var(--foreground)',
+              fontSize: '12.5px',
+              outline: 'none',
+              boxSizing: 'border-box',
+              fontFamily: 'inherit',
+            }}
+          />
+        </div>
 
-        <VStack gap={1} align="start" width="100%">
-          <Text type="supporting" size="xsm" weight="medium">
+        <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
+          <label style={{fontSize: '12px', fontWeight: 500, color: 'var(--muted-foreground)'}}>
             Message Body
-          </Text>
+          </label>
           <textarea
             value={body}
             onChange={e => setBody(e.target.value)}
             rows={5}
             style={{
               width: '100%',
-              padding: 'var(--spacing-2) var(--spacing-3)',
-              fontFamily: 'inherit',
-              fontSize: 'var(--font-size-sm)',
+              padding: '8px 10px',
+              borderRadius: 'var(--radius-md, 8px)',
+              border: '1px solid var(--border)',
               backgroundColor: 'var(--input)',
               color: 'var(--foreground)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-md)',
+              fontSize: '12.5px',
+              outline: 'none',
               resize: 'vertical',
+              boxSizing: 'border-box',
+              fontFamily: 'inherit',
+              lineHeight: 1.5,
             }}
           />
-        </VStack>
+        </div>
+      </div>
 
-        <HStack gap={2} vAlign="center">
-          <Button
-            label={sendLabel}
-            variant="primary"
-            size="sm"
-            icon={<IconSend />}
-            onClick={handleSend}
-          />
-          <Button
-            label="Discard"
-            variant="ghost"
-            size="sm"
-            onClick={handleDiscard}
-          />
-        </HStack>
-      </VStack>
-    </Card>
+      {/* Buttons */}
+      <div style={{display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px'}}>
+        <button
+          type="button"
+          onClick={handleSend}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            borderRadius: '9999px',
+            border: 'none',
+            backgroundColor: 'var(--primary)',
+            color: 'var(--primary-foreground)',
+            padding: '6px 16px',
+            fontSize: '12px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="22" y1="2" x2="11" y2="13" />
+            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+          </svg>
+          <span>{sendLabel}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={handleDiscard}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            borderRadius: '9999px',
+            border: '1px solid var(--border)',
+            backgroundColor: 'transparent',
+            color: 'var(--muted-foreground)',
+            padding: '6px 14px',
+            fontSize: '12px',
+            fontWeight: 500,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          <span>Discard</span>
+        </button>
+      </div>
+    </div>
   );
 }
 
