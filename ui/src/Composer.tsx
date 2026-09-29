@@ -1,4 +1,4 @@
-import {useMemo, useRef, useState} from 'react';
+import {useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {ChatComposer} from '@astryxdesign/core/Chat';
 import {ChatComposerInput} from '@astryxdesign/core/Chat';
 import {ChatComposerDrawer} from '@astryxdesign/core/Chat';
@@ -64,13 +64,62 @@ export function Composer({
 }: Props) {
   const inputRef = useRef<ChatComposerInputHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
 
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    function syncHeight() {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.style.height = '0px';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
+    }
+
+    syncHeight();
+    let lastWidth = el.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const width = textarea.getBoundingClientRect().width;
+      if (width === lastWidth) return;
+      lastWidth = width;
+      syncHeight();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [value]);
+
+  function isFilePaste(clipboardData: Pick<DataTransfer, 'files' | 'items'> | null | undefined): boolean {
+    if (!clipboardData) return false;
+    return (clipboardData.files?.length ?? 0) > 0;
+  }
+
+  function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const clipboardData = event.clipboardData;
+    if (isDisabled || !clipboardData || !isFilePaste(clipboardData)) return;
+    event.preventDefault();
+    void addFiles(Array.from(clipboardData.files));
+    const text = clipboardData.getData('text/plain');
+    if (!text) return;
+    const textarea = event.currentTarget;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const nextVal = `${value.slice(0, start)}${text}${value.slice(end)}`;
+    setValue(nextVal);
+    const caret = start + text.length;
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.setSelectionRange(caret, caret);
+    });
+  }
+
   const dictation = useChatDictation({
     inputRef,
-    onResult: () => {
-      /* transcript is inserted into the input via inputRef */
+    onResult: (text: string) => {
+      setValue(prev => (prev ? `${prev} ${text}` : text));
     },
   });
 
@@ -236,15 +285,28 @@ export function Composer({
         </button>
 
         <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
-          <ChatComposerInput
-            handleRef={inputRef}
+          <textarea
+            ref={textareaRef}
             value={value}
-            onChange={setValue}
-            onSubmit={() => submit()}
-            onFiles={addFiles}
-            maxRows={6}
-            label={botName ? `Message ${botName}` : 'Message input'}
-            triggers={triggers}
+            onChange={(e) => setValue(e.target.value)}
+            onPaste={handlePaste}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && !(e.nativeEvent.isComposing || e.keyCode === 229)) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            disabled={isDisabled}
+            placeholder={botName ? `Message ${botName}` : 'Message…'}
+            aria-label={botName ? `Message ${botName}` : 'Message'}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-haspopup="listbox"
+            name="chat-message"
+            autoComplete="off"
+            dir="auto"
+            rows={1}
+            className="polaris-composer-textarea max-h-32 min-h-[24px] min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-[15.5px] leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
           />
         </div>
 
