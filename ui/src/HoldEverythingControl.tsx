@@ -1,12 +1,4 @@
 import {useEffect, useRef, useState} from 'react';
-import {Button} from '@astryxdesign/core/Button';
-import {HStack} from '@astryxdesign/core/Stack';
-import {VStack} from '@astryxdesign/core/VStack';
-import {Text} from '@astryxdesign/core/Text';
-import {Badge} from '@astryxdesign/core/Badge';
-import {TextInput} from '@astryxdesign/core/TextInput';
-import {Card} from '@astryxdesign/core/Card';
-import {IconWarning, IconCheck} from './icons';
 import {
   pauseBot,
   resolveIntervention,
@@ -24,6 +16,12 @@ type Props = {
   onOpenComputer?: () => void;
 };
 
+/**
+ * Polaris HoldEverythingControl:
+ * Restyled to a Polaris warning pill button and popover.
+ * Allows pausing a running turn, entering owner steering guidance,
+ * approving running turns, or denying and terminating turns.
+ */
 export function HoldEverythingControl({
   botId,
   botName,
@@ -45,8 +43,10 @@ export function HoldEverythingControl({
     (activeIntervention.state === 'pending' || activeIntervention.status === 'pending');
 
   const isExpired = activeIntervention?.state === 'expired';
-  const isAccepted = activeIntervention?.state === 'accepted' || activeIntervention?.status === 'approved';
-  const isRejected = activeIntervention?.state === 'rejected' || activeIntervention?.status === 'denied';
+  const isAccepted =
+    activeIntervention?.state === 'accepted' || activeIntervention?.status === 'approved';
+  const isRejected =
+    activeIntervention?.state === 'rejected' || activeIntervention?.status === 'denied';
 
   // Close dropdown on outside click or escape
   useEffect(() => {
@@ -121,204 +121,427 @@ export function HoldEverythingControl({
 
   return (
     <div ref={dropdownRef} style={{position: 'relative', display: 'inline-block'}}>
-      {/* Primary visible "Hold everything" control reachable in accessibility tree */}
-      <Button
-        label={
-          isPending
-            ? 'Hold everything (Paused)'
-            : isStreaming
-              ? 'Hold everything'
-              : 'Hold everything'
-        }
+      {/* Polaris warning pill button reachable in accessibility tree */}
+      <button
+        type="button"
+        data-testid="hold-everything-control"
         aria-label="Hold everything"
         aria-haspopup="menu"
         aria-expanded={isOpen}
-        variant={isPending ? 'primary' : isStreaming ? 'secondary' : 'ghost'}
-        size="sm"
         onClick={() => setIsOpen(prev => !prev)}
-      />
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '6px',
+          borderRadius: '9999px',
+          border: '1px solid rgba(233, 196, 106, 0.4)',
+          backgroundColor: isPending
+            ? 'rgba(233, 196, 106, 0.25)'
+            : isStreaming
+              ? 'rgba(233, 196, 106, 0.15)'
+              : 'rgba(233, 196, 106, 0.08)',
+          color: 'var(--warning)',
+          padding: '4px 12px',
+          fontSize: '12px',
+          fontWeight: 500,
+          cursor: 'pointer',
+          transition: 'all 150ms ease',
+          fontFamily: 'inherit',
+          outline: 'none',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.backgroundColor = 'rgba(233, 196, 106, 0.2)';
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.backgroundColor = isPending
+            ? 'rgba(233, 196, 106, 0.25)'
+            : isStreaming
+              ? 'rgba(233, 196, 106, 0.15)'
+              : 'rgba(233, 196, 106, 0.08)';
+        }}
+      >
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+        <span>
+          {isPending ? 'Hold everything (Paused)' : 'Hold everything'}
+        </span>
+      </button>
 
+      {/* Polaris DropdownMenuContent popover */}
       {isOpen ? (
         <div
           role="menu"
           aria-label="Hold everything options"
           style={{
             position: 'absolute',
-            top: 'calc(100% + var(--spacing-1))',
+            top: 'calc(100% + var(--spacing-1, 4px))',
             right: 0,
             zIndex: 1000,
-            minWidth: 'var(--popover-min-width, 17.5rem)',
+            minWidth: '280px',
+            maxWidth: '360px',
             backgroundColor: 'var(--popover)',
             color: 'var(--popover-foreground)',
             border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-lg)',
-            boxShadow: '0 var(--spacing-2) var(--spacing-6) var(--overlay)',
-            padding: 'var(--spacing-2-5)',
+            borderRadius: 'var(--radius-lg, 12px)',
+            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3)',
+            padding: '12px',
+            boxSizing: 'border-box',
           }}
         >
-          <VStack gap={2} align="stretch">
-            <HStack gap={2} vAlign="center" justify="between">
-              <Text type="body" weight="semibold" size="sm">
+          <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+            <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
+              <span style={{fontSize: '13px', fontWeight: 600, color: 'var(--foreground)'}}>
                 Hold & Intervention
-              </Text>
+              </span>
               {isPending ? (
-                <Badge label="PAUSED" variant="warning" />
+                <span
+                  style={{
+                    backgroundColor: 'rgba(233, 196, 106, 0.2)',
+                    color: 'var(--warning)',
+                    border: '1px solid rgba(233, 196, 106, 0.4)',
+                    padding: '2px 8px',
+                    borderRadius: '9999px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  PAUSED
+                </span>
               ) : isStreaming ? (
-                <Badge label="RUNNING" variant="neutral" />
+                <span
+                  style={{
+                    backgroundColor: 'var(--muted)',
+                    color: 'var(--muted-foreground)',
+                    border: '1px solid var(--border)',
+                    padding: '2px 8px',
+                    borderRadius: '9999px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  RUNNING
+                </span>
               ) : (
-                <Badge label="IDLE" variant="neutral" />
+                <span
+                  style={{
+                    backgroundColor: 'var(--muted)',
+                    color: 'var(--muted-foreground)',
+                    border: '1px solid var(--border)',
+                    padding: '2px 8px',
+                    borderRadius: '9999px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  IDLE
+                </span>
               )}
-            </HStack>
+            </div>
 
             {/* Current State Details */}
             {isPending ? (
-              <Card variant="muted" padding={2}>
-                <VStack gap={1}>
-                  <HStack gap={1} vAlign="center">
-                    <IconWarning size="sm" color="warning" />
-                    <Text type="body" weight="medium" size="xsm">
-                      {activeIntervention.reason || 'Bot paused — awaiting human decision'}
-                    </Text>
-                  </HStack>
-                  {activeIntervention.hint ? (
-                    <Text type="supporting" size="xsm" color="secondary">
-                      Hint: {activeIntervention.hint}
-                    </Text>
-                  ) : null}
-                  {activeIntervention.expires_at ? (
-                    <Text type="supporting" size="xsm" color="secondary">
-                      Expires: {new Date(activeIntervention.expires_at).toLocaleTimeString()}
-                    </Text>
-                  ) : null}
-                </VStack>
-              </Card>
+              <div
+                style={{
+                  backgroundColor: 'var(--muted)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  padding: '10px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                }}
+              >
+                <div style={{display: 'flex', alignItems: 'center', gap: '6px'}}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" strokeWidth="2">
+                    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span style={{fontSize: '12.5px', fontWeight: 500, color: 'var(--foreground)'}}>
+                    {activeIntervention.reason || 'Bot paused — awaiting human decision'}
+                  </span>
+                </div>
+                {activeIntervention.hint ? (
+                  <p style={{margin: 0, fontSize: '11.5px', color: 'var(--muted-foreground)'}}>
+                    Hint: {activeIntervention.hint}
+                  </p>
+                ) : null}
+                {activeIntervention.expires_at ? (
+                  <p style={{margin: 0, fontSize: '11.5px', color: 'var(--muted-foreground)'}}>
+                    Expires: {new Date(activeIntervention.expires_at).toLocaleTimeString()}
+                  </p>
+                ) : null}
+              </div>
             ) : null}
 
             {isExpired ? (
-              <Card variant="muted" padding={2}>
-                <HStack gap={1} vAlign="center">
-                  <IconWarning size="sm" color="secondary" />
-                  <Text type="supporting" size="xsm" color="secondary">
-                    Intervention expired: the targeted turn has ended.
-                  </Text>
-                </HStack>
-              </Card>
+              <div
+                style={{
+                  backgroundColor: 'var(--muted)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  padding: '8px 10px',
+                  fontSize: '12px',
+                  color: 'var(--muted-foreground)',
+                }}
+              >
+                Intervention expired: the targeted turn has ended.
+              </div>
             ) : null}
 
             {isAccepted ? (
-              <Card variant="muted" padding={2}>
-                <HStack gap={1} vAlign="center">
-                  <IconCheck size="sm" color="success" />
-                  <Text type="supporting" size="xsm" color="secondary">
-                    Intervention was accepted. Bot resumed.
-                  </Text>
-                </HStack>
-              </Card>
+              <div
+                style={{
+                  backgroundColor: 'rgba(78, 203, 113, 0.1)',
+                  border: '1px solid rgba(78, 203, 113, 0.3)',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  padding: '8px 10px',
+                  fontSize: '12px',
+                  color: 'var(--success)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>Intervention was accepted. Bot resumed.</span>
+              </div>
             ) : null}
 
             {isRejected ? (
-              <Card variant="muted" padding={2}>
-                <HStack gap={1} vAlign="center">
-                  <IconWarning size="sm" color="secondary" />
-                  <Text type="supporting" size="xsm" color="secondary">
-                    Intervention was declined. Turn ended.
-                  </Text>
-                </HStack>
-              </Card>
+              <div
+                style={{
+                  backgroundColor: 'var(--muted)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  padding: '8px 10px',
+                  fontSize: '12px',
+                  color: 'var(--muted-foreground)',
+                }}
+              >
+                Intervention was declined. Turn ended.
+              </div>
             ) : null}
 
             {/* Action buttons */}
             {!isPending ? (
-              <Button
-                label="Pause turn (Hold everything)"
-                variant="primary"
-                size="sm"
-                isDisabled={busy || !isStreaming}
-                isLoading={busy}
+              <button
+                type="button"
+                disabled={busy || !isStreaming}
                 onClick={() => void handleHold()}
-              />
+                style={{
+                  width: '100%',
+                  padding: '7px 12px',
+                  borderRadius: '9999px',
+                  border: '1px solid rgba(233, 196, 106, 0.5)',
+                  backgroundColor: 'rgba(233, 196, 106, 0.15)',
+                  color: 'var(--warning)',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: busy || !isStreaming ? 'not-allowed' : 'pointer',
+                  opacity: busy || !isStreaming ? 0.5 : 1,
+                  transition: 'background-color 120ms ease',
+                  fontFamily: 'inherit',
+                }}
+                onMouseEnter={e => {
+                  if (!busy && isStreaming) e.currentTarget.style.backgroundColor = 'rgba(233, 196, 106, 0.25)';
+                }}
+                onMouseLeave={e => {
+                  if (!busy && isStreaming) e.currentTarget.style.backgroundColor = 'rgba(233, 196, 106, 0.15)';
+                }}
+              >
+                {busy ? 'Pausing…' : 'Pause turn (Hold everything)'}
+              </button>
             ) : (
-              <VStack gap={2}>
-                <HStack gap={2}>
-                  <Button
-                    label="Approve & Continue"
-                    variant="primary"
-                    size="sm"
-                    isDisabled={busy}
-                    isLoading={busy}
+              <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                <div style={{display: 'flex', gap: '8px'}}>
+                  <button
+                    type="button"
+                    disabled={busy}
                     onClick={() => void handleResolve('approve')}
-                  />
-                  <Button
-                    label="Deny & Halt"
-                    variant="ghost"
-                    size="sm"
-                    isDisabled={busy}
+                    style={{
+                      flex: 1,
+                      padding: '6px 12px',
+                      borderRadius: '9999px',
+                      border: 'none',
+                      backgroundColor: 'var(--primary)',
+                      color: 'var(--primary-foreground)',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: busy ? 'not-allowed' : 'pointer',
+                      opacity: busy ? 0.6 : 1,
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Approve & Continue
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
                     onClick={() => void handleResolve('deny')}
-                  />
-                </HStack>
+                    style={{
+                      flex: 1,
+                      padding: '6px 12px',
+                      borderRadius: '9999px',
+                      border: '1px solid var(--border)',
+                      backgroundColor: 'transparent',
+                      color: 'var(--foreground)',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      cursor: busy ? 'not-allowed' : 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Deny & Halt
+                  </button>
+                </div>
 
                 {onOpenComputer ? (
-                  <Button
-                    label="Open Agent Computer"
-                    variant="secondary"
-                    size="sm"
+                  <button
+                    type="button"
                     onClick={() => {
                       setIsOpen(false);
                       onOpenComputer();
                     }}
-                  />
+                    style={{
+                      width: '100%',
+                      padding: '6px 12px',
+                      borderRadius: '9999px',
+                      border: '1px solid var(--border)',
+                      backgroundColor: 'var(--muted)',
+                      color: 'var(--foreground)',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Open Agent Computer
+                  </button>
                 ) : null}
 
                 {/* Steering flow */}
                 {!showSteerInput ? (
-                  <Button
-                    label="Steer turn with guidance…"
-                    variant="ghost"
-                    size="sm"
+                  <button
+                    type="button"
                     onClick={() => setShowSteerInput(true)}
-                  />
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--muted-foreground)',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      textAlign: 'center',
+                      padding: '4px',
+                      textDecoration: 'underline',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Steer turn with guidance…
+                  </button>
                 ) : (
-                  <VStack gap={1}>
-                    <TextInput
-                      label="Steering note"
+                  <div style={{display: 'flex', flexDirection: 'column', gap: '6px'}}>
+                    <input
+                      type="text"
+                      aria-label="Steering note"
                       placeholder="Instructions for the paused bot…"
                       value={steerNote}
-                      onChange={setSteerNote}
-                      size="sm"
+                      onChange={e => setSteerNote(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '6px 10px',
+                        borderRadius: 'var(--radius-md, 8px)',
+                        border: '1px solid var(--border)',
+                        backgroundColor: 'var(--input)',
+                        color: 'var(--foreground)',
+                        fontSize: '12px',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                        fontFamily: 'inherit',
+                      }}
                     />
-                    <HStack gap={1}>
-                      <Button
-                        label="Resume with guidance"
-                        variant="primary"
-                        size="sm"
-                        isDisabled={busy || !steerNote.trim()}
-                        isLoading={busy}
+                    <div style={{display: 'flex', gap: '6px'}}>
+                      <button
+                        type="button"
+                        disabled={busy || !steerNote.trim()}
                         onClick={() => void handleResolve('approve', steerNote.trim())}
-                      />
-                      <Button
-                        label="Cancel"
-                        variant="ghost"
-                        size="sm"
+                        style={{
+                          flex: 1,
+                          padding: '5px 10px',
+                          borderRadius: '9999px',
+                          border: 'none',
+                          backgroundColor: 'var(--primary)',
+                          color: 'var(--primary-foreground)',
+                          fontSize: '11.5px',
+                          fontWeight: 600,
+                          cursor: busy || !steerNote.trim() ? 'not-allowed' : 'pointer',
+                          opacity: busy || !steerNote.trim() ? 0.5 : 1,
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        Resume with guidance
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setShowSteerInput(false)}
-                      />
-                    </HStack>
-                  </VStack>
+                        style={{
+                          padding: '5px 10px',
+                          borderRadius: '9999px',
+                          border: '1px solid var(--border)',
+                          backgroundColor: 'transparent',
+                          color: 'var(--muted-foreground)',
+                          fontSize: '11.5px',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
                 )}
-              </VStack>
+              </div>
             )}
 
             {(isExpired || isAccepted || isRejected) && (
-              <Button
-                label="Dismiss status"
-                variant="ghost"
-                size="sm"
+              <button
+                type="button"
                 onClick={() => {
                   onInterventionChange(null);
                   setIsOpen(false);
                 }}
-              />
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--muted-foreground)',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  textAlign: 'center',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Dismiss status
+              </button>
             )}
-          </VStack>
+          </div>
         </div>
       ) : null}
     </div>
