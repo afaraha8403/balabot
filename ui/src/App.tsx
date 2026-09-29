@@ -827,13 +827,14 @@ export default function App() {
     const session = ensureSession(activeBot);
 
     if (isStreaming) {
+      const hasActiveTools = toolCallsRef.current.length > 0;
       const userMsg: ChatMessage = {
         role: 'user',
         content: text,
         at: Date.now(),
         attachments: attachments?.length ? attachments : undefined,
         replyTo: replyTo,
-        deliveryStatus: 'queued',
+        deliveryStatus: hasActiveTools ? 'steered' : 'queued',
       };
       patchSession(session.id, s => ({
         ...s,
@@ -888,6 +889,12 @@ export default function App() {
         t => {
           toolCallsRef.current = mergeToolProgress(toolCallsRef.current, t);
           setToolCalls(toolCallsRef.current);
+          patchSession(session.id, s => ({
+            ...s,
+            messages: s.messages.map(m =>
+              m.deliveryStatus === 'queued' ? {...m, deliveryStatus: 'steered'} : m
+            ),
+          }));
         },
         r => {
           thinkingRef.current = r;
@@ -1672,6 +1679,20 @@ export default function App() {
                                         style={{ marginTop: '4px', fontSize: '11.5px', fontWeight: 500, opacity: 0.85 }}
                                       >
                                         delivered
+                                      </div>
+                                    ) : null}
+                                    {m.deliveryStatus === 'steered' ? (
+                                      <div
+                                        data-testid="message-delivery-status"
+                                        className="mt-1 flex items-center gap-1.5 text-[11.5px] font-medium text-chat-user-foreground/75"
+                                        style={{ marginTop: '4px', fontSize: '11.5px', fontWeight: 500, opacity: 0.85 }}
+                                      >
+                                        <span
+                                          data-testid="steered-badge"
+                                          className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+                                        >
+                                          steered
+                                        </span>
                                       </div>
                                     ) : null}
 

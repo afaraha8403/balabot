@@ -45,6 +45,7 @@
 - Implement and wire attachments intake: `POST /api/attachments` upload, `GET /api/attachments/{id}/{name}`, Composer UI upload handling, and `/api/chat` context delivery.
 
 ### Fixes
+- Render honest "steered" badge on queued messages applied at tool boundaries during active tool execution (W1-10).
 - Mark in-flight steer messages as delivered once the active turn completes (W1-1).
 - Display queued chip immediately on mid-turn message submission and pace anchor streams to keep turns genuinely in-flight during steering (W1-15).
 - Audit and repair post-Polaris E2E test suites: eliminate vacuous passes in artifact sandboxing (strict iframe sandbox/referrer check) and OpenUI cards (strict testid verification); repair cua-driver failure injection in UI harness; prove 5 load-bearing mutations (shipped-bot 409, SPA fallback scoping, deep-link routing, secret redaction, and database WAL mode); audit and record 14 application defects in TEST-AUDIT.md.
