@@ -36,6 +36,7 @@ import {ComputerMaintenanceActions} from './ComputerMaintenanceActions';
 import {SecretRequestCard} from './SecretRequestCard';
 import {OpenUIRenderer} from './openui/OpenUIRenderer';
 import {SkillLibraryDialog} from './SkillLibraryDialog';
+import {PluginsOverlay} from './PluginsOverlay';
 import {GroupChatDialog} from './GroupChatDialog';
 import {BotSettings} from './BotSettings';
 import {CreateBotForm} from './CreateBotForm';
@@ -223,6 +224,7 @@ export default function App() {
   const [showPanel, setShowPanel] = useState(false);
   const [showComputer, setShowComputer] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
+  const [showPlugins, setShowPlugins] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
   const [deleteBotTarget, setDeleteBotTarget] = useState<Bot | null>(null);
   const [clearTarget, setClearTarget] = useState<Bot | null>(null);
@@ -1065,7 +1067,7 @@ export default function App() {
                 size="sm"
                 variant="ghost"
                 icon={<IconSkills />}
-                onClick={() => setShowSkills(true)}
+                onClick={() => setShowPlugins(true)}
               />
               <Button
                 label="Sessions"
@@ -2074,6 +2076,13 @@ export default function App() {
             bots={bots}
             activeBotId={activeBotId}
             onClose={() => setShowSkills(false)}
+          />
+        ) : null}
+        {showPlugins ? (
+          <PluginsOverlay
+            onClose={() => setShowPlugins(false)}
+            bots={bots}
+            activeBotId={activeBotId}
           />
         ) : null}
         {showGroups ? (
