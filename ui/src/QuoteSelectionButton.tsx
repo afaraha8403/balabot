@@ -54,7 +54,7 @@ export const QuoteSelectionButton = memo(function QuoteSelectionButton({
       ref={buttonRef}
       type="button"
       data-quote-selection
-      data-testid="quote-selection"
+      data-testid="quote-selection-button"
       onMouseDown={(event) => {
         // Keep the highlight alive until the click commits the quote.
         event.preventDefault();

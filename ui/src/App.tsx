@@ -1362,43 +1362,44 @@ export default function App() {
             {screen === 'chat' ? (
               activeBot ? (
                 <div style={{flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
-                  {(activeSession?.messages ?? []).length === 0 && !isStreaming && secretCards.length === 0 && interventions.length === 0 && draftCards.length === 0 && voiceMemos.length === 0 ? (
-                    <div style={{flex: 1, overflowY: 'auto', display: 'flex', justifyContent: 'center'}}>
-                      <VStack gap={5} align="center" paddingBlock={6} maxWidth={460}>
-                        <EmptyState
-                          title={`Say hi to ${activeBot.name}`}
-                          description={activeBot.description}
-                          icon={<Avatar name={activeBot.name} size="lg" tooltip={false} />}
-                        />
-                        <Grid columns={1} gap={2} width="100%">
-                          {PROMPTS.map(p => (
-                            <ClickableCard
-                              key={p}
-                              label={p}
-                              padding={3}
-                              elevation="low"
-                              onClick={() => void send(p)}
-                            >
-                              <Text type="supporting">{p}</Text>
-                            </ClickableCard>
-                          ))}
-                        </Grid>
-                      </VStack>
-                    </div>
-                  ) : (
-                    <Transcript
-                      trackDep={activeSession?.messages?.length}
-                      isStreaming={isStreaming}
-                      onQuote={(messageId, quoteText) => {
-                        const msg = (activeSession?.messages ?? []).find((_, idx) => `msg-${_?.at}-${idx}` === messageId);
-                        const sender = msg?.role === 'user' ? 'You' : activeBot.name;
-                        setReplyingToMessage({
-                          sender,
-                          text: quoteText,
-                        });
-                      }}
-                    >
-                      {(activeSession?.messages ?? []).map((m, i) => {
+                  <Transcript
+                    trackDep={activeSession?.messages?.length}
+                    isStreaming={isStreaming}
+                    onQuote={(messageId, quoteText) => {
+                      const msg = (activeSession?.messages ?? []).find((_, idx) => `msg-${_?.at}-${idx}` === messageId);
+                      const sender = msg?.role === 'user' ? 'You' : activeBot.name;
+                      setReplyingToMessage({
+                        sender,
+                        text: quoteText,
+                      });
+                    }}
+                  >
+                    {(activeSession?.messages ?? []).length === 0 && !isStreaming && secretCards.length === 0 && interventions.length === 0 && draftCards.length === 0 && voiceMemos.length === 0 ? (
+                      <div style={{display: 'flex', justifyContent: 'center', width: '100%', margin: 'auto 0'}}>
+                        <VStack gap={5} align="center" paddingBlock={6} maxWidth={460}>
+                          <EmptyState
+                            title={`Say hi to ${activeBot.name}`}
+                            description={activeBot.description}
+                            icon={<Avatar name={activeBot.name} size="lg" tooltip={false} />}
+                          />
+                          <Grid columns={1} gap={2} width="100%">
+                            {PROMPTS.map(p => (
+                              <ClickableCard
+                                key={p}
+                                label={p}
+                                padding={3}
+                                elevation="low"
+                                onClick={() => void send(p)}
+                              >
+                                <Text type="supporting">{p}</Text>
+                              </ClickableCard>
+                            ))}
+                          </Grid>
+                        </VStack>
+                      </div>
+                    ) : (
+                      <>
+                        {(activeSession?.messages ?? []).map((m, i) => {
                         const isUser = m.role === 'user';
                         const messageId = `msg-${m.at}-${i}`;
                         return (
@@ -1789,8 +1790,9 @@ export default function App() {
                     {voiceMemos.map(memo => (
                       <VoiceMemoCard key={memo.id} memo={memo} />
                     ))}
+                      </>
+                    )}
                   </Transcript>
-                )}
                 <Composer
                   isStreaming={isStreaming}
                   onSubmit={(text, attachments, replyTo) => void send(text, attachments, replyTo)}
