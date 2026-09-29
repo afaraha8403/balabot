@@ -144,16 +144,16 @@ export function HoldEverythingControl({
           aria-label="Hold everything options"
           style={{
             position: 'absolute',
-            top: 'calc(100% + 4px)',
+            top: 'calc(100% + var(--spacing-1))',
             right: 0,
             zIndex: 1000,
-            minWidth: '280px',
+            minWidth: 'var(--popover-min-width, 17.5rem)',
             backgroundColor: 'var(--popover)',
             color: 'var(--popover-foreground)',
             border: '1px solid var(--border)',
             borderRadius: 'var(--radius-lg)',
-            boxShadow: '0 8px 24px var(--overlay)',
-            padding: '10px',
+            boxShadow: '0 var(--spacing-2) var(--spacing-6) var(--overlay)',
+            padding: 'var(--spacing-2-5)',
           }}
         >
           <VStack gap={2} align="stretch">

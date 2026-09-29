@@ -111,9 +111,9 @@ export function DraftCard({draft, onSend, onDiscard}: Props) {
             rows={5}
             style={{
               width: '100%',
-              padding: '8px 12px',
+              padding: 'var(--spacing-2) var(--spacing-3)',
               fontFamily: 'inherit',
-              fontSize: '14px',
+              fontSize: 'var(--font-size-sm)',
               backgroundColor: 'var(--input)',
               color: 'var(--foreground)',
               border: '1px solid var(--border)',

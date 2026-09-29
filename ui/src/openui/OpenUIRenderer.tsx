@@ -75,7 +75,7 @@ export function OpenUIRenderer({ content, isStreaming = false, onAction }: Props
         <Markdown isStreaming={false}>{parts.before}</Markdown>
       ) : null}
 
-      <div style={{ margin: '8px 0' }}>
+      <div style={{ margin: 'var(--spacing-2) 0' }}>
         <Renderer
           library={balabotLibrary}
           response={parts.openuiCode}

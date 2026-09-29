@@ -17,31 +17,31 @@ export const balabotTheme = {
   name: 'balabot',
   __built: true,
   tokens: {
-    "--color-accent": "light-dark(#1d9bf0, #1d9bf0)",
+    "--color-accent": "light-dark(#eaeae6, #1a1b20)",
     "--color-accent-muted": "light-dark(color-mix(in srgb, var(--color-accent) 20%, transparent), color-mix(in srgb, var(--color-accent) 25%, transparent))",
-    "--color-on-accent": "light-dark(#000000, #000000)",
-    "--color-neutral": "light-dark(#191C1F1A, #DFE3E833)",
-    "--color-background-surface": "light-dark(#ecece9, #16181c)",
-    "--color-background-body": "light-dark(#fafaf8, #000000)",
-    "--color-overlay": "light-dark(#00000066, #00000066)",
-    "--color-overlay-hover": "light-dark(#0000000c, #ffffff0c)",
-    "--color-overlay-pressed": "light-dark(#00000019, #ffffff19)",
-    "--color-background-muted": "light-dark(#f0f0ed, #20232766)",
-    "--color-text-primary": "light-dark(#1a1a1a, #ffffff)",
-    "--color-text-secondary": "light-dark(#6c6c70, #71767b)",
-    "--color-text-disabled": "light-dark(#8B919B, #595F68)",
+    "--color-on-accent": "light-dark(#1a1a1a, #ececee)",
+    "--color-neutral": "light-dark(#1B1B1F1A, #E1E2E833)",
+    "--color-background-surface": "light-dark(#ecece9, #111215)",
+    "--color-background-body": "light-dark(#fafaf8, #0b0c0e)",
+    "--color-overlay": "light-dark(rgba(20, 20, 22, 0.45), rgba(4, 4, 5, 0.72))",
+    "--color-overlay-hover": "light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.05))",
+    "--color-overlay-pressed": "light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1))",
+    "--color-background-muted": "light-dark(#f0f0ed, #141518)",
+    "--color-text-primary": "light-dark(#1a1a1a, #ececee)",
+    "--color-text-secondary": "light-dark(#6c6c70, #85858a)",
+    "--color-text-disabled": "light-dark(#8F909B, #5C5E68)",
     "--color-text-accent": "var(--color-accent)",
     "--color-icon-accent": "var(--color-accent)",
-    "--color-icon-primary": "light-dark(#000000, #F9FCFF)",
-    "--color-icon-secondary": "light-dark(#2B3139, #C0C7D1)",
-    "--color-icon-disabled": "light-dark(#8B919B, #595F68)",
-    "--color-background-card": "light-dark(#ffffff, #202327)",
-    "--color-background-popover": "light-dark(#ffffff, #202327)",
-    "--color-background-inverted": "light-dark(#111111, #ffffff)",
-    "--color-border": "light-dark(#e8e8e4, #2a2a2a)",
-    "--color-border-emphasized": "light-dark(#d8d8d2, #3e4144)",
-    "--color-skeleton": "light-dark(#A5ACB6, #414750)",
-    "--color-track": "light-dark(#A5ACB6, #414750)",
+    "--color-icon-primary": "light-dark(#000000, #FBFCFF)",
+    "--color-icon-secondary": "light-dark(#2E3039, #C4C6D1)",
+    "--color-icon-disabled": "light-dark(#8F909B, #5C5E68)",
+    "--color-background-card": "light-dark(#ffffff, #141518)",
+    "--color-background-popover": "light-dark(#ffffff, #141518)",
+    "--color-background-inverted": "light-dark(#1a1a1a, #f1f1ef)",
+    "--color-border": "light-dark(#f0f0ed, #1e2026)",
+    "--color-border-emphasized": "light-dark(#e8e8e4, #1c1d22)",
+    "--color-skeleton": "light-dark(#A9ABB5, #454650)",
+    "--color-track": "light-dark(#A9ABB5, #454650)",
     "--color-shadow": "light-dark(#0000001A, #0000004D)",
     "--color-tint-hover": "light-dark(black, white)",
     "--font-size-4xs": "0.375rem",
@@ -105,8 +105,9 @@ export const balabotTheme = {
     "--radius-page": "42px",
     "--radius-chat": "42px",
     "--radius-full": "9999px",
-    "--font-family-body": "Inter, -apple-system, system-ui, sans-serif",
-    "--font-family-heading": "Inter, -apple-system, system-ui, sans-serif"
+    "--font-family-body": "\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+    "--font-family-heading": "\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, sans-serif",
+    "--font-family-code": "\"Geist Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
   },
   components: {
     "heading": {
@@ -206,14 +207,14 @@ export const balabotTheme = {
     },
     "chat-message-bubble": {
       "base": {
-        "borderRadius": "var(--radius-chat)",
+        "borderRadius": "var(--radius-xl)",
         "paddingBlock": "var(--spacing-3)",
         "paddingInline": "var(--spacing-4)"
       }
     },
     "side-nav-item": {
       "base": {
-        "borderRadius": "var(--radius-element)"
+        "borderRadius": "var(--radius-md)"
       }
     }
   },
@@ -250,15 +251,23 @@ export const balabotTheme = {
         "ratio": 1.2
       },
       "body": {
-        "family": "Inter",
-        "fallbacks": "-apple-system, system-ui, sans-serif"
+        "family": "Geist Variable",
+        "fallbacks": "ui-sans-serif, system-ui, -apple-system, sans-serif",
+        "weight": "normal"
       },
       "heading": {
+        "family": "Geist Variable",
+        "fallbacks": "ui-sans-serif, system-ui, -apple-system, sans-serif",
         "weight": "semibold"
+      },
+      "code": {
+        "family": "Geist Mono",
+        "fallbacks": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        "weight": "normal"
       }
     },
     "color": {
-      "accent": "#1d9bf0",
+      "accent": "#3b82f6",
       "neutralStyle": "neutral",
       "contrast": "high"
     },

@@ -317,7 +317,7 @@ export function CommandPalette({
 
         <Divider />
 
-        <VStack gap={2} style={{flex: 1, minHeight: 0, overflowY: 'auto'}}>
+        <VStack className="rk-scroll" gap={2} style={{flex: 1, minHeight: 0, overflowY: 'auto'}}>
           <List density="compact">
             {filteredItems.map((item, idx) => (
               <ListItem

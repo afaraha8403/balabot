@@ -222,7 +222,7 @@ export function AgentComputerDialog({bot, onClose}: Props) {
         }
         onOpenChange={onClose}
       />
-      <VStack gap={3} padding={4} height="fill" style={{position: 'relative', minHeight: '640px'}}>
+      <VStack gap={3} padding={4} height="fill" style={{position: 'relative', minHeight: '40rem'}}>
         {/* Top Control Bar: Reset & Teach task */}
         <HStack gap={2} vAlign="center" justify="between" wrap="wrap">
           <HStack gap={2} vAlign="center">
@@ -270,11 +270,11 @@ export function AgentComputerDialog({bot, onClose}: Props) {
           <div
             data-testid="teach-chrome-popover"
             style={{
-              padding: '16px',
+              padding: 'var(--spacing-4)',
               backgroundColor: 'var(--card)',
               border: '1px solid var(--border)',
               borderRadius: 'var(--radius-lg)',
-              boxShadow: '0 8px 24px var(--overlay)',
+              boxShadow: '0 var(--spacing-2) var(--spacing-6) var(--overlay)',
             }}
           >
             <VStack gap={2}>
@@ -290,13 +290,13 @@ export function AgentComputerDialog({bot, onClose}: Props) {
                 onChange={e => setTeachGoal(e.target.value)}
                 style={{
                   width: '100%',
-                  padding: '8px 12px',
+                  padding: 'var(--spacing-2) var(--spacing-3)',
                   backgroundColor: 'var(--input)',
                   color: 'var(--foreground)',
                   border: '1px solid var(--border)',
                   borderRadius: 'var(--radius-md)',
                   fontFamily: 'inherit',
-                  fontSize: '14px',
+                  fontSize: 'var(--font-size-sm)',
                 }}
               />
               <HStack gap={2}>
@@ -323,24 +323,24 @@ export function AgentComputerDialog({bot, onClose}: Props) {
           <div
             data-testid="teach-recording"
             style={{
-              padding: '12px 16px',
+              padding: 'var(--spacing-3) var(--spacing-4)',
               backgroundColor: 'var(--card)',
               border: '1px solid var(--border)',
               borderRadius: 'var(--radius-md)',
-              borderLeft: '4px solid var(--destructive)',
+              borderLeft: 'var(--spacing-1) solid var(--destructive)',
             }}
           >
-            <div style={{fontSize: '14px', fontWeight: 500, color: 'var(--foreground)'}}>
+            <div style={{fontSize: 'var(--font-size-sm)', fontWeight: 500, color: 'var(--foreground)'}}>
               Recording: {teachGoal}
             </div>
-            <div style={{marginTop: '4px', fontSize: '13px', color: 'var(--muted-foreground)'}}>
+            <div style={{marginTop: 'var(--spacing-1)', fontSize: 'var(--font-size-xs)', color: 'var(--muted-foreground)'}}>
               {formatTimer(recordingSecondsRemaining)} left · bot is watching, not acting
             </div>
-            <div style={{marginTop: '4px', fontSize: '12px', color: 'var(--destructive)'}}>
+            <div style={{marginTop: 'var(--spacing-1)', fontSize: 'var(--font-size-xs)', color: 'var(--destructive)'}}>
               Do not type passwords into the demo. Use Take control for credentials.
             </div>
             {recordedSteps.length > 0 ? (
-              <div style={{marginTop: '8px', fontSize: '12px', color: 'var(--muted-foreground)'}}>
+              <div style={{marginTop: 'var(--spacing-2)', fontSize: 'var(--font-size-xs)', color: 'var(--muted-foreground)'}}>
                 Actions captured: {recordedSteps.length}
               </div>
             ) : null}
@@ -375,7 +375,7 @@ export function AgentComputerDialog({bot, onClose}: Props) {
         ) : null}
 
         {/* Main Workspace Area (Screen vs Terminal vs Files) */}
-        <div style={{flex: 1, minHeight: '380px', position: 'relative', overflow: 'hidden'}}>
+        <div style={{flex: 1, minHeight: '23.75rem', position: 'relative', overflow: 'hidden'}}>
           {activeApp === 'screen' ? (
             isLoading && !frame ? (
               <VStack gap={3} align="center" justify="center" height="fill">
@@ -410,25 +410,26 @@ export function AgentComputerDialog({bot, onClose}: Props) {
             )
           ) : activeApp === 'terminal' ? (
             <div
+              className="rk-scroll"
               style={{
                 width: '100%',
                 height: '100%',
-                minHeight: '380px',
+                minHeight: '23.75rem',
                 backgroundColor: 'var(--background)',
                 color: 'var(--foreground)',
                 fontFamily: 'var(--font-family-code, monospace)',
-                fontSize: '13px',
-                padding: '16px',
+                fontSize: 'var(--font-size-xs)',
+                padding: 'var(--spacing-4)',
                 borderRadius: 'var(--radius-md)',
                 border: '1px solid var(--border)',
                 overflowY: 'auto',
               }}
             >
-              <div style={{display: 'flex', flexDirection: 'column', gap: '4px'}}>
+              <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)'}}>
                 {terminalHistory.map((line, idx) => (
                   <div key={idx}>{line}</div>
                 ))}
-                <form onSubmit={executeTerminal} style={{display: 'flex', gap: '8px', marginTop: '8px'}}>
+                <form onSubmit={executeTerminal} style={{display: 'flex', gap: 'var(--spacing-2)', marginTop: 'var(--spacing-2)'}}>
                   <span>[hermes@balabot-agent ~]$</span>
                   <input
                     type="text"
@@ -449,13 +450,14 @@ export function AgentComputerDialog({bot, onClose}: Props) {
             </div>
           ) : (
             <div
+              className="rk-scroll"
               style={{
                 width: '100%',
                 height: '100%',
-                minHeight: '380px',
+                minHeight: '23.75rem',
                 backgroundColor: 'var(--card)',
                 color: 'var(--foreground)',
-                padding: '16px',
+                padding: 'var(--spacing-4)',
                 borderRadius: 'var(--radius-md)',
                 border: '1px solid var(--border)',
                 overflowY: 'auto',
@@ -464,7 +466,7 @@ export function AgentComputerDialog({bot, onClose}: Props) {
               <Text type="supporting" weight="semibold">
                 Workspace Files — /opt/data/profiles/{bot.id}/
               </Text>
-              <VStack gap={2} style={{marginTop: '12px'}}>
+              <VStack gap={2} style={{marginTop: 'var(--spacing-3)'}}>
                 {[
                   {name: 'AGENTS.md', size: '1.2 KB', type: 'Markdown'},
                   {name: 'SOUL.md', size: '2.0 KB', type: 'Markdown'},
@@ -482,7 +484,7 @@ export function AgentComputerDialog({bot, onClose}: Props) {
                     }}
                   >
                     <span>{file.name}</span>
-                    <span style={{color: 'var(--muted-foreground)', fontSize: '13px'}}>
+                    <span style={{color: 'var(--muted-foreground)', fontSize: 'var(--font-size-xs)'}}>
                       {file.size} · {file.type}
                     </span>
                   </HStack>
@@ -556,15 +558,15 @@ export function AgentComputerDialog({bot, onClose}: Props) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '8px',
-            padding: '6px 12px',
+            gap: 'var(--spacing-2)',
+            padding: 'var(--spacing-1-5) var(--spacing-3)',
             backgroundColor: 'var(--card)',
             border: '1px solid var(--border)',
             borderRadius: 'var(--radius-xl)',
-            boxShadow: '0 4px 16px var(--overlay)',
-            backdropFilter: 'blur(8px)',
+            boxShadow: '0 var(--spacing-1) var(--spacing-4) var(--overlay)',
+            backdropFilter: 'blur(var(--spacing-2))',
             alignSelf: 'center',
-            marginTop: '8px',
+            marginTop: 'var(--spacing-2)',
           }}
         >
           <Button

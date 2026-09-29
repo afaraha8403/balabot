@@ -209,7 +209,7 @@ export function BotRoster({
 
   return (
     <VStack gap={3} height="100%" justify="between">
-      <VStack gap={2} style={{flex: 1, minHeight: 0, overflowY: 'auto'}}>
+      <VStack className="rk-scroll" gap={2} style={{flex: 1, minHeight: 0, overflowY: 'auto'}}>
         {/* Pinned Bots */}
         {pinnedEntries.length > 0 ? (
           <VStack gap={1}>

@@ -56,9 +56,9 @@ export function FilePreviewCard({attachment, onDownload}: Props) {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        minWidth: '280px',
-        maxWidth: '460px',
-        borderRadius: 'var(--radius-lg, 12px)',
+        minWidth: 'var(--preview-card-min-width, 17.5rem)',
+        maxWidth: 'var(--preview-card-max-width, 28.75rem)',
+        borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--border)',
         backgroundColor: 'var(--card)',
         color: 'var(--foreground)',
@@ -81,8 +81,8 @@ export function FilePreviewCard({attachment, onDownload}: Props) {
             flex: 1,
             display: 'flex',
             alignItems: 'center',
-            gap: '12px',
-            padding: '12px 16px',
+            gap: 'var(--spacing-3)',
+            padding: 'var(--spacing-3) var(--spacing-4)',
             background: 'none',
             border: 'none',
             color: 'inherit',
@@ -94,9 +94,9 @@ export function FilePreviewCard({attachment, onDownload}: Props) {
             style={{
               display: 'grid',
               placeItems: 'center',
-              width: '40px',
-              height: '40px',
-              borderRadius: 'var(--radius-md, 8px)',
+              width: 'var(--spacing-10)',
+              height: 'var(--spacing-10)',
+              borderRadius: 'var(--radius-md)',
               backgroundColor: 'var(--muted)',
               color: 'var(--foreground)',
               flexShrink: 0,
@@ -109,7 +109,7 @@ export function FilePreviewCard({attachment, onDownload}: Props) {
               style={{
                 display: 'block',
                 fontWeight: 500,
-                fontSize: '14px',
+                fontSize: 'var(--font-size-sm)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -120,8 +120,8 @@ export function FilePreviewCard({attachment, onDownload}: Props) {
             <span
               style={{
                 display: 'block',
-                marginTop: '2px',
-                fontSize: '13px',
+                marginTop: 'var(--spacing-0-5)',
+                fontSize: 'var(--font-size-xs)',
                 color: 'var(--muted-foreground)',
               }}
             >
@@ -138,7 +138,7 @@ export function FilePreviewCard({attachment, onDownload}: Props) {
           title={`Download ${attachment.name}`}
           onClick={handleDownload}
           style={{
-            width: '56px',
+            width: 'var(--spacing-14)',
             display: 'grid',
             placeItems: 'center',
             border: 'none',
@@ -176,15 +176,15 @@ export function FilePreviewCard({attachment, onDownload}: Props) {
 
       {/* Rich preview */}
       {isImg && (attachment.url || attachment.path) ? (
-        <div style={{padding: '0 12px 12px 12px', textAlign: 'center'}}>
+        <div style={{padding: '0 var(--spacing-3) var(--spacing-3) var(--spacing-3)', textAlign: 'center'}}>
           <img
             src={attachment.url || attachment.path}
             alt={attachment.name}
             style={{
               width: '100%',
-              maxHeight: isExpanded ? '600px' : '180px',
+              maxHeight: isExpanded ? '37.5rem' : '11.25rem',
               objectFit: 'contain',
-              borderRadius: 'var(--radius-sm, 6px)',
+              borderRadius: 'var(--radius-sm)',
               cursor: 'pointer',
               backgroundColor: 'var(--secondary)',
             }}
@@ -198,15 +198,16 @@ export function FilePreviewCard({attachment, onDownload}: Props) {
 
       {isCode ? (
         <div
+          className="rk-scroll"
           style={{
-            margin: '0 12px 12px 12px',
-            padding: '10px 12px',
+            margin: '0 var(--spacing-3) var(--spacing-3) var(--spacing-3)',
+            padding: 'var(--spacing-2-5) var(--spacing-3)',
             fontFamily: 'var(--font-family-code, monospace)',
-            fontSize: '12px',
+            fontSize: 'var(--font-size-xs)',
             backgroundColor: 'var(--secondary)',
-            borderRadius: 'var(--radius-sm, 6px)',
+            borderRadius: 'var(--radius-sm)',
             overflowX: 'auto',
-            maxHeight: isExpanded ? '400px' : '140px',
+            maxHeight: isExpanded ? '25rem' : '8.75rem',
           }}
         >
           <Text type="supporting" size="xsm" color="secondary">

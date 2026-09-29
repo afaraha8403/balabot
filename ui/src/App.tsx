@@ -1091,7 +1091,7 @@ export default function App() {
                     />
                   </HStack>
                 </HStack>
-                <div style={{flex: 1, minHeight: 0, overflowY: 'auto'}}>
+                <div className="rk-scroll" style={{flex: 1, minHeight: 0, overflowY: 'auto'}}>
                   <BotRoster
                     bots={filteredBots}
                     activeBotId={activeGroupId ? null : activeBotId}
@@ -1302,10 +1302,10 @@ export default function App() {
                               paddingInline={2}
                               paddingBlock={1}
                               style={{
-                                backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                                borderLeft: '2px solid var(--accent, #6366f1)',
-                                borderRadius: 'var(--radius-sm, 4px)',
-                                marginBottom: '2px',
+                                backgroundColor: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+                                borderLeft: 'var(--spacing-0-5) solid var(--accent)',
+                                borderRadius: 'var(--radius-sm)',
+                                marginBottom: 'var(--spacing-0-5)',
                               }}
                             >
                               <Text type="supporting" size="xsm" color="secondary">
@@ -1383,7 +1383,7 @@ export default function App() {
                         side={isUser ? 'start' : 'end'}
                         pinned={Object.values(m.reactions || {}).some(c => c > 0)}
                       >
-                        <HStack gap={1} vAlign="center" wrap="wrap" style={{paddingInline: '4px'}}>
+                        <HStack gap={1} vAlign="center" wrap="wrap" style={{paddingInline: 'var(--spacing-1)'}}>
                           {Object.entries(m.reactions || {}).map(([emoji, count]) =>
                             count > 0 ? (
                               <Button
@@ -1615,13 +1615,13 @@ export default function App() {
                     rows={6}
                     style={{
                       width: '100%',
-                      padding: '8px',
+                      padding: 'var(--spacing-2)',
                       fontFamily: 'inherit',
-                      fontSize: '13px',
+                      fontSize: 'var(--font-size-xs)',
                       backgroundColor: 'var(--muted)',
                       color: 'inherit',
                       border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius-md, 6px)',
+                      borderRadius: 'var(--radius-md)',
                       resize: 'vertical',
                     }}
                   />
@@ -1684,7 +1684,7 @@ export default function App() {
                         style={{
                           width: '100%',
                           height: 'auto',
-                          borderRadius: 'var(--radius-sm, 4px)',
+                          borderRadius: 'var(--radius-sm)',
                           cursor: 'pointer',
                         }}
                         onClick={() => setShowComputer(true)}

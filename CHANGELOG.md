@@ -61,3 +61,6 @@
 - Replace five references to undefined CSS custom properties in `ui/src/App.tsx` and `ui/src/Composer.tsx` (`--surface-default`, `--border-default` ×2, `--surface-sunken` ×2). Each silently fell back to a hardcoded dark value, which painted the transcript header bar solid black and washed out the composer and textarea surfaces once light mode could be reached; they now use the real `--card`, `--border`, and `--muted` tokens.
 - Require an explicit chat confirmation before an agent files a bot proposal: `personas/principal/AGENTS.md` and `personas/governor/AGENTS.md` previously instructed agents to file immediately, which is why a request to hire an agent produced a proposal with no name, role or confirmation settled in the conversation.
 
+### Changes
+- Rebase design tokens, CSS base, and typography onto Polaris (Wave 1 of 8): achieve token parity across :root, dark, and light scopes in `ui/src/tokens.css` and `ui/src/theme.ts`; adopt Geist typography; enforce `.rk-scroll` standard across all scroll regions; eliminate raw hex and px values across component styles.
+

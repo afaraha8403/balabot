@@ -159,9 +159,9 @@ export function Composer({
           padding={2}
           style={{
             backgroundColor: 'var(--muted)',
-            borderRadius: 'var(--radius-sm, 4px)',
-            marginBottom: '4px',
-            borderLeft: '3px solid var(--accent, #6366f1)',
+            borderRadius: 'var(--radius-sm)',
+            marginBottom: 'var(--spacing-1)',
+            borderLeft: 'var(--spacing-0-5) solid var(--accent)',
           }}
         >
           <Text type="supporting" size="xsm" color="accent">

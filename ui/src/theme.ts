@@ -1,50 +1,58 @@
-// BalaBot theme — near-black X/Grok palette (see DESIGN-SPEC.md).
-// Build with: npx @astryxdesign/cli theme build src/theme.ts
+// BalaBot theme — mirrored from Polaris design tokens.
+// Build with: .\node_modules\.bin\astryx.cmd theme build src\theme.ts
 import {defineTheme} from '@astryxdesign/core/theme';
 
 export const balabotTheme = defineTheme({
   name: 'balabot',
-  color: {accent: '#1d9bf0', neutralStyle: 'neutral', contrast: 'high'},
+  color: {accent: '#3b82f6', neutralStyle: 'neutral', contrast: 'high'},
   typography: {
     scale: {base: 16, ratio: 1.2},
-    body: {family: 'Inter', fallbacks: '-apple-system, system-ui, sans-serif'},
-    heading: {weight: 'semibold'},
+    body: {
+      family: 'Geist Variable',
+      fallbacks: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
+      weight: 'normal',
+    },
+    heading: {
+      family: 'Geist Variable',
+      fallbacks: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
+      weight: 'semibold',
+    },
+    code: {
+      family: 'Geist Mono',
+      fallbacks: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+      weight: 'normal',
+    },
   },
   radius: {base: 4, multiplier: 1.5},
   tokens: {
-    // Astryx token pairs are [light, dark] and follow data-theme. Both entries
-    // used to be the dark value, so Astryx-styled components stayed near-black in
-    // light mode while our tokens.css layer switched — half-themed UI. The light
-    // entries below mirror the light values in tokens.css so both layers agree.
-    '--color-background-body': ['#fafaf8', '#000000'],
-    '--color-background-surface': ['#ecece9', '#16181c'],
-    '--color-background-card': ['#ffffff', '#202327'],
-    '--color-background-popover': ['#ffffff', '#202327'],
-    '--color-background-muted': ['#f0f0ed', '#20232766'],
-    '--color-text-primary': ['#1a1a1a', '#ffffff'],
-    '--color-text-secondary': ['#6c6c70', '#71767b'],
-    '--color-border': ['#e8e8e4', '#2a2a2a'],
-    '--color-border-emphasized': ['#d8d8d2', '#3e4144'],
-    // Overlays stay dark in both modes: they are scrims over content.
-    '--color-overlay': ['#00000066', '#00000066'],
-    '--color-overlay-hover': ['#0000000c', '#ffffff0c'],
-    '--color-overlay-pressed': ['#00000019', '#ffffff19'],
-    '--color-accent': ['#1d9bf0', '#1d9bf0'],
-    '--color-on-accent': ['#000000', '#000000'],
-    // Primary button inverts against the page: white-on-black in dark mode,
-    // near-black-on-cream in light. Its label reads the body background token.
-    '--color-background-inverted': ['#111111', '#ffffff'],
+    // Astryx token pairs are [light, dark] and follow data-theme.
+    // Explicitly aligned to Polaris design tokens across both themes.
+    '--color-background-body': ['#fafaf8', '#0b0c0e'],
+    '--color-background-surface': ['#ecece9', '#111215'],
+    '--color-background-card': ['#ffffff', '#141518'],
+    '--color-background-popover': ['#ffffff', '#141518'],
+    '--color-background-muted': ['#f0f0ed', '#141518'],
+    '--color-text-primary': ['#1a1a1a', '#ececee'],
+    '--color-text-secondary': ['#6c6c70', '#85858a'],
+    '--color-border': ['#f0f0ed', '#1e2026'],
+    '--color-border-emphasized': ['#e8e8e4', '#1c1d22'],
+    '--color-overlay': ['rgba(20, 20, 22, 0.45)', 'rgba(4, 4, 5, 0.72)'],
+    '--color-overlay-hover': ['rgba(0, 0, 0, 0.05)', 'rgba(255, 255, 255, 0.05)'],
+    '--color-overlay-pressed': ['rgba(0, 0, 0, 0.1)', 'rgba(255, 255, 255, 0.1)'],
+    '--color-accent': ['#eaeae6', '#1a1b20'],
+    '--color-on-accent': ['#1a1a1a', '#ececee'],
+    '--color-background-inverted': ['#1a1a1a', '#f1f1ef'],
   },
   components: {
     'chat-message-bubble': {
       base: {
-        borderRadius: 'var(--radius-chat)',
+        borderRadius: 'var(--radius-xl)',
         paddingBlock: 'var(--spacing-3)',
         paddingInline: 'var(--spacing-4)',
       },
     },
     'side-nav-item': {
-      base: {borderRadius: 'var(--radius-element)'},
+      base: {borderRadius: 'var(--radius-md)'},
     },
   },
 });

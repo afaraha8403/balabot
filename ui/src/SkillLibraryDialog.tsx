@@ -133,7 +133,7 @@ export function SkillLibraryDialog({bots, activeBotId, onClose}: Props) {
         {/* Scroll region: StackItem with size="fill" + isScrollable is a
             complete bounded scroll region (flex min-height reset + overflow:
             auto), so the header/tabs stay usable and the list scrolls. */}
-        <StackItem size="fill" isScrollable>
+        <StackItem size="fill" isScrollable className="rk-scroll">
         {error ? (
           <HStack gap={2} vAlign="center">
             <IconError color="red" />

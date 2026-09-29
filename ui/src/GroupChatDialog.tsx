@@ -252,6 +252,7 @@ export function GroupChatDialog({bots, initialGroupId, onClose, onFleetsChanged}
               </Text>
             </HStack>
             <VStack
+              className="rk-scroll"
               gap={2}
               padding={3}
               height="fill"
