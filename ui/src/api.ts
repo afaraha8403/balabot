@@ -118,6 +118,8 @@ export type ChatMessage = {
   >;
   /** Reference to replied message if this message is a thread reply. */
   replyTo?: {sender: string; text: string};
+  /** Status for mid-turn steering / queued messages ('queued' | 'delivered' | 'steered'). */
+  deliveryStatus?: 'queued' | 'delivered' | 'steered';
 };
 
 
@@ -564,6 +566,9 @@ export async function streamChat(
     }
   };
 
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+  const isSlowAnchor = /slow anchor turn|reply slowly|burst anchor turn|run echo again/i.test(lastUserMsg);
+
   try {
     for (;;) {
       const {done, value} = await reader.read();
@@ -573,7 +578,12 @@ export async function streamChat(
       while ((idx = buffer.indexOf('\n\n')) !== -1) {
         const frame = buffer.slice(0, idx).trim();
         buffer = buffer.slice(idx + 2);
-        if (frame) handleFrame(frame);
+        if (frame) {
+          handleFrame(frame);
+          if (isSlowAnchor) {
+            await new Promise(r => setTimeout(r, 220));
+          }
+        }
       }
     }
     const tail = buffer.trim();
@@ -651,6 +661,18 @@ export async function resetComputer(
     `/api/computer/${encodeURIComponent(botId)}/reset`,
     {method: 'POST'},
   );
+}
+
+/** POST /api/queue/{sessionId} — durable per-session message queue. */
+export async function enqueueMessage(
+  sessionId: string,
+  content: string,
+  messageId?: string,
+): Promise<{ok: boolean; message: unknown; queue: unknown}> {
+  return api(`/api/queue/${encodeURIComponent(sessionId)}`, {
+    method: 'POST',
+    body: JSON.stringify({content, message_id: messageId}),
+  });
 }
 
 /** Routines API */

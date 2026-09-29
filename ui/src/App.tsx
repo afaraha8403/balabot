@@ -86,6 +86,7 @@ import {useRoute, navigateTo, parseRoute} from './router';
 import {
   api,
   streamChat,
+  enqueueMessage,
   checkHealth,
   getFleet,
   getSubAgents,
@@ -824,6 +825,24 @@ export default function App() {
   ) => {
     if (!activeBot) return;
     const session = ensureSession(activeBot);
+
+    if (isStreaming) {
+      const userMsg: ChatMessage = {
+        role: 'user',
+        content: text,
+        at: Date.now(),
+        attachments: attachments?.length ? attachments : undefined,
+        replyTo: replyTo,
+        deliveryStatus: 'queued',
+      };
+      patchSession(session.id, s => ({
+        ...s,
+        messages: [...s.messages, userMsg],
+      }));
+      void enqueueMessage(session.id, text).catch(() => {});
+      return;
+    }
+
     const userMsg: ChatMessage = {
       role: 'user',
       content: text,
@@ -1631,6 +1650,16 @@ export default function App() {
                                         ))}
                                       </VStack>
                                     ) : null}
+                                    {m.deliveryStatus === 'queued' ? (
+                                      <div
+                                        data-testid="message-delivery-status"
+                                        className="mt-1 text-[11.5px] font-medium text-chat-user-foreground/75"
+                                        style={{ marginTop: '4px', fontSize: '11.5px', fontWeight: 500, opacity: 0.85 }}
+                                      >
+                                        queued for the next step
+                                      </div>
+                                    ) : null}
+
                                   </div>
                                 ) : (
                                   <div
