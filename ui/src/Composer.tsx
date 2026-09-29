@@ -45,6 +45,62 @@ function MentionChipIcon({ mention }: { mention: ComposerMention }) {
   return <Radio size={13} strokeWidth={1.7} className="shrink-0 text-muted-foreground/70" />;
 }
 
+export type MentionPickerKeyAction =
+  | { type: 'complete'; index: number }
+  | { type: 'move'; index: number }
+  | { type: 'dismiss' }
+  | { type: 'send' }
+  | { type: 'none' };
+
+export function wrapMentionHighlightIndex(index: number, count: number): number {
+  if (count <= 0) return 0;
+  return ((index % count) + count) % count;
+}
+
+export function clampMentionHighlightIndex(index: number, count: number): number {
+  if (count <= 0) return 0;
+  if (index < 0) return 0;
+  if (index >= count) return count - 1;
+  return index;
+}
+
+export function resolveMentionPickerKey(input: {
+  key: string;
+  shiftKey?: boolean;
+  isComposing?: boolean;
+  optionCount: number;
+  highlightedIndex: number;
+}): MentionPickerKeyAction {
+  if (input.isComposing) return { type: 'none' };
+
+  const { key, shiftKey = false, optionCount } = input;
+  const highlightedIndex = clampMentionHighlightIndex(input.highlightedIndex, optionCount);
+
+  if (optionCount > 0) {
+    if (key === 'ArrowDown') {
+      return { type: 'move', index: wrapMentionHighlightIndex(highlightedIndex + 1, optionCount) };
+    }
+    if (key === 'ArrowUp') {
+      return { type: 'move', index: wrapMentionHighlightIndex(highlightedIndex - 1, optionCount) };
+    }
+    if (key === 'Enter' && !shiftKey) {
+      return { type: 'complete', index: highlightedIndex };
+    }
+    if (key === 'Tab') {
+      return { type: 'complete', index: highlightedIndex };
+    }
+    if (key === 'Escape') {
+      return { type: 'dismiss' };
+    }
+    return { type: 'none' };
+  }
+
+  if (key === 'Enter' && !shiftKey) {
+    return { type: 'send' };
+  }
+  return { type: 'none' };
+}
+
 export type ComposerAttachment = Attachment & {
   previewUrl?: string;
 };
@@ -93,6 +149,75 @@ export function Composer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<SkillEntry | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<ComposerMention[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionHighlightIndex, setMentionHighlightIndex] = useState(0);
+
+  const mentionOptions = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const query = mentionQuery.trim().toLowerCase();
+    const all: ComposerMention[] = [];
+    if ('everyone'.startsWith(query)) {
+      all.push({
+        kind: 'everyone',
+        id: 'everyone',
+        name: 'everyone',
+        subtitle: 'Everyone in this group',
+      });
+    }
+    for (const b of bots) {
+      if (!query || b.name.toLowerCase().startsWith(query)) {
+        all.push({
+          kind: 'bot',
+          id: b.id,
+          name: b.name,
+          subtitle: 'Bot',
+        });
+      }
+    }
+    for (const g of groups) {
+      if (!query || g.name.toLowerCase().startsWith(query)) {
+        all.push({
+          kind: 'group',
+          id: g.id,
+          name: g.name,
+          subtitle: 'Group',
+        });
+      }
+    }
+    return all.slice(0, 10);
+  }, [mentionQuery, bots, groups]);
+
+  useEffect(() => {
+    setMentionHighlightIndex(0);
+  }, [mentionQuery, mentionOptions]);
+
+  const activeMentionIndex = clampMentionHighlightIndex(
+    mentionHighlightIndex,
+    mentionOptions.length,
+  );
+  const mentionPickerOpen = mentionOptions.length > 0;
+  const mentionListboxId = 'composer-mentions-listbox';
+  const activeMentionOptionId = mentionPickerOpen
+    ? `${mentionListboxId}-option-${activeMentionIndex}`
+    : undefined;
+
+  function updateDraft(text: string) {
+    setValue(text);
+    const mentionMatch = /(?:^|\s)@([\w-]*)$/.exec(text);
+    setMentionQuery(mentionMatch ? (mentionMatch[1] ?? '') : null);
+  }
+
+  function insertMention(mention: ComposerMention) {
+    setValue(current => current.replace(/@([\w-]*)$/, ''));
+    setMentionQuery(null);
+    setMentionHighlightIndex(0);
+    setSelectedMentions(current =>
+      current.some(selected => `${selected.kind}:${selected.id}` === `${mention.kind}:${mention.id}`)
+        ? current
+        : [...current, mention],
+    );
+    textareaRef.current?.focus();
+  }
   const [replyAnnouncement, setReplyAnnouncement] = useState('');
   const replyAnnouncementKind = useRef<'reply' | 'cancelled' | null>(null);
   const prevReplyTarget = useRef<{sender: string; text: string} | null>(null);
@@ -424,6 +549,62 @@ export function Composer({
         </div>
       ) : null}
 
+      {mentionPickerOpen ? (
+        <div
+          id={mentionListboxId}
+          role="listbox"
+          aria-label="Mentions"
+          data-testid="mention-picker"
+          className="polaris-mention-picker mb-2 overflow-hidden rounded-[14px] border border-border bg-muted"
+        >
+          {mentionOptions.map((mention, index) => {
+            const optionId = `${mentionListboxId}-option-${index}`;
+            const highlighted = index === activeMentionIndex;
+            return (
+              <button
+                id={optionId}
+                key={`${mention.kind}:${mention.id}`}
+                type="button"
+                role="option"
+                aria-selected={highlighted}
+                aria-label={`@${mention.name}`}
+                data-highlighted={highlighted ? "true" : undefined}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => insertMention(mention)}
+                onMouseEnter={() => setMentionHighlightIndex(index)}
+                className={`polaris-picker-option flex w-full items-start gap-3 px-4 py-2.5 text-start hover:bg-accent ${
+                  highlighted ? "bg-accent" : ""
+                }`}
+                style={{
+                  display: 'flex',
+                  width: '100%',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 16px',
+                  border: 'none',
+                  background: highlighted ? 'var(--accent)' : 'transparent',
+                  color: 'var(--foreground)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                <MentionChipIcon mention={mention} />
+                <span className="min-w-0" style={{ flex: 1 }}>
+                  <span dir="auto" className="block text-[14px] text-foreground" style={{ display: 'block', fontWeight: 500 }}>
+                    @{mention.name}
+                  </span>
+                  {mention.subtitle ? (
+                    <span dir="auto" className="block truncate text-[12.5px] text-muted-foreground" style={{ display: 'block', fontSize: '12px', color: 'var(--muted-foreground)' }}>
+                      {mention.subtitle}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
       <div
         data-testid="composer-bar"
         className="polaris-composer-bar flex items-center gap-3.5 rounded-full border border-border bg-background py-[9px] pe-2.5 ps-3 transition-colors focus-within:border-ring"
@@ -507,7 +688,7 @@ export function Composer({
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => updateDraft(e.target.value)}
             onPaste={handlePaste}
             onKeyDown={(e) => {
               if (
@@ -519,7 +700,32 @@ export function Composer({
                 removeLastChip();
                 return;
               }
-              if (e.key === 'Enter' && !e.shiftKey && !(e.nativeEvent.isComposing || e.keyCode === 229)) {
+              const action = resolveMentionPickerKey({
+                key: e.key,
+                shiftKey: e.shiftKey,
+                isComposing: e.nativeEvent.isComposing || e.keyCode === 229,
+                optionCount: mentionOptions.length,
+                highlightedIndex: activeMentionIndex,
+              });
+              if (action.type === 'complete') {
+                const mention = mentionOptions[action.index];
+                if (!mention) return;
+                e.preventDefault();
+                insertMention(mention);
+                return;
+              }
+              if (action.type === 'move') {
+                e.preventDefault();
+                setMentionHighlightIndex(action.index);
+                return;
+              }
+              if (action.type === 'dismiss') {
+                e.preventDefault();
+                setMentionQuery(null);
+                setMentionHighlightIndex(0);
+                return;
+              }
+              if (action.type === 'send') {
                 e.preventDefault();
                 submit();
               }
@@ -530,6 +736,9 @@ export function Composer({
             role="combobox"
             aria-autocomplete="list"
             aria-haspopup="listbox"
+            aria-expanded={mentionPickerOpen}
+            aria-controls={mentionPickerOpen ? mentionListboxId : undefined}
+            aria-activedescendant={activeMentionOptionId}
             name="chat-message"
             autoComplete="off"
             dir="auto"
