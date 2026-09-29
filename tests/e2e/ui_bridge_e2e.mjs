@@ -927,17 +927,24 @@ async function w7s01(browser) {
 /** W7-5: honest "driver unavailable" state. */
 async function w7s05(browser) {
   const { ctx, page } = await openPage(browser);
+  // Intercept frame API to simulate cua-driver down
+  await page.route('**/api/computer/*/frame', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ available: false, error: 'driver_unavailable', note: 'Agent computer driver is not installed' }),
+    });
+  });
   await bootApp(page);
   const opened = await openAgentComputerOverlay(page);
   await sleep(2000);
   const t = await bodyText(page);
   await ctx.close();
   if (!opened || !/computer|screen/i.test(t)) return null; // pane not built
-  // Fails if: the UI shows an empty frame or an infinite spinner when the
-  // driver is down — "driver unavailable" with a reason must render.
+  const honest = /driver is not installed|driver unavailable|unavailable/i.test(t);
   record('W7-5 driver-unavailable state is explicit, never an empty pane',
-    /driver unavailable|unavailable|retry/i.test(t),
-    `honestState=${/driver unavailable|unavailable|retry/i.test(t)} (full leg needs the cua-driver socket broken)`);
+    honest,
+    `honestState=${honest} (cua-driver failure injected via route interception)`);
   return true;
 }
 
@@ -1192,18 +1199,17 @@ async function w9s13(browser) {
   return true;
 }
 
-/** W9-1: generative approval cards (promoted from PENDING via Wave 8 OpenUIRenderer). */
+/** W9-1: generative approval cards (requires W5 / OpenUI card stream). */
 async function w9s01(browser) {
   const { ctx, page } = await openPage(browser);
   await bootApp(page);
-  const hasOpenUi = await page.evaluate(() => {
-    const t = document.body.innerText || '';
-    const hasCards = document.querySelectorAll('[data-testid="hire-agent-card"], [data-testid="openui-card"]').length > 0;
-    return hasCards || /hire|proposal|agent/i.test(t);
+  const hasCards = await page.evaluate(() => {
+    return document.querySelectorAll('[data-testid="openui-hire-agent-card"], [data-testid="openui-card"], [data-testid="hire-agent-card"]').length > 0;
   });
   await ctx.close();
-  record('W9-1 generative approval cards available in message stream', Boolean(hasOpenUi),
-    `hasOpenUi=${hasOpenUi}`);
+  if (!hasCards) return null; // generative card surface not present in session -> pending
+  record('W9-1 generative approval cards available in message stream', hasCards,
+    `hasCards=${hasCards}`);
   return true;
 }
 
@@ -1289,18 +1295,27 @@ async function polarisMessageCards(browser) {
 /** polaris-s04: artifact modal with sandboxed HTML and PDF viewer */
 async function polarisArtifactSandbox(browser) {
   const { ctx, page } = await openPage(browser);
-  await page.goto(`${BASE}/app/artifacts`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await sleep(2000);
+  // Navigate directly to seed HTML artifact to mount SandboxedHtmlViewer
+  await page.goto(`${BASE}/app/artifacts/art-sys-arch-01`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await sleep(2500);
   const sandboxChecked = await page.evaluate(() => {
     // Assert SandboxedHtmlViewer iframe has strict sandbox="allow-scripts" attribute
-    const iframes = Array.from(document.querySelectorAll('iframe'));
-    const hasSandboxed = iframes.some((f) => f.getAttribute('sandbox') === 'allow-scripts');
-    return { count: iframes.length, sandboxed: hasSandboxed || true };
+    const iframe = document.querySelector('iframe');
+    const sandbox = iframe?.getAttribute('sandbox');
+    const referrer = iframe?.getAttribute('referrerpolicy');
+    return {
+      hasIframe: Boolean(iframe),
+      sandbox,
+      referrer,
+      isSandboxed: sandbox === 'allow-scripts',
+      noReferrer: referrer === 'no-referrer',
+    };
   });
   await ctx.close();
+  const ok = sandboxChecked.hasIframe && sandboxChecked.isSandboxed && sandboxChecked.noReferrer;
   record('polaris-artifact-sandbox SandboxedHtmlViewer strictly enforces sandbox="allow-scripts"',
-    sandboxChecked.sandboxed,
-    'sandbox="allow-scripts" verified on preview frames with no-referrer policy');
+    ok,
+    `hasIframe=${sandboxChecked.hasIframe} sandbox="${sandboxChecked.sandbox}" referrer="${sandboxChecked.referrer}"`);
   return true;
 }
 
@@ -1320,16 +1335,15 @@ async function polarisComposerPickersIme(browser) {
   const mentionEl = await page.$('[data-testid="mention-picker"]');
   const mentionOk = Boolean(mentionEl);
 
-  // Clear
+  // Clear textarea via keyboard select all + backspace
   await page.keyboard.press('Escape');
   await sleep(150);
-  await page.evaluate(() => {
-    const el = document.querySelector('.polaris-composer-textarea');
-    if (el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); }
-  });
+  await textarea.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.press('Backspace');
+  await sleep(200);
 
   // 2. / slash picker
-  await textarea.click();
   await page.keyboard.type('/');
   await sleep(600);
   const slashEl = await page.$('[data-testid="slash-picker"]');
@@ -1348,7 +1362,7 @@ async function polarisComposerPickersIme(browser) {
 
   await ctx.close();
   record('polaris-composer-pickers-ime autocomplete pickers (@, /) and IME Enter guard',
-    mentionOk && imeGuarded,
+    mentionOk && slashOk && imeGuarded,
     `mentionPicker=${mentionOk} slashPicker=${slashOk} imeGuard=${imeGuarded}`);
   return true;
 }
@@ -1358,14 +1372,26 @@ async function polarisSettingsOverlays(browser) {
   const { ctx, page } = await openPage(browser, { viewport: { width: 1440, height: 900 } });
   await bootApp(page);
   await sleep(1000);
-  const trigger = await page.$('[data-testid="user-menu-trigger"]');
-  if (!trigger) { await ctx.close(); return record('polaris-settings-overlays', false, 'no user menu trigger'); }
-  await trigger.click();
-  await sleep(600);
-  const settingsBtn = await page.$('[data-testid="user-menu-settings"]');
-  if (!settingsBtn) { await ctx.close(); return record('polaris-settings-overlays', false, 'no settings button'); }
-  await settingsBtn.click();
-  await sleep(1000);
+
+  let opened = false;
+  for (let attempt = 0; attempt < 4 && !opened; attempt++) {
+    const trigger = await page.$('[data-testid="user-menu-trigger"]');
+    if (trigger) {
+      await trigger.click();
+      await sleep(600);
+      const settingsBtn = await page.$('[data-testid="user-menu-settings"]');
+      if (settingsBtn) {
+        await settingsBtn.click();
+        await sleep(1200);
+        opened = await page.evaluate(() => Boolean(document.querySelector('[data-testid="user-settings"]')));
+      }
+    }
+  }
+
+  if (!opened) {
+    await ctx.close();
+    return record('polaris-settings-overlays', false, 'settings overlay did not open');
+  }
 
   const tabs = ['general', 'models', 'memory', 'voice', 'usage', 'computer', 'updates'];
   const tabsFound = await page.evaluate((tabList) => {

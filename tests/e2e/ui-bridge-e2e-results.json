@@ -1,0 +1,268 @@
+{
+  "base": "http://127.0.0.1:9119",
+  "when": "2026-09-29T20:11:42.801Z",
+  "passed": 25,
+  "ran": 39,
+  "pending": 9,
+  "registered": 58,
+  "results": [
+    {
+      "name": "W1-1 mid-turn steers reach the model and mark delivered",
+      "ok": false,
+      "detail": "delivered=false stillQueued=false (requires upstream payload stub for full proof)"
+    },
+    {
+      "name": "W1-4 mid-turn burst queues five messages in FIFO order",
+      "ok": true,
+      "detail": "positions=542,559,818,835,1111 (payload order additionally needs the upstream stub)"
+    },
+    {
+      "name": "W1-5 idle message goes straight to the turn, never queued",
+      "ok": true,
+      "detail": "landed=true wronglyQueued=false"
+    },
+    {
+      "name": "W1-7 duplicate send is refused, transcript shows the message once",
+      "ok": true,
+      "detail": "before=1 after=1 replayStatus=405"
+    },
+    {
+      "name": "W1-8 whitespace-only message refused with inline validation",
+      "ok": true,
+      "detail": "bodyGrew=false"
+    },
+    {
+      "name": "W1-10 mid-turn steer renders the honest \"steered\" state",
+      "ok": false,
+      "detail": "steered=false (needs the two-tool-call stub turn for full proof)"
+    },
+    {
+      "name": "W1-13 no stale busy-flag affordance while idle",
+      "ok": true,
+      "detail": "bypassAffordanceIdle=false (full restart leg needs the restart hook)"
+    },
+    {
+      "name": "W1-15 queued chip appears within one SSE tick mid-turn",
+      "ok": false,
+      "detail": "appearedIn=16824ms"
+    },
+    {
+      "name": "W2-1 clearing site data + reload re-renders the full transcript",
+      "ok": false,
+      "detail": "m1=false m2=false"
+    },
+    {
+      "name": "W2-3 message from client A appears live in client B",
+      "ok": false,
+      "detail": "seenInB=false"
+    },
+    {
+      "name": "W2-8 sending works with no 4xx/5xx on the API surface",
+      "ok": true,
+      "detail": "clean"
+    },
+    {
+      "name": "W2-10 same session id across profiles shows the same transcript",
+      "ok": false,
+      "detail": "sessionId=s_1790633764736_2808ke seen=false"
+    },
+    {
+      "name": "W2-13 two clients converge to the same order under interleave",
+      "ok": false,
+      "detail": "a=[398,-1] b=[-1,315]"
+    },
+    {
+      "name": "W2-15 reconnecting client receives the burst in order",
+      "ok": false,
+      "detail": "count=0/5"
+    },
+    {
+      "id": "w3-2",
+      "name": "W3 approval resolves the takeover card",
+      "pending": true,
+      "workstream": "W3",
+      "reason": "feature surface not detected in the running app"
+    },
+    {
+      "id": "w3-3",
+      "name": "W3 deny renders \"rejected\"",
+      "pending": true,
+      "workstream": "W3",
+      "reason": "feature surface not detected in the running app"
+    },
+    {
+      "id": "w3-12",
+      "name": "W3 first resolution wins the race",
+      "pending": true,
+      "workstream": "W3",
+      "reason": "feature surface not detected in the running app"
+    },
+    {
+      "name": "W3-14 transcript never renders a spinner-only takeover episode",
+      "ok": true,
+      "detail": "episodeVisible=false"
+    },
+    {
+      "id": "w4-12",
+      "name": "W4 secret-form path leaks nothing, shows fingerprint",
+      "pending": true,
+      "workstream": "W4",
+      "reason": "feature surface not detected in the running app"
+    },
+    {
+      "id": "w5-2",
+      "name": "W5 approval card click executes exactly once",
+      "pending": true,
+      "workstream": "W5",
+      "reason": "feature surface not detected in the running app"
+    },
+    {
+      "id": "w5-6",
+      "name": "W5 deny path — mutation never fires",
+      "pending": true,
+      "workstream": "W5",
+      "reason": "feature surface not detected in the running app"
+    },
+    {
+      "id": "w5-12",
+      "name": "W5 card attributable and tamper-evident",
+      "pending": true,
+      "workstream": "W5",
+      "reason": "feature surface not detected in the running app"
+    },
+    {
+      "name": "W6-1 oversized upload rejected naming the limit",
+      "ok": false,
+      "detail": "errorShown=false"
+    },
+    {
+      "name": "W6-5 non-vision model honestly says it cannot see",
+      "ok": false,
+      "detail": "attachNotice=false honestReply=false"
+    },
+    {
+      "name": "W6-10 unsupported file type refused naming accepted types",
+      "ok": false,
+      "detail": "refusalShown=false"
+    },
+    {
+      "name": "W6-13 attachment mid-turn is labelled \"queued for the next step\"",
+      "ok": false,
+      "detail": "queued=false"
+    },
+    {
+      "name": "W6-15 attach UI surfaces the no-vision state up front",
+      "ok": false,
+      "detail": "guard=false"
+    },
+    {
+      "name": "W7-1 cold start: fresh bot gets a usable screen",
+      "ok": true,
+      "detail": "opened=true viewport=true chrome=true dock=true"
+    },
+    {
+      "name": "W7-5 driver-unavailable state is explicit, never an empty pane",
+      "ok": true,
+      "detail": "honestState=true (cua-driver failure injected via route interception)"
+    },
+    {
+      "name": "W7-10 computer pane header names the bot",
+      "ok": true,
+      "detail": "namesBot=true"
+    },
+    {
+      "name": "W7-13 pane recovers displays on a fresh boot (no stuck error)",
+      "ok": true,
+      "detail": "stuckError=false (hard-kill leg needs the docker hook)"
+    },
+    {
+      "name": "W7-15 blank screen carries a \"screen idle\" indicator, never a cached frame",
+      "ok": true,
+      "detail": "{\"hasLiveScreen\":true,\"idleIndicator\":false,\"fabricated\":false,\"hasCanvas\":0}"
+    },
+    {
+      "name": "W8-2 SSE stream delivers events while the app is open",
+      "ok": true,
+      "detail": "chunksReceived=101 (slow-call injection leg needs the test hook)"
+    },
+    {
+      "name": "W8-8 composer stays interactive under server load",
+      "ok": true,
+      "detail": "interactive=true sendTookMs=11220"
+    },
+    {
+      "name": "W8-14 reload reconnects and catches up without losing the gap",
+      "ok": true,
+      "detail": "sentinelPresent=true"
+    },
+    {
+      "id": "w9-1",
+      "name": "W9 generative approval cards in message stream",
+      "pending": true,
+      "workstream": "W9",
+      "reason": "feature surface not detected in the running app"
+    },
+    {
+      "name": "W9-5 no honest state renders spuriously on a clean idle session",
+      "ok": true,
+      "detail": "statesRenderedWithoutCondition=[]"
+    },
+    {
+      "name": "W9-7 PWA operable at mobile width (no horizontal overflow)",
+      "ok": true,
+      "detail": "overflow=false"
+    },
+    {
+      "name": "W9-9 W2 headline still holds after all waves (history survives)",
+      "ok": false,
+      "detail": "survived=false"
+    },
+    {
+      "id": "w9-11",
+      "name": "W9 steering + approvals compose (queue leg)",
+      "pending": true,
+      "workstream": "W9",
+      "reason": "feature surface not detected in the running app"
+    },
+    {
+      "name": "W9-13 frustration signal accepted from the UI (server-side sensor leg)",
+      "ok": true,
+      "detail": "ledgerStatus=200 bodyLen=ok"
+    },
+    {
+      "name": "polaris-shell-geometry 316px desktop sidebar & off-canvas drawer <1024px",
+      "ok": true,
+      "detail": "desktopW=316px (target 316px +/-2) mobileOffCanvas=true"
+    },
+    {
+      "name": "polaris-hard-load-routes deep links resolve on hard page load with .rk-scroll",
+      "ok": true,
+      "detail": "/app/artifacts:200 /app/fleet:200 /app/cost:200 /app/decisions:200 /app/governance:200"
+    },
+    {
+      "name": "polaris-message-cards six standard message cards geometry and tokens",
+      "ok": true,
+      "detail": "AskCard ChoiceCard AppConnectCard McpApprovalCard ChartBlockView ArtifactFileCard verified"
+    },
+    {
+      "name": "polaris-artifact-sandbox SandboxedHtmlViewer strictly enforces sandbox=\"allow-scripts\"",
+      "ok": true,
+      "detail": "hasIframe=true sandbox=\"allow-scripts\" referrer=\"no-referrer\""
+    },
+    {
+      "name": "polaris-composer-pickers-ime autocomplete pickers (@, /) and IME Enter guard",
+      "ok": true,
+      "detail": "mentionPicker=true slashPicker=true imeGuard=true"
+    },
+    {
+      "name": "polaris-settings-overlays unified SettingsOverlay renders 7 tabs and handles Escape",
+      "ok": true,
+      "detail": "tabs=7/7 closedOnEscape=true"
+    },
+    {
+      "name": "polaris-computer-coordinate-mapping mapTeachPointer scales across aspect ratios",
+      "ok": true,
+      "detail": "exact 16:9 center, letterbox top-left, and margin clamp proven"
+    }
+  ]
+}
