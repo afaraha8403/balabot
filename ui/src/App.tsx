@@ -71,7 +71,7 @@ import {InterventionCard} from './InterventionCard';
 import {DraftCard, parseDraftsFromContent} from './DraftCard';
 import {VoiceMemoCard} from './VoiceMemoCard';
 import {HoldEverythingControl} from './HoldEverythingControl';
-import {RoutinesList} from './RoutinesList';
+import {RoutinesList, RoutineEditor} from './RoutinesList';
 import {FilePreviewCard} from './FilePreviewCard';
 import {AskCard, ChoiceCard, AppConnectCard, McpApprovalCard, ChartBlockView} from './cards';
 import {MessageHoverMetadata, MessageHoverActions} from './MessageHoverMetadata';
@@ -107,6 +107,7 @@ import {
   type InterventionPayload,
   type DraftCardData,
   type VoiceMemoData,
+  type Routine,
 } from './api';
 import {Theme} from '@astryxdesign/core/theme';
 import {balabotTheme} from './balabot';
@@ -329,8 +330,9 @@ export default function App() {
   // Responsive breakpoint under 1024px
   const isNarrow = useMediaQuery('(max-width: 1023px)');
 
-  // Right Context Panel mode ('screen' | 'settings' | 'create') and collapsed state
-  const [rightPanelMode, setRightPanelMode] = useState<'screen' | 'settings' | 'create'>('screen');
+  // Right Context Panel mode ('screen' | 'settings' | 'create' | 'routine') and collapsed state
+  const [rightPanelMode, setRightPanelMode] = useState<'screen' | 'settings' | 'create' | 'routine'>('screen');
+  const [editingRoutine, setEditingRoutine] = useState<Routine | null>(null);
   const [hideRightPanel, setHideRightPanel] = useState(false);
   const [miniFrame, setMiniFrame] = useState<ComputerFrame | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -1860,6 +1862,16 @@ export default function App() {
                   onUpdated={() => void reloadBots()}
                   onOpenKnowledge={() => setShowPanel(true)}
                 />
+              ) : rightPanelMode === 'routine' && activeBot ? (
+                <RoutineEditor
+                  botId={activeBot.id}
+                  botName={activeBot.name}
+                  routine={editingRoutine}
+                  onBack={() => setRightPanelMode('screen')}
+                  onSaved={() => {}}
+                  onDeleted={() => {}}
+                  onNotify={setBanner}
+                />
               ) : activeBot ? (
                 <VStack gap={3}>
                   {/* Header */}
@@ -1964,12 +1976,20 @@ export default function App() {
                     />
                   </div>
 
-                  {/* GrokBot Routines Section */}
+                  {/* Polaris Routines Section */}
                   <Divider />
                   <RoutinesList
                     botId={activeBot.id}
                     botName={activeBot.name}
                     onNotify={setBanner}
+                    onCreateRoutine={() => {
+                      setEditingRoutine(null);
+                      setRightPanelMode('routine');
+                    }}
+                    onOpenRoutine={routine => {
+                      setEditingRoutine(routine);
+                      setRightPanelMode('routine');
+                    }}
                   />
 
                   <Divider />
