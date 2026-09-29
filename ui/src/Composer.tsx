@@ -12,7 +12,7 @@ import {Button} from '@astryxdesign/core/Button';
 import {HStack} from '@astryxdesign/core/Stack';
 import {Text} from '@astryxdesign/core/Text';
 import {IconAttach, IconClose, IconFile, IconMicrophone} from './icons';
-import {Plus, Box, Paperclip, X, Bot as BotIcon, Users, Radio} from 'lucide-react';
+import {Plus, Box, Paperclip, X, Bot as BotIcon, Users, Radio, Settings} from 'lucide-react';
 import {HoldEverythingControl} from './HoldEverythingControl';
 import {
   uploadAttachment,
@@ -99,6 +99,25 @@ export function resolveMentionPickerKey(input: {
     return { type: 'send' };
   }
   return { type: 'none' };
+}
+
+export function truncateSlashDescription(value?: string, max = 72): string {
+  if (!value) return '';
+  const text = value.replace(/\s+/g, ' ').trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+export function serializeComposerPrompt(
+  draft: string,
+  skill: { name: string } | null,
+  mentions: Array<{ name: string }>,
+): string {
+  const body = draft.replace(/^\s+/, '');
+  const mentionPrefix = mentions.map(member => `@${member.name}`).join(' ');
+  const afterSkill = [mentionPrefix, body].filter(part => part.trim().length > 0).join(' ');
+  if (!skill) return afterSkill.trimEnd();
+  return afterSkill.trim().length > 0 ? `/${skill.name}\n${afterSkill}` : `/${skill.name}`;
 }
 
 export type ComposerAttachment = Attachment & {
@@ -201,10 +220,66 @@ export function Composer({
     ? `${mentionListboxId}-option-${activeMentionIndex}`
     : undefined;
 
+  const [slashQuery, setSlashQuery] = useState<string | null>(null);
+
+  const slashSkillOptions = useMemo(() => {
+    if (slashQuery === null) return [];
+    const query = slashQuery.trim().toLowerCase();
+    const list = skills ?? [];
+    return list
+      .filter(s => {
+        if (!query) return true;
+        return s.name.toLowerCase().includes(query) || (s.description && s.description.toLowerCase().includes(query));
+      })
+      .slice(0, 8);
+  }, [skills, slashQuery]);
+
+  const slashActionOptions = useMemo(() => {
+    if (slashQuery === null) return [];
+    const query = slashQuery.trim().toLowerCase();
+    const baseActions = [
+      { id: 'chat-settings', label: 'Chat Settings' },
+      { id: 'settings-general', label: 'Settings: General' },
+      { id: 'settings-usage', label: 'Settings: Usage' },
+      ...(skills.length === 0
+        ? [
+            { id: 'no-skills', label: 'No skills installed' },
+            { id: 'skill-library', label: 'Open Skill Library' },
+          ]
+        : [{ id: 'skill-library', label: 'Open Skill Library' }]),
+    ];
+    return baseActions.filter(a => !query || a.label.toLowerCase().includes(query));
+  }, [skills, slashQuery]);
+
+  const showSlashPicker =
+    slashQuery !== null &&
+    mentionQuery === null &&
+    (slashSkillOptions.length > 0 || slashActionOptions.length > 0);
+
   function updateDraft(text: string) {
     setValue(text);
     const mentionMatch = /(?:^|\s)@([\w-]*)$/.exec(text);
     setMentionQuery(mentionMatch ? (mentionMatch[1] ?? '') : null);
+    const slashMatch = selectedSkill === null ? /^\/([^\n]*)$/.exec(text) : null;
+    setSlashQuery(slashMatch ? (slashMatch[1] ?? '') : null);
+  }
+
+  function insertSkill(skill: SkillEntry) {
+    setSelectedSkill(skill);
+    setValue('');
+    setSlashQuery(null);
+    textareaRef.current?.focus();
+  }
+
+  function runSlashAction(actionId: string) {
+    setValue('');
+    setSlashQuery(null);
+    if (actionId === 'skill-library') {
+      onNotify?.('Opening Skill Library');
+    } else {
+      onNotify?.(`Action: ${actionId}`);
+    }
+    textareaRef.current?.focus();
   }
 
   function insertMention(mention: ComposerMention) {
@@ -369,11 +444,16 @@ export function Composer({
   });
 
   const submit = () => {
-    const text = value.trim();
-    if (!text || isDisabled) return;
+    const text = serializeComposerPrompt(value, selectedSkill, selectedMentions);
+    if (!text && attachments.length === 0) return;
+    if (isDisabled) return;
     onSubmit(text, attachments, replyingTo ?? undefined);
     setValue('');
     setAttachments([]);
+    setSelectedSkill(null);
+    setSelectedMentions([]);
+    setMentionQuery(null);
+    setSlashQuery(null);
     onCancelReply?.();
   };
 
@@ -605,6 +685,80 @@ export function Composer({
         </div>
       ) : null}
 
+      {showSlashPicker ? (
+        <div
+          data-testid="slash-picker"
+          className="polaris-slash-picker mb-2 overflow-hidden rounded-[14px] border border-border bg-muted"
+          style={{
+            marginBottom: '8px',
+            overflow: 'hidden',
+            borderRadius: '14px',
+            border: '1px solid var(--border)',
+            backgroundColor: 'var(--popover, var(--muted))',
+          }}
+        >
+          {slashSkillOptions.map((skill) => (
+            <button
+              key={skill.name}
+              type="button"
+              aria-label={`Skill ${skill.name}`}
+              onClick={() => insertSkill(skill)}
+              className="polaris-picker-option flex w-full items-start gap-3 px-4 py-2.5 text-start hover:bg-accent"
+              style={{
+                display: 'flex',
+                width: '100%',
+                alignItems: 'flex-start',
+                gap: '12px',
+                padding: '10px 16px',
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--foreground)',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <Box size={16} strokeWidth={1.7} className="mt-0.5 shrink-0 text-muted-foreground" style={{ marginTop: '2px', flexShrink: 0, color: 'var(--muted-foreground)' }} />
+              <span className="min-w-0" style={{ flex: 1 }}>
+                <span dir="auto" className="block text-[14px] text-foreground" style={{ display: 'block', fontWeight: 500 }}>
+                  {skill.name}
+                </span>
+                {skill.description ? (
+                  <span dir="auto" className="block truncate text-[12.5px] text-muted-foreground" style={{ display: 'block', fontSize: '12px', color: 'var(--muted-foreground)' }}>
+                    {truncateSlashDescription(skill.description)}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          ))}
+          {slashActionOptions.map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              aria-label={action.label}
+              onClick={() => runSlashAction(action.id)}
+              className="polaris-picker-option flex w-full items-center gap-3 px-4 py-2.5 text-start hover:bg-accent"
+              style={{
+                display: 'flex',
+                width: '100%',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '10px 16px',
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--foreground)',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <Settings size={16} strokeWidth={1.7} className="shrink-0 text-muted-foreground" style={{ flexShrink: 0, color: 'var(--muted-foreground)' }} />
+              <span className="text-[14px] text-foreground" style={{ fontWeight: 500 }}>
+                {action.label}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div
         data-testid="composer-bar"
         className="polaris-composer-bar flex items-center gap-3.5 rounded-full border border-border bg-background py-[9px] pe-2.5 ps-3 transition-colors focus-within:border-ring"
@@ -698,6 +852,11 @@ export function Composer({
               ) {
                 e.preventDefault();
                 removeLastChip();
+                return;
+              }
+              if (e.key === 'Escape' && slashQuery !== null) {
+                e.preventDefault();
+                setSlashQuery(null);
                 return;
               }
               const action = resolveMentionPickerKey({
