@@ -11,7 +11,7 @@ import {Button} from '@astryxdesign/core/Button';
 import {HStack} from '@astryxdesign/core/Stack';
 import {Text} from '@astryxdesign/core/Text';
 import {IconAttach, IconClose, IconFile} from './icons';
-import {Plus, Box, Paperclip, X, Bot as BotIcon, Users, Radio, Settings, Mic} from 'lucide-react';
+import {Plus, Box, Paperclip, X, Bot as BotIcon, Users, Radio, Settings, Mic, ArrowUp, Square} from 'lucide-react';
 import {HoldEverythingControl} from './HoldEverythingControl';
 import {
   uploadAttachment,
@@ -442,10 +442,17 @@ export function Composer({
     },
   });
 
+  const canSend = Boolean(
+    value.trim() ||
+    attachments.length > 0 ||
+    selectedSkill !== null ||
+    selectedMentions.length > 0
+  );
+
   const submit = () => {
+    if (!canSend || isDisabled) return;
     const text = serializeComposerPrompt(value, selectedSkill, selectedMentions);
     if (!text && attachments.length === 0) return;
-    if (isDisabled) return;
     onSubmit(text, attachments, replyingTo ?? undefined);
     setValue('');
     setAttachments([]);
@@ -952,14 +959,40 @@ export function Composer({
           <Mic size={16} strokeWidth={1.8} />
         </button>
 
-        <button
-          type="button"
-          aria-label={isStreaming ? "Stop" : "Send"}
-          onClick={() => (isStreaming ? onStop() : submit())}
-          className="polaris-composer-btn-send"
-        >
-          {isStreaming ? "■" : "↑"}
-        </button>
+        {isStreaming ? (
+          <div
+            className="flex items-center gap-1.5 shrink-0"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}
+          >
+            <button
+              type="button"
+              aria-label="Send"
+              disabled={!canSend || isDisabled}
+              onClick={submit}
+              className="polaris-composer-btn-send size-8 rounded-full bg-white text-black hover:bg-white/90 shadow-sm transition-transform active:scale-95"
+            >
+              <ArrowUp size={16} strokeWidth={2.2} />
+            </button>
+            <button
+              type="button"
+              aria-label="Stop"
+              onClick={onStop}
+              className="polaris-composer-btn-stop size-8 rounded-full border border-border bg-muted text-foreground/80 shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Square size={11} strokeWidth={0} fill="currentColor" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            aria-label="Send"
+            disabled={!canSend || isDisabled}
+            onClick={submit}
+            className="polaris-composer-btn-send size-8 shrink-0 rounded-full bg-white text-black hover:bg-white/90 shadow-sm transition-transform active:scale-95 disabled:bg-white/10 disabled:text-muted-foreground/30 disabled:shadow-none"
+          >
+            <ArrowUp size={16} strokeWidth={2.2} />
+          </button>
+        )}
       </div>
     </fieldset>
   );
