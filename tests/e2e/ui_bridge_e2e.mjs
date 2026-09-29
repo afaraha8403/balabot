@@ -409,7 +409,7 @@ async function w1s15(browser) {
   const t0 = Date.now();
   await sendViaComposer(page, 'chip E2E-CHIP-15');
   let appeared = false;
-  const deadline = Date.now() + 10000; // within one SSE tick, before turn end
+  const deadline = Date.now() + 3000; // 3s: generous enough not to flake under load, tight enough that the original ~17s regression FAILS
   while (Date.now() < deadline) {
     if (/queued for the next step/i.test(await bodyText(page))) { appeared = true; break; }
     await sleep(400);
