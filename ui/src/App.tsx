@@ -1,8 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Transcript} from './Transcript';
-import {ChatMessage as ChatMessageRow} from '@astryxdesign/core/Chat';
-import {ChatMessageBubble} from '@astryxdesign/core/Chat';
-import {ChatMessageMetadata} from '@astryxdesign/core/Chat';
+import {LinkifiedText} from './LinkifiedText';
 import {ChatToolCalls} from '@astryxdesign/core/Chat';
 import {Timestamp} from '@astryxdesign/core/Timestamp';
 import {ClickableCard} from '@astryxdesign/core/ClickableCard';
@@ -1390,217 +1388,311 @@ export default function App() {
                       trackDep={activeSession?.messages?.length}
                       isStreaming={isStreaming}
                     >
-                      {(activeSession?.messages ?? []).map((m, i, arr) => {
-                      const isUser = m.role === 'user';
-                      const prevSame = i > 0 && arr[i - 1].role === m.role;
-                      const nextSame = i < arr.length - 1 && arr[i + 1].role === m.role;
-                      const group: 'first' | 'middle' | 'last' | undefined = prevSame
-                        ? nextSame
-                          ? 'middle'
-                          : 'last'
-                        : nextSame
-                          ? 'first'
-                          : undefined;
-                      return (
-                        <ChatMessageRow
-                          key={`${m.at}-${i}`}
-                          sender={isUser ? 'user' : 'assistant'}
-                          avatar={
-                            <Avatar
-                              name={isUser ? 'Ali' : activeBot.name}
-                              size="md"
-                              tooltip={false}
-                            />
-                          }
-                        >
-                          <div className="message-row-container">
-                            <ChatMessageBubble
-                              variant={isUser ? 'filled' : 'ghost'}
-                              group={group}
-                              name={
-                                isUser ? undefined : (
-                                  <Text type="supporting" weight="semibold" color="secondary">
-                                    {activeBot.name}
-                                  </Text>
-                                )
-                              }
-                              metadata={
-                                group === 'middle' || group === 'first' ? undefined : (
-                                  <ChatMessageMetadata
-                                    timestamp={<Timestamp value={new Date(m.at).toISOString()} format="time" />}
-                                  />
-                                )
-                              }
+                      {(activeSession?.messages ?? []).map((m, i) => {
+                        const isUser = m.role === 'user';
+                        const messageId = `msg-${m.at}-${i}`;
+                        return (
+                          <div
+                            key={messageId}
+                            data-message-id={messageId}
+                            className="group/message relative hover:z-20"
+                            style={{ position: 'relative' }}
+                          >
+                            <div
+                              className={`relative flex ${isUser ? 'justify-end' : 'justify-start'}`}
+                              style={{
+                                position: 'relative',
+                                display: 'flex',
+                                justifyContent: isUser ? 'flex-end' : 'flex-start',
+                                width: '100%',
+                              }}
                             >
-                              {isUser ? (
-                                <VStack gap={1} align="start">
-                                  {m.replyTo ? (
-                                    <HStack
-                                      gap={1}
-                                      paddingInline={2}
-                                      paddingBlock={1}
-                                      style={{
-                                        backgroundColor: 'color-mix(in srgb, var(--accent) 8%, transparent)',
-                                        borderLeft: 'var(--spacing-0-5) solid var(--accent)',
-                                        borderRadius: 'var(--radius-sm)',
-                                        marginBottom: 'var(--spacing-0-5)',
-                                      }}
-                                    >
-                                      <Text type="supporting" size="xsm" color="secondary">
-                                        ↩ Replying to {m.replyTo.sender}: &ldquo;{m.replyTo.text.slice(0, 50)}{m.replyTo.text.length > 50 ? '…' : ''}&rdquo;
-                                      </Text>
-                                    </HStack>
-                                  ) : null}
-                                  <Text>{m.content}</Text>
-                                  {m.attachments && m.attachments.length > 0 ? (
-                                    <VStack gap={2} align="start" width="100%">
-                                      {m.attachments.map(a => (
-                                        <FilePreviewCard key={a.id} attachment={a} />
-                                      ))}
-                                    </VStack>
-                                  ) : null}
-                                </VStack>
-                              ) : (
-                                <VStack gap={2} align="start">
-                                  {showThinking && m.thinking ? (
-                                    <ThinkingBlock text={m.thinking} theme={themeMode} />
-                                  ) : null}
-                                  <Markdown isStreaming={false}>{m.content}</Markdown>
-                                  {m.attachments && m.attachments.length > 0 ? (
-                                    <VStack gap={2} align="start" width="100%">
-                                      {m.attachments.map(a => (
-                                        <FilePreviewCard key={a.id} attachment={a} />
-                                      ))}
-                                    </VStack>
-                                  ) : null}
-                                  <OpenUIRenderer content={m.content} onAction={handleOpenUIAction} />
-                                  {m.toolCalls && m.toolCalls.length > 0 ? (
-                                    <ChatToolCalls
-                                      calls={m.toolCalls.map(t => ({
-                                        key: t.toolCallId,
-                                        name: t.tool,
-                                        target: t.label,
-                                        status: toToolCallStatus(t.status),
-                                      }))}
+                              <div
+                                data-testid="message-bubble-frame"
+                                className={`relative w-fit min-w-0 ${
+                                  isUser
+                                    ? 'max-w-[min(84%,calc(100%_-_6rem))] [@media(hover:none)]:max-w-[84%]'
+                                    : 'max-w-[min(88%,calc(100%_-_6rem))] [@media(hover:none)]:max-w-[88%]'
+                                }`}
+                                style={{
+                                  position: 'relative',
+                                  width: 'fit-content',
+                                  minWidth: 0,
+                                  maxWidth: isUser ? 'min(84%, calc(100% - 6rem))' : 'min(88%, calc(100% - 6rem))',
+                                }}
+                              >
+                                {!isUser ? (
+                                  <div
+                                    className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold tracking-tight"
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                      marginBottom: '6px',
+                                      fontSize: '13px',
+                                      fontWeight: 600,
+                                      color: activeBot.color || 'var(--foreground)',
+                                    }}
+                                  >
+                                    <BotAvatar
+                                      identity={activeBot.id}
+                                      color={activeBot.color}
+                                      size={22}
                                     />
-                                  ) : null}
-                                </VStack>
-                              )}
-                            </ChatMessageBubble>
-                            <MessageHoverMetadata side={isUser ? 'start' : 'end'}>
-                              <HStack gap={1} vAlign="center" wrap="wrap" style={{paddingInline: 'var(--spacing-1)'}}>
-                                {Object.entries(m.reactions || {}).map(([emoji, count]) =>
-                                  count > 0 ? (
-                                    <Button
-                                      key={emoji}
-                                      label={`${emoji} ${count}`}
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => handleToggleReaction(i, emoji)}
-                                    />
-                                  ) : null,
+                                    {activeBot.name}
+                                  </div>
+                                ) : null}
+
+                                {m.replyTo ? (
+                                  <button
+                                    type="button"
+                                    data-testid="reply-parent-preview"
+                                    aria-label={`Jump to replied message: “${m.replyTo.text.slice(0, 50)}”`}
+                                    style={{
+                                      display: 'block',
+                                      maxWidth: '74%',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                      borderRadius: '14px',
+                                      border: '1px solid var(--border)',
+                                      backgroundColor: 'var(--background)',
+                                      padding: '6px 12px',
+                                      textAlign: 'left',
+                                      fontSize: '12.5px',
+                                      color: 'var(--muted-foreground)',
+                                      marginBottom: '6px',
+                                      cursor: 'default',
+                                    }}
+                                  >
+                                    “{m.replyTo.text}”
+                                  </button>
+                                ) : null}
+
+                                {isUser ? (
+                                  <div
+                                    data-testid="message-user-bubble"
+                                    data-quote-message-id={messageId}
+                                    className="max-w-full whitespace-pre-wrap wrap-anywhere rounded-[20px] bg-chat-user px-[18px] py-3 text-[15.5px] leading-[1.45] text-chat-user-foreground"
+                                    style={{
+                                      backgroundColor: 'var(--chat-user)',
+                                      color: 'var(--chat-user-foreground)',
+                                      borderRadius: '20px',
+                                      padding: '12px 18px',
+                                      fontSize: '15.5px',
+                                      lineHeight: 1.45,
+                                      wordBreak: 'break-word',
+                                      whiteSpace: 'pre-wrap',
+                                    }}
+                                  >
+                                    <LinkifiedText>{m.content}</LinkifiedText>
+                                    {m.attachments && m.attachments.length > 0 ? (
+                                      <VStack gap={2} align="start" width="100%" style={{ marginTop: '8px' }}>
+                                        {m.attachments.map(a => (
+                                          <FilePreviewCard key={a.id} attachment={a} />
+                                        ))}
+                                      </VStack>
+                                    ) : null}
+                                  </div>
+                                ) : (
+                                  <div
+                                    data-testid="message-bot-bubble"
+                                    className="max-w-full space-y-2.5 rounded-[20px] bg-muted px-[18px] py-3 text-[15.5px] leading-[1.5] text-foreground/90"
+                                    style={{
+                                      backgroundColor: 'var(--muted)',
+                                      color: 'var(--foreground)',
+                                      borderRadius: '20px',
+                                      padding: '12px 18px',
+                                      fontSize: '15.5px',
+                                      lineHeight: 1.5,
+                                    }}
+                                  >
+                                    {showThinking && m.thinking ? (
+                                      <ThinkingBlock text={m.thinking} theme={themeMode} />
+                                    ) : null}
+                                    <div data-quote-message-id={messageId}>
+                                      <Markdown isStreaming={false}>{m.content}</Markdown>
+                                    </div>
+                                    {m.attachments && m.attachments.length > 0 ? (
+                                      <VStack gap={2} align="start" width="100%" style={{ marginTop: '8px' }}>
+                                        {m.attachments.map(a => (
+                                          <FilePreviewCard key={a.id} attachment={a} />
+                                        ))}
+                                      </VStack>
+                                    ) : null}
+                                    <OpenUIRenderer content={m.content} onAction={handleOpenUIAction} />
+                                    {m.toolCalls && m.toolCalls.length > 0 ? (
+                                      <ChatToolCalls
+                                        calls={m.toolCalls.map(t => ({
+                                          key: t.toolCallId,
+                                          name: t.tool,
+                                          target: t.label,
+                                          status: toToolCallStatus(t.status),
+                                        }))}
+                                      />
+                                    ) : null}
+                                  </div>
                                 )}
-                                <HStack gap={1} vAlign="center">
-                                  {['👍', '❤️', '🚀'].map(emoji => (
-                                    <button
-                                      key={emoji}
-                                      type="button"
-                                      className="message-reaction-button"
-                                      title={`React with ${emoji}`}
-                                      aria-label={`React ${emoji}`}
-                                      onClick={() => handleToggleReaction(i, emoji)}
-                                    >
-                                      {emoji}
-                                    </button>
-                                  ))}
-                                  <Button
-                                    label="Reply"
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() =>
-                                      setReplyingToMessage({
-                                        sender: isUser ? 'You' : activeBot.name,
-                                        text: m.content,
-                                      })
-                                    }
-                                  />
-                                </HStack>
-                              </HStack>
-                            </MessageHoverMetadata>
+
+                                <MessageHoverMetadata side={isUser ? 'start' : 'end'}>
+                                  <HStack gap={1} vAlign="center" wrap="wrap" style={{paddingInline: 'var(--spacing-1)'}}>
+                                    {Object.entries(m.reactions || {}).map(([emoji, count]) =>
+                                      count > 0 ? (
+                                        <Button
+                                          key={emoji}
+                                          label={`${emoji} ${count}`}
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => handleToggleReaction(i, emoji)}
+                                        />
+                                      ) : null,
+                                    )}
+                                    <HStack gap={1} vAlign="center">
+                                      {['👍', '❤️', '🚀'].map(emoji => (
+                                        <button
+                                          key={emoji}
+                                          type="button"
+                                          className="message-reaction-button"
+                                          title={`React with ${emoji}`}
+                                          aria-label={`React ${emoji}`}
+                                          onClick={() => handleToggleReaction(i, emoji)}
+                                        >
+                                          {emoji}
+                                        </button>
+                                      ))}
+                                      <Button
+                                        label="Reply"
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() =>
+                                          setReplyingToMessage({
+                                            sender: isUser ? 'You' : activeBot.name,
+                                            text: m.content,
+                                          })
+                                        }
+                                      />
+                                    </HStack>
+                                  </HStack>
+                                </MessageHoverMetadata>
+                              </div>
+                            </div>
                           </div>
-                        </ChatMessageRow>
-                      );
-                    })}
+                        );
+                      })}
 
-                    {/* Live streaming turn in flight */}
-                    {isStreaming && (displayed || streamThinking || toolCalls.length > 0) ? (
-                      <ChatMessageRow
-                        sender="assistant"
-                        avatar={
-                          <Avatar
-                            name={activeBot.name}
-                            size="md"
-                            tooltip={false}
-                          />
-                        }
-                      >
-                        <ChatMessageBubble
-                          variant="ghost"
-                          name={
-                            <Text type="supporting" weight="semibold" color="secondary">
-                              {activeBot.name}
-                            </Text>
-                          }
+                      {/* Live streaming turn in flight */}
+                      {isStreaming && (displayed || streamThinking || toolCalls.length > 0) ? (
+                        <div
+                          data-message-id="progress:live"
+                          className="group/message relative hover:z-20"
+                          style={{ position: 'relative' }}
                         >
-                          <VStack gap={2} align="start">
-                            {showThinking && streamThinking ? (
-                              <ThinkingBlock text={streamThinking} isLive theme={themeMode} />
-                            ) : null}
-                            {displayed ? (
-                              <Markdown isStreaming>{displayed}</Markdown>
-                            ) : (
-                              <HStack gap={2} vAlign="center">
-                                <ThinkingOrb
-                                  state={orbStateForTool(activeTool(toolCalls)?.tool)}
-                                  size={32}
-                                  theme={themeMode}
+                          <div
+                            style={{
+                              position: 'relative',
+                              display: 'flex',
+                              justifyContent: 'flex-start',
+                              width: '100%',
+                            }}
+                          >
+                            <div
+                              data-testid="message-bubble-frame"
+                              className="relative w-fit min-w-0 max-w-[min(88%,calc(100%_-_6rem))] [@media(hover:none)]:max-w-[88%]"
+                              style={{
+                                position: 'relative',
+                                width: 'fit-content',
+                                minWidth: 0,
+                                maxWidth: 'min(88%, calc(100% - 6rem))',
+                              }}
+                            >
+                              <div
+                                className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold tracking-tight"
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  marginBottom: '6px',
+                                  fontSize: '13px',
+                                  fontWeight: 600,
+                                  color: activeBot.color || 'var(--foreground)',
+                                }}
+                              >
+                                <BotAvatar
+                                  identity={activeBot.id}
+                                  color={activeBot.color}
+                                  status="working"
+                                  size={22}
                                 />
-                                <Text type="supporting" color="secondary">
-                                  {activeTool(toolCalls)?.label ?? 'Working…'}
-                                </Text>
-                              </HStack>
-                            )}
-                            {toolCalls.length > 0 ? (
-                              <ChatToolCalls
-                                calls={toolCalls.map(t => ({
-                                  key: t.toolCallId,
-                                  name: t.tool,
-                                  target: t.label,
-                                  status: toToolCallStatus(t.status),
-                                }))}
-                              />
-                            ) : null}
-                          </VStack>
-                        </ChatMessageBubble>
-                      </ChatMessageRow>
-                    ) : null}
+                                {activeBot.name}
+                              </div>
 
-                    {/* Handoff signals */}
-                    {(activeSession?.handoffs ?? []).map((h, i) => (
-                      <ChatMessageRow
-                        key={`handoff-${i}`}
-                        sender="system"
-                        avatar={<Avatar name={`${h.from}→${h.to}`} size="md" tooltip={false} />}
-                      >
-                        <HStack gap={2} vAlign="center" wrap="wrap">
+                              <div
+                                data-testid="message-bot-bubble"
+                                className="max-w-full space-y-2.5 rounded-[20px] bg-muted px-[18px] py-3 text-[15.5px] leading-[1.5] text-foreground/90"
+                                style={{
+                                  backgroundColor: 'var(--muted)',
+                                  color: 'var(--foreground)',
+                                  borderRadius: '20px',
+                                  padding: '12px 18px',
+                                  fontSize: '15.5px',
+                                  lineHeight: 1.5,
+                                }}
+                              >
+                                {showThinking && streamThinking ? (
+                                  <ThinkingBlock text={streamThinking} isLive theme={themeMode} />
+                                ) : null}
+                                {displayed ? (
+                                  <Markdown isStreaming>{displayed}</Markdown>
+                                ) : (
+                                  <HStack gap={2} vAlign="center">
+                                    <ThinkingOrb
+                                      state={orbStateForTool(activeTool(toolCalls)?.tool)}
+                                      size={32}
+                                      theme={themeMode}
+                                    />
+                                    <Text type="supporting" color="secondary">
+                                      {activeTool(toolCalls)?.label ?? 'Working…'}
+                                    </Text>
+                                  </HStack>
+                                )}
+                                {toolCalls.length > 0 ? (
+                                  <ChatToolCalls
+                                    calls={toolCalls.map(t => ({
+                                      key: t.toolCallId,
+                                      name: t.tool,
+                                      target: t.label,
+                                      status: toToolCallStatus(t.status),
+                                    }))}
+                                  />
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {/* Handoff signals */}
+                      {(activeSession?.handoffs ?? []).map((h, i) => (
+                        <div
+                          key={`handoff-${i}`}
+                          className="flex items-center justify-center gap-2 py-1 text-[13.5px] text-muted-foreground"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            padding: '4px 0',
+                            fontSize: '13.5px',
+                            color: 'var(--muted-foreground)',
+                          }}
+                        >
                           <Token label={h.from || 'bot'} size="sm" color="blue" />
                           <Text type="supporting">→</Text>
                           <Token label={h.to || 'bot'} size="sm" color="teal" />
                           {h.summary ? <Text type="supporting">{h.summary}</Text> : null}
                           <Timestamp value={new Date(h.at).toISOString()} format="time" />
-                        </HStack>
-                      </ChatMessageRow>
-                    ))}
+                        </div>
+                      ))}
 
                     {/* In-chat secret intake cards */}
                     {secretCards.map(card => (
