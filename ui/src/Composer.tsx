@@ -25,6 +25,14 @@ import {
 const ATTACHMENT_ACCEPT = '.txt,.md,.pdf,.png,.jpg,.jpeg,.gif,.webp,.json,.csv,.py,.js,.ts,.html,.css';
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB upload ceiling
 
+function isFileTypeSupported(file: File): boolean {
+  const parts = file.name.split('.');
+  if (parts.length < 2) return false;
+  const ext = '.' + parts.pop()!.toLowerCase();
+  const accepted = ATTACHMENT_ACCEPT.split(',').map(s => s.trim().toLowerCase());
+  return accepted.includes(ext);
+}
+
 export type ComposerMentionKind = 'bot' | 'group' | 'routine' | 'connector' | 'everyone';
 
 export type ComposerMention = {
@@ -471,6 +479,12 @@ export function Composer({
     for (const f of files) {
       if (f.size > MAX_FILE_SIZE_BYTES) {
         setAttachmentError(`File "${f.name}" is too large (${(f.size / (1024 * 1024)).toFixed(1)} MB). Exceeds the 25 MB limit.`);
+        continue;
+      }
+      if (!isFileTypeSupported(f)) {
+        const parts = f.name.split('.');
+        const ext = parts.length > 1 ? '.' + parts.pop()!.toLowerCase() : 'unknown';
+        setAttachmentError(`Unsupported file type "${ext}" for "${f.name}". Accepted types: ${ATTACHMENT_ACCEPT}`);
         continue;
       }
       validFiles.push(f);
