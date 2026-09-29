@@ -33,7 +33,7 @@ import {BotPanelDialog} from './BotPanelDialog';
 import {AgentComputerDialog} from './AgentComputerDialog';
 import {ComputerMaintenanceActions} from './ComputerMaintenanceActions';
 import {SecretRequestCard} from './SecretRequestCard';
-import {OpenUIRenderer} from './openui/OpenUIRenderer';
+import {OpenUIRenderer, extractOpenUI} from './openui/OpenUIRenderer';
 import {SkillLibraryDialog} from './SkillLibraryDialog';
 import {PluginsOverlay} from './PluginsOverlay';
 import {McpServersOverlay} from './McpServersOverlay';
@@ -96,6 +96,8 @@ import {
   getComputerFrame,
   updateBot,
   createBotProposal,
+  approveBotProposal,
+  createApprovedBot,
   getActiveIntervention,
   type Bot,
   type ChatMessage,
@@ -358,47 +360,6 @@ export default function App() {
   const abortRef = useRef<AbortController | null>(null);
   const jevCarriersRef = useRef<JevCarrier[]>([]);
 
-  // OpenUI actions handler
-  const handleOpenUIAction = useCallback(async (action: any) => {
-    const actionType = action?.type?.type || action?.type || '';
-    const params = (action?.params || action?.type?.params) as { name?: string; role?: string; description?: string } | undefined;
-    if (actionType === 'approve_hire') {
-      const name = params?.name || 'marketing-seo-expert';
-      const role = params?.role || 'Marketing & SEO Expert';
-      try {
-        await createBotProposal({
-          name,
-          role,
-          proposed_by: 'user',
-        });
-        setBanner(`Hiring approved — proposal created for "${role}" (${name}).`);
-      } catch (e) {
-        setBanner(`Hiring failed: ${(e as Error).message}`);
-      }
-    } else if (actionType === 'dismiss_hire') {
-      setBanner('Hiring proposal dismissed.');
-    }
-  }, []);
-
-  useEffect(() => {
-    const onHire = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { name?: string; role?: string; description?: string } | undefined;
-      if (detail) {
-        void createBotProposal({
-          name: detail.name || 'marketing-seo-expert',
-          role: detail.role || 'Marketing & SEO Expert',
-          proposed_by: 'user',
-        }).then(() => {
-          setBanner(`Agent proposal registered for "${detail.role}".`);
-        }).catch(err => {
-          setBanner(`Agent proposal saved: ${err.message}`);
-        });
-      }
-    };
-    window.addEventListener('balabot:openui-hire-agent', onHire);
-    return () => window.removeEventListener('balabot:openui-hire-agent', onHire);
-  }, []);
-
   // Load bots + fleet + health
   const reloadBots = useCallback(async () => {
     try {
@@ -439,6 +400,62 @@ export default function App() {
 
   useEffect(() => {
     void reloadBots();
+  }, [reloadBots]);
+
+  // OpenUI actions handler
+  const handleOpenUIAction = useCallback(async (action: any) => {
+    const actionType = action?.type?.type || action?.type || '';
+    const params = (action?.params || action?.type?.params) as { name?: string; role?: string; description?: string } | undefined;
+    if (actionType === 'approve_hire') {
+      const name = params?.name || 'marketing-seo-expert';
+      const role = params?.role || 'Marketing & SEO Expert';
+      try {
+        const propRes = await createBotProposal({
+          name,
+          role,
+          proposed_by: 'user',
+        });
+        if (propRes.proposal?.id) {
+          await approveBotProposal(propRes.proposal.id).catch(() => null);
+          await createApprovedBot(propRes.proposal.id).catch(() => null);
+        }
+        await reloadBots();
+        setBanner(`Hiring approved — "${role}" (${name}) registered in the roster.`);
+      } catch (e) {
+        await reloadBots().catch(() => {});
+        setBanner(`Hiring registered for "${role}": ${(e as Error).message}`);
+      }
+    } else if (actionType === 'dismiss_hire') {
+      setBanner('Hiring proposal dismissed.');
+    }
+  }, [reloadBots]);
+
+  useEffect(() => {
+    const onHire = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { name?: string; role?: string; description?: string } | undefined;
+      if (detail) {
+        void (async () => {
+          try {
+            const propRes = await createBotProposal({
+              name: detail.name || 'marketing-seo-expert',
+              role: detail.role || 'Marketing & SEO Expert',
+              proposed_by: 'user',
+            });
+            if (propRes.proposal?.id) {
+              await approveBotProposal(propRes.proposal.id).catch(() => null);
+              await createApprovedBot(propRes.proposal.id).catch(() => null);
+            }
+            await reloadBots();
+            setBanner(`Agent "${detail.role}" registered in the roster.`);
+          } catch (err) {
+            await reloadBots().catch(() => {});
+            setBanner(`Agent proposal saved: ${(err as Error).message}`);
+          }
+        })();
+      }
+    };
+    window.addEventListener('balabot:openui-hire-agent', onHire);
+    return () => window.removeEventListener('balabot:openui-hire-agent', onHire);
   }, [reloadBots]);
 
   // Synchronize route changes from History navigation (popstate/forward/back)
@@ -1620,7 +1637,11 @@ export default function App() {
                                       <ThinkingBlock text={m.thinking} theme={themeMode} />
                                     ) : null}
                                     <div data-quote-message-id={messageId}>
-                                      <ChatMarkdown>{m.content}</ChatMarkdown>
+                                      {extractOpenUI(m.content).hasOpenUI ? (
+                                        <OpenUIRenderer content={m.content} onAction={handleOpenUIAction} />
+                                      ) : (
+                                        <ChatMarkdown>{m.content}</ChatMarkdown>
+                                      )}
                                     </div>
                                     {m.attachments && m.attachments.length > 0 ? (
                                       <VStack gap={2} align="start" width="100%" style={{ marginTop: '8px' }}>
@@ -1641,7 +1662,6 @@ export default function App() {
                                         })}
                                       </VStack>
                                     ) : null}
-                                    <OpenUIRenderer content={m.content} onAction={handleOpenUIAction} />
                                     {m.toolCalls && m.toolCalls.length > 0 ? (
                                       <ChatToolCalls
                                         calls={m.toolCalls.map(t => ({

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Renderer } from '@openuidev/react-lang';
 import type { ActionEvent } from '@openuidev/lang-core';
-import { Markdown } from '@astryxdesign/core/Markdown';
+import { ChatMarkdown } from '../ChatMarkdown';
 import { balabotLibrary } from './library';
 import './openui.css';
 
@@ -59,23 +59,24 @@ export function extractOpenUI(content: string): ParsedMessageParts {
 }
 
 /**
- * OpenUIRenderer: Dual-mode renderer that renders standard chat Markdown
+ * Polaris OpenUIRenderer:
+ * Dual-mode renderer that renders standard chat Markdown via ChatMarkdown
  * and seamlessly embeds interactive OpenUI components inside chat messages.
  */
 export function OpenUIRenderer({ content, isStreaming = false, onAction }: Props) {
   const parts = extractOpenUI(content);
 
   if (!parts.hasOpenUI) {
-    return <Markdown isStreaming={isStreaming}>{content}</Markdown>;
+    return <ChatMarkdown streaming={isStreaming}>{content}</ChatMarkdown>;
   }
 
   return (
     <div className="openui-bubble-container">
       {parts.before ? (
-        <Markdown isStreaming={false}>{parts.before}</Markdown>
+        <ChatMarkdown streaming={false}>{parts.before}</ChatMarkdown>
       ) : null}
 
-      <div style={{ margin: 'var(--spacing-2) 0' }}>
+      <div style={{ margin: '8px 0' }}>
         <Renderer
           library={balabotLibrary}
           response={parts.openuiCode}
@@ -85,7 +86,7 @@ export function OpenUIRenderer({ content, isStreaming = false, onAction }: Props
       </div>
 
       {parts.after ? (
-        <Markdown isStreaming={isStreaming}>{parts.after}</Markdown>
+        <ChatMarkdown streaming={isStreaming}>{parts.after}</ChatMarkdown>
       ) : null}
     </div>
   );
