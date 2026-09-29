@@ -72,6 +72,7 @@ import {VoiceMemoCard} from './VoiceMemoCard';
 import {HoldEverythingControl} from './HoldEverythingControl';
 import {RoutinesList} from './RoutinesList';
 import {FilePreviewCard} from './FilePreviewCard';
+import {AskCard, ChoiceCard, AppConnectCard, McpApprovalCard, ChartBlockView} from './cards';
 import {MessageHoverMetadata, MessageHoverActions} from './MessageHoverMetadata';
 import {WindowChrome} from './WindowChrome';
 import {ShellSkeleton} from './ShellSkeleton';
@@ -1549,6 +1550,18 @@ export default function App() {
                                         {m.attachments.map(a => (
                                           <FilePreviewCard key={a.id} attachment={a} />
                                         ))}
+                                      </VStack>
+                                    ) : null}
+                                    {m.blocks && m.blocks.length > 0 ? (
+                                      <VStack gap={2} align="start" width="100%" style={{ marginTop: '8px' }}>
+                                        {m.blocks.map((block, idx) => {
+                                          if (block.kind === 'ask') return <AskCard key={idx} block={block} />;
+                                          if (block.kind === 'choice') return <ChoiceCard key={idx} block={block} />;
+                                          if (block.kind === 'app_connect') return <AppConnectCard key={idx} block={block} />;
+                                          if (block.kind === 'mcp_approval') return <McpApprovalCard key={idx} block={block} />;
+                                          if (block.kind === 'chart') return <ChartBlockView key={idx} name={block.name} spec={block.spec} data={block.data} />;
+                                          return null;
+                                        })}
                                       </VStack>
                                     ) : null}
                                     <OpenUIRenderer content={m.content} onAction={handleOpenUIAction} />
