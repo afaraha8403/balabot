@@ -42,6 +42,7 @@ import {CreateBotForm} from './CreateBotForm';
 import {ClearConversationDialog} from './ClearConversationDialog';
 import {BotDeleteDialog} from './BotDeleteDialog';
 import {OrphansDialog} from './OrphansDialog';
+import {SettingsOverlay, type SettingsSection} from './SettingsOverlay';
 import {useMediaQuery} from '@astryxdesign/core/hooks';
 import {Divider} from '@astryxdesign/core/Divider';
 import {
@@ -226,6 +227,8 @@ export default function App() {
   const [deleteBotTarget, setDeleteBotTarget] = useState<Bot | null>(null);
   const [clearTarget, setClearTarget] = useState<Bot | null>(null);
   const [showOrphans, setShowOrphans] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [, setExcluded] = useState<string[]>([]);
   const [pinnedBotIds, setPinnedBotIds] = useState<string[]>(() => loadPinnedBots());
   const [hiddenBotIds, setHiddenBotIds] = useState<string[]>(() => loadHiddenBots());
@@ -1078,10 +1081,13 @@ export default function App() {
                 setScreen('chat');
                 navigateTo('/app/artifacts');
               }}
-              onOpenSettings={() => setShowPanel(true)}
+              onOpenSettings={(tab) => {
+                setSettingsSection((tab as SettingsSection) || 'general');
+                setShowSettings(true);
+              }}
               onOpenUsage={() => {
-                setScreen('cost');
-                navigateTo('/app/cost');
+                setSettingsSection('usage');
+                setShowSettings(true);
               }}
               onSignOut={() => {
                 try {
@@ -2105,6 +2111,14 @@ export default function App() {
           <OrphansDialog
             onClose={() => setShowOrphans(false)}
             onFleetChanged={() => void reloadBots()}
+          />
+        ) : null}
+        {showSettings ? (
+          <SettingsOverlay
+            initialSection={settingsSection}
+            onClose={() => setShowSettings(false)}
+            userName="Ali"
+            email="ali@balacode.xyz"
           />
         ) : null}
         {newSectionBot ? (
