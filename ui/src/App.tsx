@@ -2119,6 +2119,7 @@ export default function App() {
             onClose={() => setShowSettings(false)}
             userName="Ali"
             email="ali@balacode.xyz"
+            onFleetChanged={() => void reloadBots()}
           />
         ) : null}
         {newSectionBot ? (

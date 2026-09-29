@@ -3,6 +3,12 @@ import {Brain, CloudDownload, Cpu, Gauge, Monitor, Settings, Volume2, X} from 'l
 import {ModelSettingsOverlay} from './ModelSettingsOverlay';
 import {MemorySettingsOverlay} from './MemorySettingsOverlay';
 import {VoiceSettingsOverlay} from './VoiceSettingsOverlay';
+import {
+  GeneralSettingsPanel,
+  UsageSettingsPanel,
+  ComputerSettingsPanel,
+  UpdatesSettingsPanel,
+} from './AccountSettingsPanels';
 
 export type SettingsSection =
   | 'general'
@@ -27,6 +33,8 @@ export type SettingsOverlayProps = {
   email?: string | null;
   avatarStyle?: 'robot' | 'organic';
   onAvatarStyleChange?: (style: 'robot' | 'organic') => Promise<void>;
+  // Fleet update callback
+  onFleetChanged?: () => void;
   // Slots for tab bodies
   renderGeneral?: () => React.ReactNode;
   renderModels?: () => React.ReactNode;
@@ -58,6 +66,7 @@ export function SettingsOverlay({
   email = 'ali@balacode.xyz',
   avatarStyle = 'robot',
   onAvatarStyleChange,
+  onFleetChanged,
   renderGeneral,
   renderModels,
   renderMemory,
@@ -255,13 +264,7 @@ export function SettingsOverlay({
               }}
             >
               {section === 'general' && (renderGeneral ? renderGeneral() : (
-                <div data-testid="general-settings" style={{display: 'flex', flexDirection: 'column', gap: '20px'}}>
-                  <div style={{padding: '16px', borderRadius: 'var(--radius-lg, 12px)', border: '1px solid var(--border)', backgroundColor: 'var(--card)'}}>
-                    <h3 style={{margin: '0 0 8px 0', fontSize: '15px', fontWeight: 500, color: 'var(--foreground)'}}>Account</h3>
-                    <p style={{margin: 0, fontSize: '14px', color: 'var(--foreground)'}}>{userName}</p>
-                    {email ? <p style={{margin: '4px 0 0 0', fontSize: '13px', color: 'var(--muted-foreground)'}}>{email}</p> : null}
-                  </div>
-                </div>
+                <GeneralSettingsPanel userName={userName} email={email} />
               ))}
 
               {section === 'models' && (renderModels ? renderModels() : (
@@ -277,24 +280,15 @@ export function SettingsOverlay({
               ))}
 
               {section === 'usage' && (renderUsage ? renderUsage() : (
-                <div data-testid="usage-settings" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
-                  <h3 style={{margin: '0 0 8px 0', fontSize: '15px', fontWeight: 500, color: 'var(--foreground)'}}>Token & Spend Usage</h3>
-                  <p style={{margin: 0, fontSize: '14px', color: 'var(--muted-foreground)'}}>Track model spend and execution volume across the fleet.</p>
-                </div>
+                <UsageSettingsPanel />
               ))}
 
               {section === 'computer' && (renderComputer ? renderComputer() : (
-                <div data-testid="computers-setup-settings" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
-                  <h3 style={{margin: '0 0 8px 0', fontSize: '15px', fontWeight: 500, color: 'var(--foreground)'}}>Agent Computer Setup</h3>
-                  <p style={{margin: 0, fontSize: '14px', color: 'var(--muted-foreground)'}}>Manage desktop container sandbox daemons and orphan profiles.</p>
-                </div>
+                <ComputerSettingsPanel onFleetChanged={onFleetChanged} />
               ))}
 
               {section === 'updates' && (renderUpdates ? renderUpdates() : (
-                <div data-testid="updates-settings" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
-                  <h3 style={{margin: '0 0 8px 0', fontSize: '15px', fontWeight: 500, color: 'var(--foreground)'}}>Software Updates</h3>
-                  <p style={{margin: 0, fontSize: '14px', color: 'var(--muted-foreground)'}}>BalaBot v1.0.0 — Polaris re-base Wave 7.</p>
-                </div>
+                <UpdatesSettingsPanel />
               ))}
             </div>
           </div>
