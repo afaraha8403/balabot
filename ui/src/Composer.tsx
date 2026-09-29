@@ -12,6 +12,7 @@ import {Button} from '@astryxdesign/core/Button';
 import {HStack} from '@astryxdesign/core/Stack';
 import {Text} from '@astryxdesign/core/Text';
 import {IconAttach, IconClose, IconFile, IconMicrophone} from './icons';
+import {Plus} from 'lucide-react';
 import {HoldEverythingControl} from './HoldEverythingControl';
 import {
   uploadAttachment,
@@ -21,6 +22,8 @@ import {
   type SkillEntry,
   type InterventionPayload,
 } from './api';
+
+const ATTACHMENT_ACCEPT = '.txt,.md,.pdf,.png,.jpg,.jpeg,.gif,.webp,.json,.csv,.py,.js,.ts,.html,.css';
 
 type Props = {
   isStreaming: boolean;
@@ -60,6 +63,7 @@ export function Composer({
   onOpenComputer,
 }: Props) {
   const inputRef = useRef<ChatComposerInputHandle>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
 
@@ -207,21 +211,29 @@ export function Composer({
         data-testid="composer-bar"
         className="polaris-composer-bar flex items-center gap-3.5 rounded-full border border-border bg-background py-[9px] pe-2.5 ps-3 transition-colors focus-within:border-ring"
       >
-        <IconButton
-          label="Attach file"
-          size="sm"
-          variant="ghost"
-          icon={<IconAttach />}
-          onClick={() => {
-            const el = document.createElement('input');
-            el.type = 'file';
-            el.multiple = true;
-            el.onchange = () => {
-              if (el.files) addFiles(Array.from(el.files));
-            };
-            el.click();
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ATTACHMENT_ACCEPT}
+          style={{ display: 'none' }}
+          className="hidden"
+          onChange={(event) => {
+            if (event.target.files) {
+              void addFiles(Array.from(event.target.files));
+              event.target.value = '';
+            }
           }}
         />
+        <button
+          type="button"
+          aria-label="Attach file"
+          disabled={isDisabled}
+          onClick={() => fileInputRef.current?.click()}
+          className="polaris-composer-btn-attach size-8 shrink-0 rounded-full border border-border bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Plus size={16} strokeWidth={2} />
+        </button>
 
         <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
           <ChatComposerInput
