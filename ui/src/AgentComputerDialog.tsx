@@ -1,5 +1,4 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Dialog, DialogHeader} from '@astryxdesign/core/Dialog';
 import {VStack} from '@astryxdesign/core/VStack';
 import {HStack} from '@astryxdesign/core/Stack';
 import {Text} from '@astryxdesign/core/Text';
@@ -207,24 +206,44 @@ export function AgentComputerDialog({bot, onClose}: Props) {
     setTerminalCommand('');
   };
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isRecording) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isRecording, onClose]);
+
   return (
-    <Dialog
-      isOpen
-      onOpenChange={open => !open && onClose()}
-      purpose="form"
+    <div
+      className="fixed inset-0 z-30 bg-background"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 30,
+        backgroundColor: 'var(--background)',
+        color: 'var(--foreground)',
+        overflow: 'hidden',
+      }}
     >
-      <DialogHeader
-        title={`${bot.name} — Agent Computer`}
-        subtitle={
-          frame
-            ? `Captured ${frame.capturedAt} · ${frame.width}×${frame.height} · ${noDriver ? 'no driver' : isError ? 'error' : 'live'}`
-            : 'Connecting…'
-        }
-        onOpenChange={onClose}
-      />
-      <VStack gap={3} padding={4} height="fill" style={{position: 'relative', minHeight: '40rem'}}>
-        {/* Top Control Bar: Reset & Teach task */}
-        <HStack gap={2} vAlign="center" justify="between" wrap="wrap">
+      <div
+        data-testid="computer-viewport"
+        className="fixed inset-x-0 top-0 flex flex-col bg-background"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: 'var(--background)',
+          height: '100dvh',
+          overflow: 'hidden',
+        }}
+      >
+        <VStack gap={3} padding={4} height="fill" style={{position: 'relative', minHeight: '100%', flex: 1}}>
+          {/* Top Control Bar: Reset & Teach task */}
+          <HStack gap={2} vAlign="center" justify="between" wrap="wrap">
           <HStack gap={2} vAlign="center">
             <Button
               label={isResetting ? "Resetting…" : "Reset Computer"}
@@ -589,6 +608,7 @@ export function AgentComputerDialog({bot, onClose}: Props) {
           />
         </div>
       </VStack>
-    </Dialog>
+      </div>
+    </div>
   );
 }
