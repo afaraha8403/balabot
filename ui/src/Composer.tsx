@@ -67,6 +67,62 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const dragDepth = useRef(0);
+  const [draggingFiles, setDraggingFiles] = useState(false);
+
+  function isFileDrag(dataTransfer: Pick<DataTransfer, 'types' | 'items'> | null): boolean {
+    if (!dataTransfer) return false;
+    return (
+      Array.from(dataTransfer.types).includes('Files') ||
+      Array.from(dataTransfer.items).some(item => item.kind === 'file')
+    );
+  }
+
+  function handleDragEnter(event: React.DragEvent<HTMLFieldSetElement>) {
+    const dataTransfer = event.dataTransfer;
+    if (!isFileDrag(dataTransfer)) return;
+    event.preventDefault();
+    if (isDisabled) {
+      dragDepth.current = 0;
+      setDraggingFiles(false);
+      return;
+    }
+    dragDepth.current += 1;
+    setDraggingFiles(true);
+  }
+
+  function handleDragOver(event: React.DragEvent<HTMLFieldSetElement>) {
+    const dataTransfer = event.dataTransfer;
+    if (!isFileDrag(dataTransfer)) return;
+    event.preventDefault();
+    dataTransfer.dropEffect = isDisabled ? 'none' : 'copy';
+    if (isDisabled) {
+      dragDepth.current = 0;
+      setDraggingFiles(false);
+      return;
+    }
+    setDraggingFiles(true);
+  }
+
+  function handleDragLeave(event: React.DragEvent<HTMLFieldSetElement>) {
+    if (!isFileDrag(event.dataTransfer)) return;
+    if (isDisabled) {
+      dragDepth.current = 0;
+      setDraggingFiles(false);
+      return;
+    }
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDraggingFiles(false);
+  }
+
+  function handleDrop(event: React.DragEvent<HTMLFieldSetElement>) {
+    const dataTransfer = event.dataTransfer;
+    if (!isFileDrag(dataTransfer)) return;
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDraggingFiles(false);
+    if (!isDisabled && dataTransfer.files) void addFiles(Array.from(dataTransfer.files));
+  }
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
@@ -206,8 +262,15 @@ export function Composer({
     <fieldset
       aria-label="Message composer"
       data-testid="composer-fieldset"
+      data-dragging={draggingFiles ? "files" : undefined}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       onKeyDown={onKeyDown}
-      className="polaris-composer-fieldset rounded-full border border-border bg-background relative z-30 m-0 min-w-0 border-0 px-3 pb-4 pt-3 md:px-6 md:pb-6"
+      className={`polaris-composer-fieldset rounded-full border border-border bg-background relative z-30 m-0 min-w-0 border-0 px-3 pb-4 pt-3 md:px-6 md:pb-6 ${
+        draggingFiles ? "rounded-[14px] ring-2 ring-inset ring-ring" : ""
+      }`}
     >
       {replyingTo ? (
         <HStack
