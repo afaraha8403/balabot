@@ -1387,6 +1387,14 @@ export default function App() {
                     <Transcript
                       trackDep={activeSession?.messages?.length}
                       isStreaming={isStreaming}
+                      onQuote={(messageId, quoteText) => {
+                        const msg = (activeSession?.messages ?? []).find((_, idx) => `msg-${_?.at}-${idx}` === messageId);
+                        const sender = msg?.role === 'user' ? 'You' : activeBot.name;
+                        setReplyingToMessage({
+                          sender,
+                          text: quoteText,
+                        });
+                      }}
                     >
                       {(activeSession?.messages ?? []).map((m, i) => {
                         const isUser = m.role === 'user';
