@@ -33,6 +33,15 @@ function isFileTypeSupported(file: File): boolean {
   return accepted.includes(ext);
 }
 
+function botHasVision(bot?: Bot | null): boolean {
+  if (!bot) return false;
+  if ((bot as any).hasVision === true) return true;
+  if (Array.isArray((bot as any).capabilities) && (bot as any).capabilities.includes('vision')) return true;
+  const model = ((bot as any).model || '').toLowerCase();
+  if (['gpt-4o', 'gemini', 'claude-3', 'sonnet', 'vision'].some(v => model.includes(v))) return true;
+  return false;
+}
+
 export type ComposerMentionKind = 'bot' | 'group' | 'routine' | 'connector' | 'everyone';
 
 export type ComposerMention = {
@@ -179,6 +188,16 @@ export function Composer({
   const [selectedMentions, setSelectedMentions] = useState<ComposerMention[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionHighlightIndex, setMentionHighlightIndex] = useState(0);
+
+  const currentBot = useMemo(() => bots.find(b => b.id === botId), [bots, botId]);
+  const activeBotHasVision = useMemo(() => botHasVision(currentBot), [currentBot]);
+  const hasImageAttachment = useMemo(
+    () =>
+      attachments.some(
+        a => a.mime_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(a.name),
+      ),
+    [attachments],
+  );
 
   const mentionOptions = useMemo(() => {
     if (mentionQuery === null) return [];
@@ -640,6 +659,15 @@ export function Composer({
         </div>
       ) : null}
 
+      {hasImageAttachment && !activeBotHasVision ? (
+        <div
+          data-testid="composer-vision-notice"
+          className="polaris-vision-notice mb-2 flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-[13px] text-amber-500"
+        >
+          <span>Active bot has no vision capability — images cannot be seen or analysed.</span>
+        </div>
+      ) : null}
+
       {attachments.length > 0 ? (
         <div className="mb-3 flex flex-wrap gap-2" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
           {attachments.map(a => (
@@ -665,6 +693,11 @@ export function Composer({
               >
                 {a.name}
               </span>
+              {!activeBotHasVision && (a.mime_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(a.name)) ? (
+                <span className="text-[11.5px] text-amber-500 font-medium">
+                  (no vision capability — cannot be seen)
+                </span>
+              ) : null}
               <button
                 type="button"
                 aria-label={`Remove ${a.name}`}
