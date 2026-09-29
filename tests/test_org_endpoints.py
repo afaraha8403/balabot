@@ -288,6 +288,7 @@ async def test_org_run_non_blocking_concurrency(monkeypatch):
 
     monkeypatch.setattr(server, "_org_run", slow_org_run)
     monkeypatch.setattr(server, "container_ok", lambda: True)
+    monkeypatch.setattr(server, "_created_bots", lambda: {})
 
     transport = httpx.ASGITransport(app=server.app)
     headers = {"Authorization": "Basic YWxpOnB3"}
