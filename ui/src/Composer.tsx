@@ -2,7 +2,6 @@ import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {ChatComposer} from '@astryxdesign/core/Chat';
 import {ChatComposerInput} from '@astryxdesign/core/Chat';
 import {ChatComposerDrawer} from '@astryxdesign/core/Chat';
-import {ChatDictationButton} from '@astryxdesign/core/Chat';
 import {useChatDictation} from '@astryxdesign/core/Chat';
 import type {ChatComposerInputHandle, ChatComposerTrigger} from '@astryxdesign/core/Chat';
 import {createStaticSource} from '@astryxdesign/core/Typeahead';
@@ -11,8 +10,8 @@ import {IconButton} from '@astryxdesign/core/IconButton';
 import {Button} from '@astryxdesign/core/Button';
 import {HStack} from '@astryxdesign/core/Stack';
 import {Text} from '@astryxdesign/core/Text';
-import {IconAttach, IconClose, IconFile, IconMicrophone} from './icons';
-import {Plus, Box, Paperclip, X, Bot as BotIcon, Users, Radio, Settings} from 'lucide-react';
+import {IconAttach, IconClose, IconFile} from './icons';
+import {Plus, Box, Paperclip, X, Bot as BotIcon, Users, Radio, Settings, Mic} from 'lucide-react';
 import {HoldEverythingControl} from './HoldEverythingControl';
 import {
   uploadAttachment,
@@ -887,6 +886,16 @@ export function Composer({
               if (action.type === 'send') {
                 e.preventDefault();
                 submit();
+                return;
+              }
+              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+                e.preventDefault();
+                if (onStartVoiceChat) {
+                  onStartVoiceChat();
+                } else {
+                  dictation.toggle();
+                }
+                return;
               }
             }}
             disabled={isDisabled}
@@ -906,16 +915,6 @@ export function Composer({
           />
         </div>
 
-        {!value.trim() && onStartVoiceChat ? (
-          <Button
-            label="Start voice chat"
-            size="sm"
-            variant="ghost"
-            icon={<IconMicrophone />}
-            onClick={onStartVoiceChat}
-          />
-        ) : null}
-
         {botId && onInterventionChange && onNotify ? (
           <HoldEverythingControl
             botId={botId}
@@ -929,7 +928,29 @@ export function Composer({
           />
         ) : null}
 
-        <ChatDictationButton dictation={dictation} size="md" />
+        <button
+          type="button"
+          aria-label={dictation.isListening ? 'Stop voice' : 'Voice'}
+          title={dictation.isListening ? 'Stop voice' : 'Voice'}
+          disabled={isDisabled}
+          onClick={() => {
+            if (onStartVoiceChat) {
+              onStartVoiceChat();
+            } else {
+              dictation.toggle();
+            }
+          }}
+          className={`polaris-composer-btn-voice size-8 shrink-0 rounded-full text-foreground/75 ${
+            dictation.isListening ? 'bg-destructive/20 text-destructive' : ''
+          }`}
+          style={
+            dictation.isListening
+              ? { backgroundColor: 'rgba(239, 68, 68, 0.2)', color: 'rgb(239, 68, 68)' }
+              : undefined
+          }
+        >
+          <Mic size={16} strokeWidth={1.8} />
+        </button>
 
         <button
           type="button"
