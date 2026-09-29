@@ -2,6 +2,7 @@ import {type ComponentType, useEffect, useRef, useState} from 'react';
 import {Brain, CloudDownload, Cpu, Gauge, Monitor, Settings, Volume2, X} from 'lucide-react';
 import {ModelSettingsOverlay} from './ModelSettingsOverlay';
 import {MemorySettingsOverlay} from './MemorySettingsOverlay';
+import {VoiceSettingsOverlay} from './VoiceSettingsOverlay';
 
 export type SettingsSection =
   | 'general'
@@ -272,9 +273,7 @@ export function SettingsOverlay({
               ))}
 
               {section === 'voice' && (renderVoice ? renderVoice() : (
-                <div data-testid="voice-settings" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
-                  <p style={{color: 'var(--muted-foreground)', fontSize: '14px'}}>Text-to-speech and audio transcription engines.</p>
-                </div>
+                <VoiceSettingsOverlay embedded onClose={onClose} />
               ))}
 
               {section === 'usage' && (renderUsage ? renderUsage() : (
