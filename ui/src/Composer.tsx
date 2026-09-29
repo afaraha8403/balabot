@@ -150,7 +150,12 @@ export function Composer({
   };
 
   return (
-    <div onKeyDown={onKeyDown}>
+    <fieldset
+      aria-label="Message composer"
+      data-testid="composer-fieldset"
+      onKeyDown={onKeyDown}
+      className="polaris-composer-fieldset rounded-full border border-border bg-background relative z-30 m-0 min-w-0 border-0 px-3 pb-4 pt-3 md:px-6 md:pb-6"
+    >
       {replyingTo ? (
         <HStack
           gap={2}
@@ -176,80 +181,49 @@ export function Composer({
           />
         </HStack>
       ) : null}
-      <ChatComposer
-        value={value}
-        onChange={setValue}
-        onSubmit={() => submit()}
-        onStop={onStop}
-        isStopShown={isStreaming}
-        isDisabled={isDisabled}
-        placeholder={botName ? `Message ${botName}` : 'Message…'}
-        drawer={
-          attachments.length > 0 ? (
-            <ChatComposerDrawer
-              count={attachments.length}
-              label="Attachments"
-              defaultIsCollapsed={false}
-            >
-              <HStack gap={1} wrap="wrap" padding={2}>
-                {attachments.map(a => (
-                  <Token
-                    key={a.id}
-                    label={a.name}
-                    icon={<IconFile />}
-                    onRemove={() =>
-                      setAttachments(prev => prev.filter(x => x.id !== a.id))
-                    }
-                  />
-                ))}
-              </HStack>
-            </ChatComposerDrawer>
-          ) : null
-        }
-        headerActions={
-          <HStack gap={1} vAlign="center" justify="between" width="100%">
-            <HStack gap={1} vAlign="center">
-              <IconButton
-                label="Attach file"
-                size="sm"
-                variant="ghost"
-                icon={<IconAttach />}
-                onClick={() => {
-                  const el = document.createElement('input');
-                  el.type = 'file';
-                  el.multiple = true;
-                  el.onchange = () => {
-                    if (el.files) addFiles(Array.from(el.files));
-                  };
-                  el.click();
-                }}
-              />
-              {!value.trim() && onStartVoiceChat ? (
-                <Button
-                  label="Start voice chat"
-                  size="sm"
-                  variant="ghost"
-                  icon={<IconMicrophone />}
-                  onClick={onStartVoiceChat}
-                />
-              ) : null}
-            </HStack>
 
-            {botId && onInterventionChange && onNotify ? (
-              <HoldEverythingControl
-                botId={botId}
-                botName={botName || 'Bot'}
-                isStreaming={isStreaming}
-                onStopStreaming={onStop}
-                activeIntervention={activeIntervention ?? null}
-                onInterventionChange={onInterventionChange}
-                onNotify={onNotify}
-                onOpenComputer={onOpenComputer}
-              />
-            ) : null}
-          </HStack>
-        }
-        input={
+      {attachments.length > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+          {attachments.map(a => (
+            <div key={a.id} className="polaris-attachment-chip">
+              <IconFile />
+              <span style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {a.name}
+              </span>
+              <button
+                type="button"
+                aria-label={`Remove ${a.name}`}
+                onClick={() => setAttachments(prev => prev.filter(x => x.id !== a.id))}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--muted-foreground)', display: 'inline-flex' }}
+              >
+                <IconClose />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div
+        data-testid="composer-bar"
+        className="polaris-composer-bar flex items-center gap-3.5 rounded-full border border-border bg-background py-[9px] pe-2.5 ps-3 transition-colors focus-within:border-ring"
+      >
+        <IconButton
+          label="Attach file"
+          size="sm"
+          variant="ghost"
+          icon={<IconAttach />}
+          onClick={() => {
+            const el = document.createElement('input');
+            el.type = 'file';
+            el.multiple = true;
+            el.onchange = () => {
+              if (el.files) addFiles(Array.from(el.files));
+            };
+            el.click();
+          }}
+        />
+
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
           <ChatComposerInput
             handleRef={inputRef}
             value={value}
@@ -260,9 +234,42 @@ export function Composer({
             label={botName ? `Message ${botName}` : 'Message input'}
             triggers={triggers}
           />
-        }
-        sendActions={<ChatDictationButton dictation={dictation} size="md" />}
-      />
-    </div>
+        </div>
+
+        {!value.trim() && onStartVoiceChat ? (
+          <Button
+            label="Start voice chat"
+            size="sm"
+            variant="ghost"
+            icon={<IconMicrophone />}
+            onClick={onStartVoiceChat}
+          />
+        ) : null}
+
+        {botId && onInterventionChange && onNotify ? (
+          <HoldEverythingControl
+            botId={botId}
+            botName={botName || 'Bot'}
+            isStreaming={isStreaming}
+            onStopStreaming={onStop}
+            activeIntervention={activeIntervention ?? null}
+            onInterventionChange={onInterventionChange}
+            onNotify={onNotify}
+            onOpenComputer={onOpenComputer}
+          />
+        ) : null}
+
+        <ChatDictationButton dictation={dictation} size="md" />
+
+        <button
+          type="button"
+          aria-label={isStreaming ? "Stop" : "Send"}
+          onClick={() => (isStreaming ? onStop() : submit())}
+          className="polaris-composer-btn-send"
+        >
+          {isStreaming ? "■" : "↑"}
+        </button>
+      </div>
+    </fieldset>
   );
 }
