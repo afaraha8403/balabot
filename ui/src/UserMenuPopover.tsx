@@ -129,6 +129,7 @@ export function UserMenuPopover({
         >
           <button
             type="button"
+            data-testid="user-menu-artifacts"
             className="polaris-menu-item"
             onClick={() => {
               setOpen(false);
@@ -143,6 +144,7 @@ export function UserMenuPopover({
 
           <button
             type="button"
+            data-testid="user-menu-settings"
             className="polaris-menu-item"
             onClick={() => {
               setOpen(false);
