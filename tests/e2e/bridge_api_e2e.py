@@ -528,6 +528,20 @@ def w9_scenarios() -> None:
             "requires W5 effect keys + the OKF vault ledger (not built)")
 
 
+# ── Polaris API guards (shipped-bot 409 and SPA 404 fallback scoping) ────────
+def polaris_api_guards() -> None:
+    """Verify load-bearing API safety invariants:
+    1. DELETE /api/bots/principal must 409 (shipped-bot immutability protection).
+    2. GET /api/nonexistent must 404 with JSON, never serve the SPA HTML shell."""
+    st_del, body_del = delete("/api/bots/principal")
+    check("W3-shipped-bot protection (409)", st_del == 409 and "shipped persona" in body_del,
+          f"HTTP {st_del}", fails_if="shipped bot deletion allowed or not returning 409")
+
+    st_spa, body_spa = get("/api/nonexistent_route_scoping_probe")
+    check("W8-SPA fallback scoping (/api/* must 404)", st_spa == 404 and "api endpoint not found" in body_spa,
+          f"HTTP {st_spa}", fails_if="/api/* route serves HTML shell instead of 404 JSON")
+
+
 # ── driver ────────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -555,6 +569,7 @@ def main() -> int:
     w8_pending_scenarios()
     w8_13_blocking_call_audit()
     w9_scenarios()
+    polaris_api_guards()
 
     width = max(len(n) for n, _, _ in results)
     n_pass = sum(1 for _, s, _ in results if s == PASS)
