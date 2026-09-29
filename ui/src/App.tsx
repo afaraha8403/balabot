@@ -70,6 +70,8 @@ import {GovernanceScreen} from './screens/GovernanceScreen';
 import {OpsScreen} from './screens/OpsScreen';
 import {CostScreen} from './screens/CostScreen';
 import {ArtifactsPage} from './ArtifactsPage';
+import {CallView} from './CallView';
+import {Phone} from 'lucide-react';
 import {CommandPalette, isCommandPaletteHotkey} from './CommandPalette';
 import {InterventionCard} from './InterventionCard';
 import {DraftCard, parseDraftsFromContent} from './DraftCard';
@@ -233,6 +235,7 @@ export default function App() {
   const [clearTarget, setClearTarget] = useState<Bot | null>(null);
   const [showOrphans, setShowOrphans] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showCallView, setShowCallView] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [, setExcluded] = useState<string[]>([]);
   const [pinnedBotIds, setPinnedBotIds] = useState<string[]>(() => loadPinnedBots());
@@ -1342,6 +1345,13 @@ export default function App() {
               {screen === 'chat' && activeBot ? (
                 <>
                   <IconButton
+                    label="Voice call"
+                    size="sm"
+                    variant={showCallView ? 'primary' : 'ghost'}
+                    icon={<Phone size={15} />}
+                    onClick={() => setShowCallView(true)}
+                  />
+                  <IconButton
                     label="Agent computer"
                     size="sm"
                     variant={rightPanelMode === 'screen' && !hideRightPanel ? 'primary' : 'ghost'}
@@ -1837,7 +1847,7 @@ export default function App() {
                   onNotify={setBanner}
                   onOpenComputer={() => setShowComputer(true)}
                   onStartVoiceChat={() => {
-                    setBanner('Voice chat: GrokBot voice channel activated. Speak now.');
+                    setShowCallView(true);
                   }}
                 />
               </div>
@@ -2153,6 +2163,19 @@ export default function App() {
             userName="Ali"
             email="ali@balacode.xyz"
             onFleetChanged={() => void reloadBots()}
+          />
+        ) : null}
+        {showCallView && activeBot ? (
+          <CallView
+            botId={activeBot.id}
+            botName={activeBot.name}
+            isStreaming={isStreaming}
+            streamText={streamText}
+            lastBotReply={activeSession?.messages?.filter(m => m.role === 'assistant')?.slice(-1)[0]?.content}
+            onSend={async (text: string) => {
+              await send(text);
+            }}
+            onClose={() => setShowCallView(false)}
           />
         ) : null}
         {newSectionBot ? (
