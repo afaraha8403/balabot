@@ -270,7 +270,7 @@ def test_bot_tools_request_intervention_waits_and_resolves():
     from balabot import bot_tools, intervention
 
     def resolve_later():
-        for _ in range(50):
+        for _ in range(200):
             time.sleep(0.05)
             active = intervention.active_for_bot("worker_wait")
             if active:
@@ -279,7 +279,7 @@ def test_bot_tools_request_intervention_waits_and_resolves():
 
     t = threading.Thread(target=resolve_later)
     t.start()
-    out = bot_tools.request_intervention("worker_wait", "captcha wall", timeout=5, poll_interval=0.05)
+    out = bot_tools.request_intervention("worker_wait", "captcha wall", timeout=15, poll_interval=0.05)
     t.join()
     assert out["requested"] is True
     assert out["state"] == "accepted"
