@@ -1,4 +1,4 @@
-import {useLayoutEffect, useMemo, useRef, useState} from 'react';
+import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {ChatComposer} from '@astryxdesign/core/Chat';
 import {ChatComposerInput} from '@astryxdesign/core/Chat';
 import {ChatComposerDrawer} from '@astryxdesign/core/Chat';
@@ -93,6 +93,36 @@ export function Composer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<SkillEntry | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<ComposerMention[]>([]);
+  const [replyAnnouncement, setReplyAnnouncement] = useState('');
+  const replyAnnouncementKind = useRef<'reply' | 'cancelled' | null>(null);
+  const prevReplyTarget = useRef<{sender: string; text: string} | null>(null);
+  const announceTimer = useRef(0);
+
+  useEffect(() => () => window.clearTimeout(announceTimer.current), []);
+
+  useEffect(() => {
+    const prev = prevReplyTarget.current;
+    prevReplyTarget.current = replyingTo ?? null;
+    if (!replyingTo) {
+      window.clearTimeout(announceTimer.current);
+      if (replyAnnouncementKind.current === 'reply') {
+        replyAnnouncementKind.current = null;
+        setReplyAnnouncement('');
+      }
+      return;
+    }
+    if (!prev || prev.text !== replyingTo.text || prev.sender !== replyingTo.sender) {
+      textareaRef.current?.focus();
+      setReplyAnnouncement('');
+      replyAnnouncementKind.current = null;
+      window.clearTimeout(announceTimer.current);
+      announceTimer.current = window.setTimeout(() => {
+        replyAnnouncementKind.current = 'reply';
+        setReplyAnnouncement(`Replying to ${replyingTo.sender}`);
+      }, 50);
+    }
+  }, [replyingTo]);
+
   const dragDepth = useRef(0);
   const [draggingFiles, setDraggingFiles] = useState(false);
 
@@ -321,30 +351,38 @@ export function Composer({
         draggingFiles ? "rounded-[14px] ring-2 ring-inset ring-ring" : ""
       }`}
     >
+      <div role="status" data-testid="composer-announcement" className="sr-only">
+        {replyAnnouncement}
+      </div>
+
       {replyingTo ? (
-        <HStack
-          gap={2}
-          vAlign="center"
-          justify="between"
-          padding={2}
-          style={{
-            backgroundColor: 'var(--muted)',
-            borderRadius: 'var(--radius-sm)',
-            marginBottom: 'var(--spacing-1)',
-            borderLeft: 'var(--spacing-0-5) solid var(--accent)',
-          }}
+        <div
+          data-testid="reply-chip"
+          className="polaris-reply-chip mb-2 flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-1.5 text-[13px] text-foreground/75"
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}
         >
-          <Text type="supporting" size="xsm" color="accent">
-            Replying to {replyingTo.sender}: &ldquo;{replyingTo.text.slice(0, 60)}{replyingTo.text.length > 60 ? '…' : ''}&rdquo;
-          </Text>
-          <IconButton
-            label="Cancel reply"
-            size="sm"
-            variant="ghost"
-            icon={<IconClose />}
-            onClick={onCancelReply}
-          />
-        </HStack>
+          <span
+            className="min-w-0 flex-1 truncate text-muted-foreground"
+            style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          >
+            Replying to {replyingTo.sender}: &ldquo;{replyingTo.text}&rdquo;
+          </span>
+          <button
+            type="button"
+            aria-label="Cancel reply"
+            onClick={() => {
+              replyAnnouncementKind.current = 'cancelled';
+              window.clearTimeout(announceTimer.current);
+              onCancelReply?.();
+              setReplyAnnouncement('Reply cancelled');
+              textareaRef.current?.focus();
+            }}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--muted-foreground)', display: 'inline-flex', padding: 0 }}
+          >
+            <X size={13} strokeWidth={2} />
+          </button>
+        </div>
       ) : null}
 
       {attachments.length > 0 ? (
