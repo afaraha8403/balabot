@@ -182,24 +182,13 @@ export function CommandPalette({
         },
       },
       {
-        id: 'action-memory',
+        id: 'action-fleet',
         category: 'Actions',
-        label: 'View Holographic Memory',
-        subtitle: 'Inspect agent knowledge and facts',
-        icon: <IconMemory size="sm" color="secondary" />,
+        label: 'Fleet & Agent Hierarchy',
+        subtitle: 'Inspect agents, models, and status tree (/app/fleet)',
+        icon: <IconSkills size="sm" color="accent" />,
         onExecute: () => {
-          onAction('memory');
-          onClose();
-        },
-      },
-      {
-        id: 'action-ops',
-        category: 'Actions',
-        label: 'System Operations & Services',
-        subtitle: 'Health and running services',
-        icon: <IconOps size="sm" color="secondary" />,
-        onExecute: () => {
-          onAction('ops');
+          onAction('nav-agents');
           onClose();
         },
       },
@@ -207,10 +196,54 @@ export function CommandPalette({
         id: 'action-cost',
         category: 'Actions',
         label: 'Cost & Spend Ledger',
-        subtitle: 'Model token usage and burn rates',
+        subtitle: 'Model token usage and burn rates (/app/cost)',
         icon: <IconCost size="sm" color="secondary" />,
         onExecute: () => {
-          onAction('cost');
+          onAction('nav-cost');
+          onClose();
+        },
+      },
+      {
+        id: 'action-decisions',
+        category: 'Actions',
+        label: 'Decisions Ledger',
+        subtitle: 'Shadow decision ledger and evaluations (/app/decisions)',
+        icon: <IconGovernance size="sm" color="secondary" />,
+        onExecute: () => {
+          onAction('nav-decisions');
+          onClose();
+        },
+      },
+      {
+        id: 'action-governance',
+        category: 'Actions',
+        label: 'Governance & Audit Ledger',
+        subtitle: 'Inspect immutable OKF decisions (/app/governance)',
+        icon: <IconGovernance size="sm" color="secondary" />,
+        onExecute: () => {
+          onAction('nav-governance');
+          onClose();
+        },
+      },
+      {
+        id: 'action-memory',
+        category: 'Actions',
+        label: 'View Holographic Memory',
+        subtitle: 'Inspect agent knowledge and facts (/app/memory)',
+        icon: <IconMemory size="sm" color="secondary" />,
+        onExecute: () => {
+          onAction('nav-memory');
+          onClose();
+        },
+      },
+      {
+        id: 'action-ops',
+        category: 'Actions',
+        label: 'System Operations & Services',
+        subtitle: 'Health and running services (/app/ops)',
+        icon: <IconOps size="sm" color="secondary" />,
+        onExecute: () => {
+          onAction('nav-ops');
           onClose();
         },
       },
@@ -222,17 +255,6 @@ export function CommandPalette({
         icon: <IconSkills size="sm" color="accent" />,
         onExecute: () => {
           onAction('nav-artifacts');
-          onClose();
-        },
-      },
-      {
-        id: 'action-governance',
-        category: 'Actions',
-        label: 'Governance & Audit Ledger',
-        subtitle: 'Inspect immutable OKF decisions',
-        icon: <IconGovernance size="sm" color="secondary" />,
-        onExecute: () => {
-          onAction('governance');
           onClose();
         },
       },

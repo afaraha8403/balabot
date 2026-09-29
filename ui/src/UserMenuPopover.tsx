@@ -3,6 +3,7 @@ import {useEffect, useRef, useState} from 'react';
 type Props = {
   userName?: string;
   onNavigateArtifacts: () => void;
+  onNavigateScreen?: (screen: 'agents' | 'cost' | 'decisions' | 'governance' | 'memory' | 'ops') => void;
   onOpenSettings: (tab?: string) => void;
   onOpenUsage: () => void;
   onSignOut: () => void;
@@ -10,11 +11,13 @@ type Props = {
 
 /**
  * Polaris footer user menu popover:
- * User avatar + name trigger opening popover with Artifacts, Settings, Usage, and Sign Out.
+ * User avatar + name trigger opening popover with deep screens (Fleet, Cost, Decisions,
+ * Governance, Memory, Ops), Artifacts, Settings, Usage, and Sign Out.
  */
 export function UserMenuPopover({
   userName = 'Ali',
   onNavigateArtifacts,
+  onNavigateScreen,
   onOpenSettings,
   onOpenUsage,
   onSignOut,
@@ -112,11 +115,14 @@ export function UserMenuPopover({
       {open ? (
         <div
           data-testid="user-menu-popover"
+          className="rk-scroll"
           style={{
             position: 'absolute',
             bottom: 'calc(100% + 6px)',
             left: 0,
-            width: '210px',
+            width: '224px',
+            maxHeight: '380px',
+            overflowY: 'auto',
             backgroundColor: 'var(--popover)',
             color: 'var(--popover-foreground)',
             border: '1px solid var(--border)',
@@ -127,6 +133,109 @@ export function UserMenuPopover({
             boxSizing: 'border-box',
           }}
         >
+          {/* Deep Screens */}
+          <button
+            type="button"
+            data-testid="user-menu-fleet"
+            className="polaris-menu-item"
+            onClick={() => {
+              setOpen(false);
+              onNavigateScreen?.('agents');
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            <span>Fleet & Hierarchy</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="user-menu-cost"
+            className="polaris-menu-item"
+            onClick={() => {
+              setOpen(false);
+              onNavigateScreen?.('cost');
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="12" y1="1" x2="12" y2="23" />
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
+            <span>Cost & Usage</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="user-menu-decisions"
+            className="polaris-menu-item"
+            onClick={() => {
+              setOpen(false);
+              onNavigateScreen?.('decisions');
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="9 11 12 14 22 4" />
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+            </svg>
+            <span>Decisions Ledger</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="user-menu-governance"
+            className="polaris-menu-item"
+            onClick={() => {
+              setOpen(false);
+              onNavigateScreen?.('governance');
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            <span>Governance Ledger</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="user-menu-memory"
+            className="polaris-menu-item"
+            onClick={() => {
+              setOpen(false);
+              onNavigateScreen?.('memory');
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <ellipse cx="12" cy="5" rx="9" ry="3" />
+              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+            </svg>
+            <span>Holographic Memory</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="user-menu-ops"
+            className="polaris-menu-item"
+            onClick={() => {
+              setOpen(false);
+              onNavigateScreen?.('ops');
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+              <line x1="6" y1="6" x2="6.01" y2="6" />
+              <line x1="6" y1="18" x2="6.01" y2="18" />
+            </svg>
+            <span>Container Ops</span>
+          </button>
+
+          <div className="polaris-menu-separator" />
+
           <button
             type="button"
             data-testid="user-menu-artifacts"

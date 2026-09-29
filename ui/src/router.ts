@@ -22,7 +22,8 @@ export function parseRoute(pathname: string, search: string = ''): AppRoute {
   const screenParam = searchParams.get('screen');
 
   if (screenParam) {
-    return { kind: 'screen', screen: screenParam };
+    const s = screenParam === 'fleet' ? 'agents' : screenParam;
+    return { kind: 'screen', screen: s };
   }
 
   // /app/artifacts or /artifacts, optionally with /:artifactId
@@ -42,7 +43,10 @@ export function parseRoute(pathname: string, search: string = ''): AppRoute {
     }
   }
 
-  // Secondary screens: /app/agents, /app/memory, etc.
+  // Deep routes: /app/fleet, /app/cost, /app/decisions, /app/governance, /app/memory, /app/ops
+  if (clean === '/app/fleet' || clean === '/fleet') {
+    return { kind: 'screen', screen: 'agents' };
+  }
   const knownScreens = ['agents', 'memory', 'decisions', 'governance', 'ops', 'cost'];
   for (const s of knownScreens) {
     if (clean === `/app/${s}` || clean === `/${s}`) {
@@ -74,7 +78,7 @@ export function routeToUrl(route: AppRoute): string {
         ? `/app/artifacts/${encodeURIComponent(route.artifactId)}`
         : '/app/artifacts';
     case 'screen':
-      return `/app/${encodeURIComponent(route.screen)}`;
+      return route.screen === 'agents' ? '/app/fleet' : `/app/${encodeURIComponent(route.screen)}`;
     case 'app':
       return route.botId ? `/app/${encodeURIComponent(route.botId)}` : '/app';
   }

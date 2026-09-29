@@ -216,7 +216,15 @@ type ScreenId =
 export default function App() {
   const [route] = useRoute();
   const [hydrated, setHydrated] = useState(false);
-  const [screen, setScreen] = useState<ScreenId>('chat');
+  const [screen, setScreen] = useState<ScreenId>(() => {
+    if (typeof window !== 'undefined') {
+      const initialRoute = parseRoute(window.location.pathname, window.location.search);
+      if (initialRoute.kind === 'screen') {
+        return initialRoute.screen as ScreenId;
+      }
+    }
+    return 'chat';
+  });
   const [bots, setBots] = useState<Bot[]>([]);
   const [activeBotId, setActiveBotId] = useState<string | null>(null);
   const [rosterQuery, setRosterQuery] = useState('');
@@ -1157,6 +1165,10 @@ export default function App() {
               onNavigateArtifacts={() => {
                 setScreen('chat');
                 navigateTo('/app/artifacts');
+              }}
+              onNavigateScreen={(targetScreen) => {
+                setScreen(targetScreen);
+                navigateTo(targetScreen === 'agents' ? '/app/fleet' : `/app/${targetScreen}`);
               }}
               onOpenSettings={(tab) => {
                 setSettingsSection((tab as SettingsSection) || 'general');
@@ -2237,25 +2249,25 @@ export default function App() {
               setShowGroups(true);
             } else if (action === 'open-skills') setShowSkills(true);
             else if (action === 'open-computer') setShowComputer(true);
-            else if (action === 'nav-agents') {
+            else if (action === 'nav-agents' || action === 'nav-fleet' || action === 'agents' || action === 'fleet') {
               setScreen('agents');
-              navigateTo('/app/agents');
-            } else if (action === 'nav-memory') {
+              navigateTo('/app/fleet');
+            } else if (action === 'nav-memory' || action === 'memory') {
               setScreen('memory');
               navigateTo('/app/memory');
-            } else if (action === 'nav-decisions') {
+            } else if (action === 'nav-decisions' || action === 'decisions') {
               setScreen('decisions');
               navigateTo('/app/decisions');
-            } else if (action === 'nav-governance') {
+            } else if (action === 'nav-governance' || action === 'governance') {
               setScreen('governance');
               navigateTo('/app/governance');
-            } else if (action === 'nav-ops') {
+            } else if (action === 'nav-ops' || action === 'ops') {
               setScreen('ops');
               navigateTo('/app/ops');
-            } else if (action === 'nav-cost') {
+            } else if (action === 'nav-cost' || action === 'cost') {
               setScreen('cost');
               navigateTo('/app/cost');
-            } else if (action === 'nav-artifacts') {
+            } else if (action === 'nav-artifacts' || action === 'artifacts') {
               navigateTo('/app/artifacts');
             } else if (action === 'toggle-theme') handleSetTheme(themeMode === 'light' ? 'dark' : 'light');
           }}
