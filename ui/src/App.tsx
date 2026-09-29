@@ -25,6 +25,7 @@ import {Text} from '@astryxdesign/core/Text';
 import {Token} from '@astryxdesign/core/Token';
 import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {Markdown} from '@astryxdesign/core/Markdown';
+import {ChatMarkdown} from './ChatMarkdown';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {Composer} from './Composer';
@@ -178,7 +179,7 @@ function ThinkingBlock({
     >
       <Card variant="muted" padding={3}>
         <Text type="supporting" color="secondary">
-          <Markdown isStreaming={false}>{text}</Markdown>
+          <ChatMarkdown>{text}</ChatMarkdown>
         </Text>
       </Card>
     </Collapsible>
@@ -1541,7 +1542,7 @@ export default function App() {
                                       <ThinkingBlock text={m.thinking} theme={themeMode} />
                                     ) : null}
                                     <div data-quote-message-id={messageId}>
-                                      <Markdown isStreaming={false}>{m.content}</Markdown>
+                                      <ChatMarkdown>{m.content}</ChatMarkdown>
                                     </div>
                                     {m.attachments && m.attachments.length > 0 ? (
                                       <VStack gap={2} align="start" width="100%" style={{ marginTop: '8px' }}>
@@ -1676,7 +1677,7 @@ export default function App() {
                                   <ThinkingBlock text={streamThinking} isLive theme={themeMode} />
                                 ) : null}
                                 {displayed ? (
-                                  <Markdown isStreaming>{displayed}</Markdown>
+                                  <ChatMarkdown streaming>{displayed}</ChatMarkdown>
                                 ) : (
                                   <HStack gap={2} vAlign="center">
                                     <ThinkingOrb
