@@ -11,6 +11,7 @@ import {IconWarning} from './icons';
 import {BotAvatar} from './BotAvatar';
 import {ComputerMaintenanceActions} from './ComputerMaintenanceActions';
 import {TeachComputerOverlayControl} from './TeachComputerOverlayControl';
+import {TeachRecordingChrome} from './TeachRecordingChrome';
 import {ComputerWorkspace} from './ComputerWorkspace';
 import {TerminalApp} from './TerminalApp';
 import {FilesApp} from './FilesApp';
@@ -269,9 +270,18 @@ export function AgentComputerDialog({bot, onClose}: Props) {
               identity={bot.id}
               size={28}
             />
-            <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '15.5px', fontWeight: 500, color: 'var(--foreground)'}} dir="auto">
-              {bot.name}
-            </span>
+            {isRecording ? (
+              <TeachRecordingChrome
+                goal={teachGoal}
+                expiresAt={Date.now() + recordingSecondsRemaining * 1000}
+                variant="overlay"
+                onStop={handleStopTeaching}
+              />
+            ) : (
+              <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '15.5px', fontWeight: 500, color: 'var(--foreground)'}} dir="auto">
+                {bot.name}
+              </span>
+            )}
             {inputsEnabled ? (
               <span
                 style={{
@@ -438,31 +448,13 @@ export function AgentComputerDialog({bot, onClose}: Props) {
 
         {/* Polaris TeachRecordingChrome banner */}
         {isRecording ? (
-          <div
-            data-testid="teach-recording"
-            style={{
-              padding: 'var(--spacing-3) var(--spacing-4)',
-              backgroundColor: 'var(--card)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-md)',
-              borderLeft: 'var(--spacing-1) solid var(--destructive)',
-            }}
-          >
-            <div style={{fontSize: 'var(--font-size-sm)', fontWeight: 500, color: 'var(--foreground)'}}>
-              Recording: {teachGoal}
-            </div>
-            <div style={{marginTop: 'var(--spacing-1)', fontSize: 'var(--font-size-xs)', color: 'var(--muted-foreground)'}}>
-              {formatTimer(recordingSecondsRemaining)} left · bot is watching, not acting
-            </div>
-            <div style={{marginTop: 'var(--spacing-1)', fontSize: 'var(--font-size-xs)', color: 'var(--destructive)'}}>
-              Do not type passwords into the demo. Use Take control for credentials.
-            </div>
-            {recordedSteps.length > 0 ? (
-              <div style={{marginTop: 'var(--spacing-2)', fontSize: 'var(--font-size-xs)', color: 'var(--muted-foreground)'}}>
-                Actions captured: {recordedSteps.length}
-              </div>
-            ) : null}
-          </div>
+          <TeachRecordingChrome
+            goal={teachGoal}
+            expiresAt={Date.now() + recordingSecondsRemaining * 1000}
+            actionsCount={recordedSteps.length}
+            onStop={handleStopTeaching}
+            variant="panel"
+          />
         ) : null}
 
         {resetMessage ? (
