@@ -300,6 +300,84 @@ def test_all_product_durable_stores_report_wal_journal_mode(tmp_path, monkeypatc
         assert mode == "wal", f"balabot-jev store at {jev_db} journal_mode must be wal, got {mode}"
 
 
+def test_boot_wal_sweep_covers_all_product_stores(tmp_path, monkeypatch):
+    """Gap 4b: Boot sweep must cover all product-owned stores and enforce WAL at rest."""
+    import sqlite3
+    from balabot.sessions import get_product_store_paths, sweep_wal_mode
+    from balabot import bootstrap
+
+    monkeypatch.setenv("BALABOT_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+
+    # 1. Single source of truth must include all 7 required product store paths
+    stores = get_product_store_paths(data_root=tmp_path, hermes_home=tmp_path)
+    store_str_paths = [str(p) for p in stores]
+
+    required_relative_paths = [
+        "sessions/continuity.db",
+        "sessions/queue.db",
+        "handoffs/handoffs.db",
+        "interventions/interventions.db",
+        "memory/balabot-jev/continuity.db",
+        "profiles/principal/memory/balabot-jev/continuity.db",
+        "profiles/governor/memory/balabot-jev/continuity.db",
+    ]
+    for rel in required_relative_paths:
+        expected = tmp_path / rel
+        assert any(p.resolve() == expected.resolve() for p in stores), (
+            f"get_product_store_paths() must cover {rel}; found: {store_str_paths}"
+        )
+
+    # 2. Populate each product store with standard SQLite databases in 'delete' mode (not WAL)
+    for p in stores:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(str(p)) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS probe (x INT)")
+            mode = conn.execute("PRAGMA journal_mode").fetchone()[0].lower()
+            assert mode == "delete", f"Expected initial delete mode for {p}, got {mode}"
+
+    # 3. Verify sweep converts all existing stores to 'wal'
+    actions = sweep_wal_mode(data_root=tmp_path, hermes_home=tmp_path)
+    assert len(actions) == len(stores)
+    for p in stores:
+        with sqlite3.connect(str(p)) as conn:
+            mode = conn.execute("PRAGMA journal_mode").fetchone()[0].lower()
+            assert mode == "wal", f"Store {p} was not converted to WAL by sweep; got {mode}"
+
+    # 4. Idempotency: running a second sweep reports 'already wal'
+    actions2 = sweep_wal_mode(data_root=tmp_path, hermes_home=tmp_path)
+    for act in actions2:
+        assert "already wal" in act, f"Subsequent sweep should report already wal, got: {act}"
+
+    # 5. Fault tolerance: missing files, locked files, and non-DB files must not raise
+    missing_path = tmp_path / "sessions" / "nonexistent.db"
+    corrupt_path = tmp_path / "sessions" / "corrupt.db"
+    corrupt_path.write_text("NOT A SQLITE DATABASE", encoding="utf-8")
+    fault_actions = sweep_wal_mode(store_paths=[missing_path, corrupt_path])
+    assert any("absent" in act or "missing" in act for act in fault_actions)
+    assert any("invalid" in act or "error" in act for act in fault_actions)
+
+    # 6. Prove boot sequence actually calls the sweep: monkeypatch sweep to track calls
+    called = []
+
+    def fake_sweep(*args, **kwargs):
+        called.append(True)
+        return ["fake_action"]
+
+    monkeypatch.setattr(bootstrap, "sweep_wal_mode", fake_sweep)
+    monkeypatch.setattr(bootstrap, "install_memory_plugin", lambda *a, **k: [])
+    monkeypatch.setattr(bootstrap, "install_agent_plugins", lambda *a, **k: [])
+    monkeypatch.setattr(bootstrap, "_normalize_store_ownership", lambda *a, **k: [])
+    monkeypatch.setattr(bootstrap, "init_org", lambda *a, **k: [])
+    monkeypatch.setattr(bootstrap, "provision_persona", lambda name, *a, **k: {"persona": name, "actions": []})
+    monkeypatch.setattr(bootstrap, "install_skills", lambda *a, **k: [])
+    monkeypatch.setattr(bootstrap, "init_ledger", lambda *a, **k: [])
+    monkeypatch.setattr(bootstrap, "_run_jev_boot_health", lambda *a, **k: None)
+
+    bootstrap.run_bootstrap()
+    assert len(called) > 0, "run_bootstrap() must invoke sweep_wal_mode() at boot!"
+
+
 def test_durable_stores_backup_and_integrity_check(tmp_path, monkeypatch):
     """Gap 4: Every durable store must support online backup and integrity check."""
     import sqlite3

@@ -28,6 +28,7 @@ import yaml
 
 from . import __version__
 from .jev import JevHealth
+from .sessions import sweep_wal_mode
 
 # Environment keys each profile .env may carry, if present in the process env.
 # Never values -- the bootstrap copies what exists and says nothing about it.
@@ -626,7 +627,12 @@ def _normalize_store_ownership() -> list[str]:
         return [f"store ownership not normalised: no pwd module on this host"]
 
     home = _hermes_home()
-    targets = [home / "sessions", home / "memory" / MEMORY_PLUGIN_DIRNAME]
+    targets = [
+        home / "sessions",
+        home / "handoffs",
+        home / "interventions",
+        home / "memory" / MEMORY_PLUGIN_DIRNAME,
+    ]
     profiles = home / "profiles"
     if profiles.is_dir():
         targets += [
@@ -702,6 +708,7 @@ def run_bootstrap() -> list[dict[str, Any]]:
         # by reachability alone.
         _run_jev_boot_health(name)
         reports.append(report)
+    wal_actions = sweep_wal_mode()
     for report in reports:
         print(f"[balabot {__version__}] persona '{report['persona']}':")
         for action in report["actions"]:
@@ -713,6 +720,9 @@ def run_bootstrap() -> list[dict[str, Any]]:
         print(f"  - {action}")
     print(f"[balabot {__version__}] memory provider:")
     for action in plugin_actions:
+        print(f"  - {action}")
+    print(f"[balabot {__version__}] WAL sweep:")
+    for action in wal_actions:
         print(f"  - {action}")
     return reports
 

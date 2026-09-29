@@ -55,7 +55,7 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 __all__ = [
     "SessionError",
@@ -63,6 +63,8 @@ __all__ = [
     "SessionStore",
     "backup_sessions_db",
     "verify_sessions_integrity",
+    "get_product_store_paths",
+    "sweep_wal_mode",
 ]
 
 DEFAULT_DB_PATH = "/opt/data/sessions/continuity.db"
@@ -490,6 +492,135 @@ def verify_sessions_integrity() -> bool:
         return store.integrity_check()
 
 
+# ----------------------------------------------------------------------
+# Product-Owned Durable Store Discovery and WAL Mode Enforcement
+# ----------------------------------------------------------------------
+
+
+def get_product_store_paths(
+    data_root: str | Path | None = None,
+    hermes_home: str | Path | None = None,
+) -> list[Path]:
+    """Return the list of all product-owned durable SQLite store paths.
+
+    Single source of truth for durable product stores across boot sweep
+    and acceptance / invariant tests.
+    """
+    root = (
+        Path(data_root)
+        if data_root is not None
+        else Path(os.environ.get("BALABOT_DATA_ROOT", "/opt/data"))
+    )
+    if hermes_home is not None:
+        home = Path(hermes_home)
+    else:
+        env_home = os.environ.get("HERMES_HOME")
+        home = Path(env_home) if env_home else root
+
+    paths: list[Path] = []
+
+    # 1. Continuity store (balabot.sessions)
+    cont_env = os.environ.get("BALABOT_CONTINUITY_DB")
+    paths.append(Path(cont_env) if cont_env else (root / "sessions" / "continuity.db"))
+
+    # 2. Queue store (balabot.queueing)
+    q_env = os.environ.get("BALABOT_QUEUE_DB")
+    paths.append(Path(q_env) if q_env else (root / "sessions" / "queue.db"))
+    if (root / "queue" / "queue.db").exists():
+        paths.append(root / "queue" / "queue.db")
+
+    # 3. Inter-bot handoffs store (balabot.handoffs)
+    h_env = os.environ.get("BALABOT_HANDOFFS_DB")
+    paths.append(Path(h_env) if h_env else (root / "handoffs" / "handoffs.db"))
+
+    # 4. Human intervention store (balabot.intervention)
+    iv_env = os.environ.get("BALABOT_INTERVENTIONS_DB")
+    paths.append(Path(iv_env) if iv_env else (root / "interventions" / "interventions.db"))
+
+    # 5. balabot-jev memory plugin stores (root and profile homes)
+    paths.append(home / "memory" / "balabot-jev" / "continuity.db")
+
+    profiles_dir = home / "profiles"
+    profile_names = {"principal", "governor"}
+    if profiles_dir.is_dir():
+        for child in sorted(profiles_dir.iterdir()):
+            if child.is_dir():
+                profile_names.add(child.name)
+    for name in sorted(profile_names):
+        paths.append(profiles_dir / name / "memory" / "balabot-jev" / "continuity.db")
+
+    seen: set[str] = set()
+    deduped: list[Path] = []
+    for p in paths:
+        try:
+            norm = str(p.resolve())
+        except Exception:
+            norm = str(p)
+        if norm not in seen:
+            seen.add(norm)
+            deduped.append(p)
+    return deduped
+
+
+def sweep_wal_mode(
+    store_paths: Iterable[Path | str] | None = None,
+    data_root: str | Path | None = None,
+    hermes_home: str | Path | None = None,
+) -> list[str]:
+    """Idempotent sweep applying PRAGMA journal_mode = WAL across product stores.
+
+    Tolerates missing files, locked databases, and non-product/corrupt files.
+    Never fails container startup. Logs what it changed.
+    """
+    targets = (
+        [Path(p) for p in store_paths]
+        if store_paths is not None
+        else get_product_store_paths(data_root=data_root, hermes_home=hermes_home)
+    )
+    actions: list[str] = []
+    for path in targets:
+        if not path.is_file():
+            actions.append(f"{path} (absent, skipped)")
+            continue
+
+        try:
+            conn = sqlite3.connect(str(path), timeout=5.0)
+            try:
+                row = conn.execute("PRAGMA journal_mode").fetchone()
+                current_mode = (row[0] if row else "").lower()
+                if current_mode != "wal":
+                    row = conn.execute("PRAGMA journal_mode = WAL").fetchone()
+                    new_mode = (row[0] if row else "").lower()
+                    actions.append(f"{path} journal_mode: {current_mode} -> {new_mode}")
+                else:
+                    actions.append(f"{path} journal_mode: already wal")
+            finally:
+                conn.close()
+        except sqlite3.OperationalError as exc:
+            print(f"[balabot] WARNING: WAL sweep: {path} is locked/busy ({exc})")
+            actions.append(f"{path} locked ({exc})")
+        except sqlite3.DatabaseError as exc:
+            print(f"[balabot] WARNING: WAL sweep: {path} is not a valid SQLite database ({exc})")
+            actions.append(f"{path} invalid ({exc})")
+        except Exception as exc:
+            print(f"[balabot] WARNING: WAL sweep: {path} unexpected error ({exc})")
+            actions.append(f"{path} error ({exc})")
+
+        # Best-effort chown to runtime user hermes if running as root on POSIX
+        if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() == 0:
+            try:
+                import pwd
+                rec = pwd.getpwnam("hermes")
+                for ext in ("", "-wal", "-shm"):
+                    sp = Path(str(path) + ext)
+                    if sp.exists():
+                        os.chown(sp, rec.pw_uid, rec.pw_gid)
+            except Exception:
+                pass
+
+    return actions
+
+
 if __name__ == "__main__":
     import sys
     argv = sys.argv[1:]
@@ -502,5 +633,9 @@ if __name__ == "__main__":
         ok = verify_sessions_integrity()
         print(json.dumps({"ok": ok, "status": "ok" if ok else "corrupt"}, indent=2))
         sys.exit(0 if ok else 1)
-    print("usage: python -m balabot.sessions backup [dest] | verify", file=sys.stderr)
+    if argv[:1] == ["sweep-wal"]:
+        actions = sweep_wal_mode()
+        print(json.dumps({"ok": True, "actions": actions}, indent=2))
+        sys.exit(0)
+    print("usage: python -m balabot.sessions backup [dest] | verify | sweep-wal", file=sys.stderr)
     sys.exit(2)
