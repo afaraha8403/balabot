@@ -429,3 +429,29 @@
   }
 }
 }
+
+/* Polaris Transcript Message Anatomy */
+.group\/message [data-testid="message-hover-time"] {
+  opacity: 0;
+  transition: opacity 150ms ease;
+  pointer-events: none;
+}
+.group\/message:hover [data-testid="message-hover-time"],
+.group\/message:focus-within [data-testid="message-hover-time"] {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .group\/message [data-testid="message-hover-rail"] {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms ease;
+  }
+  .group\/message:hover [data-testid="message-hover-rail"],
+  .group\/message:focus-within [data-testid="message-hover-rail"],
+  [data-testid="message-hover-rail"][data-pinned="true"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+

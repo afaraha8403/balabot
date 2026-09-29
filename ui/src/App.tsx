@@ -71,7 +71,7 @@ import {VoiceMemoCard} from './VoiceMemoCard';
 import {HoldEverythingControl} from './HoldEverythingControl';
 import {RoutinesList} from './RoutinesList';
 import {FilePreviewCard} from './FilePreviewCard';
-import {MessageHoverMetadata} from './MessageHoverMetadata';
+import {MessageHoverMetadata, MessageHoverActions} from './MessageHoverMetadata';
 import {WindowChrome} from './WindowChrome';
 import {ShellSkeleton} from './ShellSkeleton';
 import {useRoute, navigateTo, parseRoute} from './router';
@@ -1398,6 +1398,28 @@ export default function App() {
                             className="group/message relative hover:z-20"
                             style={{ position: 'relative' }}
                           >
+                            <time
+                              dateTime={new Date(m.at).toISOString()}
+                              data-testid="message-hover-time"
+                              className={`pointer-events-none absolute top-1 z-10 text-xs tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 ${
+                                isUser ? 'start-0' : 'end-0'
+                              }`}
+                              style={{
+                                position: 'absolute',
+                                top: '-18px',
+                                [isUser ? 'right' : 'left']: '0',
+                                zIndex: 10,
+                                fontSize: '12px',
+                                color: 'var(--muted-foreground)',
+                                pointerEvents: 'none',
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {new Date(m.at).toLocaleTimeString([], {
+                                hour: 'numeric',
+                                minute: '2-digit',
+                              })}
+                            </time>
                             <div
                               className={`relative flex ${isUser ? 'justify-end' : 'justify-start'}`}
                               style={{
@@ -1534,48 +1556,52 @@ export default function App() {
                                   </div>
                                 )}
 
-                                <MessageHoverMetadata side={isUser ? 'start' : 'end'}>
-                                  <HStack gap={1} vAlign="center" wrap="wrap" style={{paddingInline: 'var(--spacing-1)'}}>
-                                    {Object.entries(m.reactions || {}).map(([emoji, count]) =>
-                                      count > 0 ? (
-                                        <Button
-                                          key={emoji}
-                                          label={`${emoji} ${count}`}
-                                          size="sm"
-                                          variant="ghost"
-                                          onClick={() => handleToggleReaction(i, emoji)}
-                                        />
-                                      ) : null,
-                                    )}
-                                    <HStack gap={1} vAlign="center">
-                                      {['👍', '❤️', '🚀'].map(emoji => (
-                                        <button
-                                          key={emoji}
-                                          type="button"
-                                          className="message-reaction-button"
-                                          title={`React with ${emoji}`}
-                                          aria-label={`React ${emoji}`}
-                                          onClick={() => handleToggleReaction(i, emoji)}
-                                        >
-                                          {emoji}
-                                        </button>
-                                      ))}
-                                      <Button
-                                        label="Reply"
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() =>
-                                          setReplyingToMessage({
-                                            sender: isUser ? 'You' : activeBot.name,
-                                            text: m.content,
-                                          })
-                                        }
-                                      />
-                                    </HStack>
-                                  </HStack>
-                                </MessageHoverMetadata>
+                                <MessageHoverActions
+                                  content={m.content}
+                                  side={isUser ? 'start' : 'end'}
+                                  onReply={() =>
+                                    setReplyingToMessage({
+                                      sender: isUser ? 'You' : activeBot.name,
+                                      text: m.content,
+                                    })
+                                  }
+                                  onReact={(emoji) => handleToggleReaction(i, emoji)}
+                                />
                               </div>
                             </div>
+                            {m.reactions && Object.entries(m.reactions).some(([_, count]) => count > 0) ? (
+                              <div
+                                data-testid="message-reactions"
+                                style={{
+                                  marginTop: '4px',
+                                  display: 'flex',
+                                  flexWrap: 'wrap',
+                                  gap: '4px',
+                                  justifyContent: isUser ? 'flex-end' : 'flex-start',
+                                }}
+                              >
+                                {Object.entries(m.reactions).map(([emoji, count]) =>
+                                  count > 0 ? (
+                                    <span
+                                      key={emoji}
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        borderRadius: '9999px',
+                                        border: '1px solid var(--border)',
+                                        backgroundColor: 'var(--muted)',
+                                        padding: '2px 8px',
+                                        fontSize: '12px',
+                                        cursor: 'pointer',
+                                      }}
+                                      onClick={() => handleToggleReaction(i, emoji)}
+                                    >
+                                      {emoji} {count > 1 ? ` ${count}` : ''}
+                                    </span>
+                                  ) : null,
+                                )}
+                              </div>
+                            ) : null}
                           </div>
                         );
                       })}
