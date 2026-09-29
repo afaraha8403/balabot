@@ -37,6 +37,7 @@ import {SecretRequestCard} from './SecretRequestCard';
 import {OpenUIRenderer} from './openui/OpenUIRenderer';
 import {SkillLibraryDialog} from './SkillLibraryDialog';
 import {PluginsOverlay} from './PluginsOverlay';
+import {McpServersOverlay} from './McpServersOverlay';
 import {GroupChatDialog} from './GroupChatDialog';
 import {BotSettings} from './BotSettings';
 import {CreateBotForm} from './CreateBotForm';
@@ -225,6 +226,7 @@ export default function App() {
   const [showComputer, setShowComputer] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
   const [showPlugins, setShowPlugins] = useState(false);
+  const [showMcp, setShowMcp] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
   const [deleteBotTarget, setDeleteBotTarget] = useState<Bot | null>(null);
   const [clearTarget, setClearTarget] = useState<Bot | null>(null);
@@ -2081,8 +2083,15 @@ export default function App() {
         {showPlugins ? (
           <PluginsOverlay
             onClose={() => setShowPlugins(false)}
+            onOpenMcp={() => setShowMcp(true)}
             bots={bots}
             activeBotId={activeBotId}
+          />
+        ) : null}
+        {showMcp ? (
+          <McpServersOverlay
+            onClose={() => setShowMcp(false)}
+            bots={bots}
           />
         ) : null}
         {showGroups ? (
