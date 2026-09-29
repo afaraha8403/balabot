@@ -1,6 +1,5 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {ChatLayout} from '@astryxdesign/core/Chat';
-import {ChatMessageList} from '@astryxdesign/core/Chat';
+import {Transcript} from './Transcript';
 import {ChatMessage as ChatMessageRow} from '@astryxdesign/core/Chat';
 import {ChatMessageBubble} from '@astryxdesign/core/Chat';
 import {ChatMessageMetadata} from '@astryxdesign/core/Chat';
@@ -1362,54 +1361,36 @@ export default function App() {
           <div style={{flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
             {screen === 'chat' ? (
               activeBot ? (
-                <ChatLayout
-                  style={{flex: 1, minHeight: 0}}
-                  composer={
-                    <Composer
+                <div style={{flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
+                  {(activeSession?.messages ?? []).length === 0 && !isStreaming && secretCards.length === 0 && interventions.length === 0 && draftCards.length === 0 && voiceMemos.length === 0 ? (
+                    <div style={{flex: 1, overflowY: 'auto', display: 'flex', justifyContent: 'center'}}>
+                      <VStack gap={5} align="center" paddingBlock={6} maxWidth={460}>
+                        <EmptyState
+                          title={`Say hi to ${activeBot.name}`}
+                          description={activeBot.description}
+                          icon={<Avatar name={activeBot.name} size="lg" tooltip={false} />}
+                        />
+                        <Grid columns={1} gap={2} width="100%">
+                          {PROMPTS.map(p => (
+                            <ClickableCard
+                              key={p}
+                              label={p}
+                              padding={3}
+                              elevation="low"
+                              onClick={() => void send(p)}
+                            >
+                              <Text type="supporting">{p}</Text>
+                            </ClickableCard>
+                          ))}
+                        </Grid>
+                      </VStack>
+                    </div>
+                  ) : (
+                    <Transcript
+                      trackDep={activeSession?.messages?.length}
                       isStreaming={isStreaming}
-                      onSubmit={(text, attachments, replyTo) => void send(text, attachments, replyTo)}
-                      onStop={stop}
-                      botName={activeBot.name}
-                      botId={activeBot.id}
-                      bots={bots}
-                      groups={groups}
-                      skills={skills}
-                      replyingTo={replyingToMessage}
-                      onCancelReply={() => setReplyingToMessage(null)}
-                      activeIntervention={activeIntervention}
-                      onInterventionChange={setActiveIntervention}
-                      onNotify={setBanner}
-                      onOpenComputer={() => setShowComputer(true)}
-                      onStartVoiceChat={() => {
-                        setBanner('Voice chat: GrokBot voice channel activated. Speak now.');
-                      }}
-                    />
-                  }
-                  emptyState={
-                    <VStack gap={5} align="center" paddingBlock={6} maxWidth={460}>
-                      <EmptyState
-                        title={`Say hi to ${activeBot.name}`}
-                        description={activeBot.description}
-                        icon={<Avatar name={activeBot.name} size="lg" tooltip={false} />}
-                      />
-                      <Grid columns={1} gap={2} width="100%">
-                        {PROMPTS.map(p => (
-                          <ClickableCard
-                            key={p}
-                            label={p}
-                            padding={3}
-                            elevation="low"
-                            onClick={() => void send(p)}
-                          >
-                            <Text type="supporting">{p}</Text>
-                          </ClickableCard>
-                        ))}
-                      </Grid>
-                    </VStack>
-                  }
-                >
-                  <ChatMessageList isStreaming={isStreaming} density="balanced">
-                    {(activeSession?.messages ?? []).map((m, i, arr) => {
+                    >
+                      {(activeSession?.messages ?? []).map((m, i, arr) => {
                       const isUser = m.role === 'user';
                       const prevSame = i > 0 && arr[i - 1].role === m.role;
                       const nextSame = i < arr.length - 1 && arr[i + 1].role === m.role;
@@ -1668,9 +1649,29 @@ export default function App() {
                     {voiceMemos.map(memo => (
                       <VoiceMemoCard key={memo.id} memo={memo} />
                     ))}
-                  </ChatMessageList>
-                </ChatLayout>
-              ) : (
+                  </Transcript>
+                )}
+                <Composer
+                  isStreaming={isStreaming}
+                  onSubmit={(text, attachments, replyTo) => void send(text, attachments, replyTo)}
+                  onStop={stop}
+                  botName={activeBot.name}
+                  botId={activeBot.id}
+                  bots={bots}
+                  groups={groups}
+                  skills={skills}
+                  replyingTo={replyingToMessage}
+                  onCancelReply={() => setReplyingToMessage(null)}
+                  activeIntervention={activeIntervention}
+                  onInterventionChange={setActiveIntervention}
+                  onNotify={setBanner}
+                  onOpenComputer={() => setShowComputer(true)}
+                  onStartVoiceChat={() => {
+                    setBanner('Voice chat: GrokBot voice channel activated. Speak now.');
+                  }}
+                />
+              </div>
+            ) : (
                 <div style={{flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)'}}>
                   Select a bot to begin
                 </div>
