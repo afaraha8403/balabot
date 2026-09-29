@@ -1,11 +1,4 @@
 import {useState} from 'react';
-import {Card} from '@astryxdesign/core/Card';
-import {HStack} from '@astryxdesign/core/Stack';
-import {VStack} from '@astryxdesign/core/VStack';
-import {Text} from '@astryxdesign/core/Text';
-import {Button} from '@astryxdesign/core/Button';
-import {Token} from '@astryxdesign/core/Token';
-import {IconAgentComputer, IconCheck, IconWarning} from './icons';
 import {resolveIntervention, type InterventionPayload} from './api';
 
 type Props = {
@@ -15,10 +8,14 @@ type Props = {
 };
 
 /**
- * In-transcript human take-over card (GrokBot spec):
+ * Polaris InterventionCard:
+ * Restyled to match Polaris McpApprovalCard geometry (w-full max-w-[460px] rounded-[20px]).
+ *
  * When an agent encounters a password/passkey, 2FA, CAPTCHA, or payment wall,
  * it pauses execution and posts this card. The human can open the Agent Computer,
  * complete the sensitive step, and click "Done — Continue Bot" to resume the turn.
+ *
+ * Invariant: Intervention resume-token resolution resolves the token and unblocks work.
  */
 export function InterventionCard({
   intervention,
@@ -47,110 +44,268 @@ export function InterventionCard({
 
   if (status === 'approved' || status === 'accepted') {
     return (
-      <Card variant="muted" padding={3}>
-        <HStack gap={2} vAlign="center">
-          <IconCheck size="sm" color="success" />
-          <Text type="supporting" color="secondary">
-            Human take-over completed for {intervention.bot}. Bot resumed.
-          </Text>
-        </HStack>
-      </Card>
+      <div
+        data-testid="intervention-card-approved"
+        style={{
+          border: '1px solid var(--border)',
+          backgroundColor: 'var(--muted)',
+          borderRadius: '16px',
+          padding: '12px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '13px',
+          color: 'var(--foreground)',
+          maxWidth: '460px',
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+        <span style={{color: 'var(--muted-foreground)'}}>
+          Human take-over completed for <strong style={{color: 'var(--foreground)'}}>{intervention.bot}</strong>. Bot resumed.
+        </span>
+      </div>
     );
   }
 
   if (status === 'denied' || status === 'rejected') {
     return (
-      <Card variant="muted" padding={3}>
-        <HStack gap={2} vAlign="center">
-          <IconWarning size="sm" color="secondary" />
-          <Text type="supporting" color="secondary">
-            Take-over request for {intervention.bot} was declined.
-          </Text>
-        </HStack>
-      </Card>
+      <div
+        data-testid="intervention-card-denied"
+        style={{
+          border: '1px solid var(--border)',
+          backgroundColor: 'var(--muted)',
+          borderRadius: '16px',
+          padding: '12px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '13px',
+          color: 'var(--muted-foreground)',
+          maxWidth: '460px',
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted-foreground)" strokeWidth="2">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="15" y1="9" x2="9" y2="15" />
+          <line x1="9" y1="9" x2="15" y2="15" />
+        </svg>
+        <span>
+          Take-over request for <strong style={{color: 'var(--foreground)'}}>{intervention.bot}</strong> was declined.
+        </span>
+      </div>
     );
   }
 
   if (status === 'expired') {
     return (
-      <Card variant="muted" padding={3}>
-        <HStack gap={2} vAlign="center">
-          <IconWarning size="sm" color="secondary" />
-          <Text type="supporting" color="secondary">
-            Intervention for {intervention.bot} expired because the turn already completed.
-          </Text>
-        </HStack>
-      </Card>
+      <div
+        data-testid="intervention-card-expired"
+        style={{
+          border: '1px solid var(--border)',
+          backgroundColor: 'var(--muted)',
+          borderRadius: '16px',
+          padding: '12px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '13px',
+          color: 'var(--muted-foreground)',
+          maxWidth: '460px',
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" strokeWidth="2">
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+        <span>
+          Intervention for {intervention.bot} expired because the turn already completed.
+        </span>
+      </div>
     );
   }
 
   return (
-    <Card variant="default" padding={4}>
-      <VStack gap={3}>
-        <HStack gap={2} vAlign="center" justify="between">
-          <HStack gap={2} vAlign="center">
-            <IconWarning size="md" color="warning" />
-            <Text type="body" weight="semibold">
+    <div
+      data-testid="intervention-card"
+      style={{
+        width: '100%',
+        maxWidth: '460px',
+        borderRadius: '20px',
+        border: '1px solid rgba(233, 196, 106, 0.4)',
+        backgroundColor: 'var(--card)',
+        color: 'var(--card-foreground)',
+        padding: '16px',
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px',
+      }}
+    >
+      {/* Header with McpApprovalCard-inspired geometry */}
+      <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px'}}>
+        <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '30px',
+              height: '30px',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(233, 196, 106, 0.15)',
+              color: 'var(--warning)',
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          </span>
+          <div>
+            <h4 style={{margin: 0, fontSize: '14px', fontWeight: 600, color: 'var(--foreground)'}}>
               Action Required: Human Take-Over
-            </Text>
-          </HStack>
-          <Token label={intervention.bot} size="sm" color="purple" />
-        </HStack>
+            </h4>
+          </div>
+        </div>
+        <span
+          style={{
+            backgroundColor: 'var(--accent)',
+            color: 'var(--accent-foreground)',
+            padding: '2px 8px',
+            borderRadius: '9999px',
+            fontSize: '11px',
+            fontWeight: 500,
+          }}
+        >
+          {intervention.bot}
+        </span>
+      </div>
 
-        <Text type="body">
-          {intervention.reason ||
-            'The bot has encountered a wall that requires human intervention (CAPTCHA, 2FA, or credentials).'}
-        </Text>
+      <p style={{margin: 0, fontSize: '13px', lineHeight: 1.5, color: 'var(--foreground)'}}>
+        {intervention.reason ||
+          'The bot has encountered a wall that requires human intervention (CAPTCHA, 2FA, or credentials).'}
+      </p>
 
-        {intervention.hint ? (
-          <Text type="supporting" color="secondary">
-            Hint: {intervention.hint}
-          </Text>
-        ) : null}
+      {intervention.hint ? (
+        <p style={{margin: 0, fontSize: '12px', color: 'var(--muted-foreground)'}}>
+          Hint: {intervention.hint}
+        </p>
+      ) : null}
 
-        {intervention.url ? (
-          <HStack gap={1} vAlign="center">
-            <Text type="supporting" size="xsm" color="secondary">
-              URL:
-            </Text>
-            <Token label={intervention.url} size="sm" />
-          </HStack>
-        ) : null}
+      {intervention.url ? (
+        <div style={{display: 'flex', alignItems: 'center', gap: '6px'}}>
+          <span style={{fontSize: '11.5px', color: 'var(--muted-foreground)'}}>URL:</span>
+          <span
+            style={{
+              backgroundColor: 'var(--muted)',
+              color: 'var(--link)',
+              padding: '2px 8px',
+              borderRadius: '6px',
+              fontSize: '11.5px',
+              fontFamily: 'var(--font-family-code, monospace)',
+            }}
+          >
+            {intervention.url}
+          </span>
+        </div>
+      ) : null}
 
-        {error ? (
-          <HStack gap={1} vAlign="center">
-            <IconWarning size="sm" color="error" />
-            <Text type="supporting" color="secondary">
-              {error}
-            </Text>
-          </HStack>
-        ) : null}
+      {error ? (
+        <div style={{display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--destructive)', fontSize: '12px'}}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <span>{error}</span>
+        </div>
+      ) : null}
 
+      {/* Action Buttons matching Polaris McpApprovalCard style */}
+      <div style={{display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '4px'}}>
+        <button
+          type="button"
+          onClick={onOpenComputer}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            borderRadius: '9999px',
+            border: '1px solid var(--border)',
+            backgroundColor: 'var(--muted)',
+            color: 'var(--foreground)',
+            padding: '6px 14px',
+            fontSize: '12px',
+            fontWeight: 500,
+            cursor: 'pointer',
+            transition: 'background-color 120ms ease',
+            fontFamily: 'inherit',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.backgroundColor = 'var(--accent)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.backgroundColor = 'var(--muted)';
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect width="20" height="14" x="2" y="3" rx="2" />
+            <line x1="8" x2="16" y1="21" y2="21" />
+            <line x1="12" x2="12" y1="17" y2="21" />
+          </svg>
+          <span>Open Agent Computer</span>
+        </button>
 
-        <HStack gap={2} vAlign="center" wrap="wrap">
-          <Button
-            label="Open Agent Computer"
-            variant="secondary"
-            size="sm"
-            icon={<IconAgentComputer />}
-            onClick={onOpenComputer}
-          />
-          <Button
-            label="Done — Continue Bot"
-            variant="primary"
-            size="sm"
-            isLoading={busy}
-            onClick={() => void handleResolve('approve')}
-          />
-          <Button
-            label="Decline"
-            variant="ghost"
-            size="sm"
-            isDisabled={busy}
-            onClick={() => void handleResolve('deny')}
-          />
-        </HStack>
-      </VStack>
-    </Card>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void handleResolve('approve')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            borderRadius: '9999px',
+            border: 'none',
+            backgroundColor: 'var(--primary)',
+            color: 'var(--primary-foreground)',
+            padding: '6px 16px',
+            fontSize: '12px',
+            fontWeight: 600,
+            cursor: busy ? 'not-allowed' : 'pointer',
+            opacity: busy ? 0.7 : 1,
+            transition: 'opacity 120ms ease',
+            fontFamily: 'inherit',
+          }}
+        >
+          <span>{busy ? 'Resuming…' : 'Done — Continue Bot'}</span>
+        </button>
+
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void handleResolve('deny')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            borderRadius: '9999px',
+            border: '1px solid var(--border)',
+            backgroundColor: 'transparent',
+            color: 'var(--muted-foreground)',
+            padding: '6px 14px',
+            fontSize: '12px',
+            fontWeight: 500,
+            cursor: busy ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          <span>Decline</span>
+        </button>
+      </div>
+    </div>
   );
 }
