@@ -204,3 +204,15 @@ export function newSession(botId: string, title: string): Session {
     createdAt: Date.now(),
   };
 }
+
+/**
+ * "A: msgs 1-40 · B: 41-90" — the session's topic spans, rendered as one
+ * compact line. Every session is responsible for something; this makes the
+ * responsibility record visible instead of hiding it in the store.
+ */
+export function topicSpanLabel(
+  spans: {topic: string; start_seq: number; end_seq: number}[] | undefined,
+): string {
+  if (!spans || spans.length === 0) return '';
+  return spans.map(s => `${s.topic}: msgs ${s.start_seq}-${s.end_seq}`).join(' · ');
+}

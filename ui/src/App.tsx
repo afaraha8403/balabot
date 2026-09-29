@@ -30,7 +30,6 @@ import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {Composer} from './Composer';
 import {BotPanelDialog} from './BotPanelDialog';
-import {SessionsDialog} from './SessionsDialog';
 import {AgentComputerDialog} from './AgentComputerDialog';
 import {ComputerMaintenanceActions} from './ComputerMaintenanceActions';
 import {SecretRequestCard} from './SecretRequestCard';
@@ -224,7 +223,6 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamText, setStreamText] = useState('');
   const [healthOk, setHealthOk] = useState<boolean | null>(null);
-  const [showSessions, setShowSessions] = useState(false);
   const [showPanel, setShowPanel] = useState(false);
   const [showComputer, setShowComputer] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
@@ -1003,7 +1001,54 @@ export default function App() {
 
           {/* Quick Space Switcher Popover */}
           <div style={{padding: '10px 14px 2px 14px'}}>
-            <SpaceSwitcher />
+            <SpaceSwitcher
+              activeBotId={activeBotId ?? undefined}
+              activeBotName={activeBot?.name}
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              onSelectSession={setActiveSessionId}
+              onNewSession={() => {
+                if (!activeBotId) return;
+                void (async () => {
+                  let created: Session | null = null;
+                  try {
+                    const s = newSession(activeBotId, 'New chat');
+                    const row = await createServerSession(
+                      activeBotId,
+                      s.title,
+                      `${activeBot?.name ?? activeBotId}: ${s.title}`,
+                      s.id,
+                    );
+                    created = {
+                      ...s,
+                      id: row.id,
+                      botId: row.botId || activeBotId,
+                      purpose: row.purpose,
+                      topicSpans: row.topicSpans ?? [],
+                    };
+                  } catch (err) {
+                    setBanner(`Could not create conversation: ${(err as Error).message}`);
+                    return;
+                  }
+                  if (created) {
+                    setSessions(prev => [created!, ...prev]);
+                    setActiveSessionId(created.id);
+                  }
+                })();
+              }}
+              onDeleteSession={id => {
+                void (async () => {
+                  try {
+                    await deleteServerSession(id);
+                  } catch (err) {
+                    setBanner(`Delete failed: ${(err as Error).message}`);
+                    return;
+                  }
+                  setSessions(prev => prev.filter(s => s.id !== id));
+                  setActiveSessionId(prev => (prev === id ? null : prev));
+                })();
+              }}
+            />
           </div>
 
           {/* Quick Space Search & Filter Input */}
@@ -1088,13 +1133,6 @@ export default function App() {
                 variant="ghost"
                 icon={<IconSkills />}
                 onClick={() => setShowPlugins(true)}
-              />
-              <Button
-                label="Sessions"
-                size="sm"
-                variant="ghost"
-                icon={<IconConversations />}
-                onClick={() => setShowSessions(true)}
               />
             </HStack>
             <UserMenuPopover
@@ -2043,55 +2081,6 @@ export default function App() {
         </aside>
 
         {/* ── Dialogs and Modals ── */}
-        {showSessions ? (
-          <SessionsDialog
-            botId={activeBotId ?? ''}
-            sessions={sessions.filter(s => s.botId === activeBotId)}
-            activeId={activeSessionId}
-            onSwitch={setActiveSessionId}
-            onDelete={id => {
-              void (async () => {
-                try {
-                  await deleteServerSession(id);
-                } catch (err) {
-                  setBanner(`Delete failed: ${(err as Error).message}`);
-                  return;
-                }
-                setSessions(prev => prev.filter(s => s.id !== id));
-                setActiveSessionId(prev => (prev === id ? null : prev));
-              })();
-            }}
-            onNew={s => {
-              if (!activeBotId) return;
-              void (async () => {
-                let created: Session | null = null;
-                try {
-                  const row = await createServerSession(
-                    activeBotId,
-                    s.title,
-                    `${activeBot?.name ?? activeBotId}: ${s.title}`,
-                    s.id,
-                  );
-                  created = {
-                    ...s,
-                    id: row.id,
-                    botId: row.botId || activeBotId,
-                    purpose: row.purpose,
-                    topicSpans: row.topicSpans ?? [],
-                  };
-                } catch (err) {
-                  setBanner(
-                    `Could not create the conversation on the server — ${(err as Error).message}`,
-                  );
-                  return;
-                }
-                setSessions(prev => [...prev, created as Session]);
-                setActiveSessionId((created as Session).id);
-              })();
-            }}
-            onClose={() => setShowSessions(false)}
-          />
-        ) : null}
         {showPanel && activeBot ? (
           <BotPanelDialog bot={activeBot} onClose={() => setShowPanel(false)} />
         ) : null}
