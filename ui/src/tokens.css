@@ -927,3 +927,44 @@ body,
   background-color: var(--accent);
 }
 
+/* Polaris Agent Computer & Teach Tokens */
+.polaris-computer-preview {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: 14px;
+  background-color: var(--background);
+  border: 1px solid var(--border);
+}
+
+.polaris-computer-preview-open {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--overlay, rgba(4, 4, 5, 0.4));
+  opacity: 0;
+  transition: opacity 150ms ease;
+  border: none;
+}
+
+.polaris-computer-preview:hover .polaris-computer-preview-open,
+.polaris-computer-preview-open:focus-visible {
+  opacity: 1;
+}
+
+.polaris-computer-preview-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 9999px;
+  background-color: var(--card);
+  padding: 8px 14px;
+  font-size: 14px;
+  color: var(--foreground);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
+}
+

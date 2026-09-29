@@ -32,6 +32,7 @@ import {Composer} from './Composer';
 import {BotPanelDialog} from './BotPanelDialog';
 import {SessionsDialog} from './SessionsDialog';
 import {AgentComputerDialog} from './AgentComputerDialog';
+import {ComputerMaintenanceActions} from './ComputerMaintenanceActions';
 import {SecretRequestCard} from './SecretRequestCard';
 import {OpenUIRenderer} from './openui/OpenUIRenderer';
 import {SkillLibraryDialog} from './SkillLibraryDialog';
@@ -1902,38 +1903,66 @@ export default function App() {
                     />
                   </HStack>
 
-                  {/* GrokBot Live Screen Preview Card */}
-                  <Card variant="muted" padding={2} minHeight={150}>
-                    <VStack gap={2} align="center">
-                      {miniFrame?.b64 ? (
-                        <img
-                          src={`data:image/png;base64,${miniFrame.b64}`}
-                          alt={`${activeBot.name} screen thumbnail`}
-                          style={{
-                            width: '100%',
-                            height: 'auto',
-                            borderRadius: 'var(--radius-sm)',
-                            cursor: 'pointer',
-                          }}
-                          onClick={() => setShowComputer(true)}
-                        />
-                      ) : (
-                        <VStack gap={2} paddingBlock={3} align="center">
-                          <IconAgentComputer size="md" color="secondary" />
-                          <Text type="supporting" size="xsm">
-                            {miniFrame?.note || 'Agent computer ready'}
-                          </Text>
-                        </VStack>
-                      )}
-                      <Button
-                        label="Open Agent Computer"
-                        size="sm"
-                        variant="secondary"
-                        icon={<IconAgentComputer />}
-                        onClick={() => setShowComputer(true)}
+                  {/* Polaris 16:10 Aspect Preview Thumbnail with Hover-Open Overlay */}
+                  <div
+                    data-testid="computer-preview"
+                    className="polaris-computer-preview"
+                    style={{
+                      position: 'relative',
+                      aspectRatio: '16 / 10',
+                      overflow: 'hidden',
+                      borderRadius: '14px',
+                      backgroundColor: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      width: '100%',
+                    }}
+                  >
+                    {showComputer ? (
+                      <div style={{display: 'grid', height: '100%', placeItems: 'center', fontSize: '13.5px', color: 'var(--muted-foreground)'}}>
+                        Open in full window
+                      </div>
+                    ) : miniFrame?.b64 ? (
+                      <img
+                        src={`data:image/png;base64,${miniFrame.b64}`}
+                        alt={`${activeBot.name}'s screen`}
+                        style={{width: '100%', height: '100%', objectFit: 'contain', backgroundColor: '#000'}}
                       />
-                    </VStack>
-                  </Card>
+                    ) : (
+                      <div style={{display: 'grid', height: '100%', placeItems: 'center', padding: '0 24px', textAlign: 'center', fontSize: '13.5px', color: 'var(--muted-foreground)'}}>
+                        {miniFrame?.note || 'Agent computer ready'}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      data-testid="computer-preview-open"
+                      className="polaris-computer-preview-open"
+                      aria-label="Open"
+                      onClick={() => setShowComputer(true)}
+                    >
+                      <span className="polaris-computer-preview-pill">
+                        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <polyline points="15 3 21 3 21 9" />
+                          <polyline points="9 21 3 21 3 15" />
+                          <line x1="21" y1="3" x2="14" y2="10" />
+                          <line x1="3" y1="21" x2="10" y2="14" />
+                        </svg>
+                        <span>Open</span>
+                      </span>
+                    </button>
+                  </div>
+
+                  <div style={{marginTop: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
+                    <p style={{margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13.5px', color: 'var(--muted-foreground)'}} dir="auto">
+                      {`${activeBot.name}'s screen`}
+                    </p>
+                    <ComputerMaintenanceActions
+                      botId={activeBot.id}
+                      onChanged={async () => {
+                        const f = await getComputerFrame(activeBot.id);
+                        setMiniFrame(f);
+                      }}
+                    />
+                  </div>
 
                   {/* GrokBot Routines Section */}
                   <Divider />
