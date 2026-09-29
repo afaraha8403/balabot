@@ -44,6 +44,17 @@ import {BotDeleteDialog} from './BotDeleteDialog';
 import {OrphansDialog} from './OrphansDialog';
 import {useMediaQuery} from '@astryxdesign/core/hooks';
 import {Divider} from '@astryxdesign/core/Divider';
+import {
+  type BotSection,
+  loadBotSections,
+  loadBotSectionAssignments,
+  saveBotSectionAssignment,
+  loadCollapsedSections,
+  saveCollapsedSections,
+  createBotSection,
+  renameBotSection,
+} from './sections';
+import {NewBotSectionDialog, RenameBotSectionDialog} from './SectionDialogs';
 import {BotRoster} from './screens/BotRoster';
 import {AgentsScreen} from './screens/AgentsScreen';
 import {MemoryScreen} from './screens/MemoryScreen';
@@ -211,6 +222,37 @@ export default function App() {
   const [, setExcluded] = useState<string[]>([]);
   const [pinnedBotIds, setPinnedBotIds] = useState<string[]>(() => loadPinnedBots());
   const [hiddenBotIds, setHiddenBotIds] = useState<string[]>(() => loadHiddenBots());
+  const [botSections, setBotSections] = useState<BotSection[]>(() => loadBotSections());
+  const [sectionAssignments, setSectionAssignments] = useState<Record<string, string | null>>(() => loadBotSectionAssignments());
+  const [collapsedSections, setCollapsedSections] = useState<string[]>(() => loadCollapsedSections());
+  const [newSectionBot, setNewSectionBot] = useState<Bot | null>(null);
+  const [renameSectionTarget, setRenameSectionTarget] = useState<BotSection | null>(null);
+
+  const toggleSection = useCallback((sectionId: string) => {
+    setCollapsedSections(prev => {
+      const next = prev.includes(sectionId) ? prev.filter(id => id !== sectionId) : [...prev, sectionId];
+      saveCollapsedSections(next);
+      return next;
+    });
+  }, []);
+
+  const handleCreateSection = useCallback(async (name: string) => {
+    const created = createBotSection(name);
+    setBotSections(loadBotSections());
+    if (newSectionBot) {
+      saveBotSectionAssignment(newSectionBot.id, created.id);
+      setSectionAssignments(loadBotSectionAssignments());
+    }
+    setNewSectionBot(null);
+  }, [newSectionBot]);
+
+  const handleRenameSection = useCallback(async (name: string) => {
+    if (renameSectionTarget) {
+      renameBotSection(renameSectionTarget.id, name);
+      setBotSections(loadBotSections());
+    }
+    setRenameSectionTarget(null);
+  }, [renameSectionTarget]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillEntry[]>([]);
@@ -951,6 +993,11 @@ export default function App() {
               onTogglePin={onTogglePin}
               onToggleHide={onToggleHide}
               onDuplicateBot={onDuplicateBot}
+              sections={botSections}
+              sectionAssignments={sectionAssignments}
+              collapsedSections={collapsedSections}
+              onToggleSection={toggleSection}
+              onRenameSection={setRenameSectionTarget}
               onEditBot={setEditBot}
               onDeleteBot={setDeleteBotTarget}
             />
@@ -1821,6 +1868,20 @@ export default function App() {
           <OrphansDialog
             onClose={() => setShowOrphans(false)}
             onFleetChanged={() => void reloadBots()}
+          />
+        ) : null}
+        {newSectionBot ? (
+          <NewBotSectionDialog
+            bot={newSectionBot}
+            onCancel={() => setNewSectionBot(null)}
+            onConfirm={handleCreateSection}
+          />
+        ) : null}
+        {renameSectionTarget ? (
+          <RenameBotSectionDialog
+            section={renameSectionTarget}
+            onCancel={() => setRenameSectionTarget(null)}
+            onConfirm={handleRenameSection}
           />
         ) : null}
 

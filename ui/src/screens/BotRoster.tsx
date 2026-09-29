@@ -12,6 +12,7 @@ import {ThinkingOrb} from 'thinking-orbs';
 import {BotRowMenu} from '../BotRowMenu';
 import {IconConceal, IconGroupChat, IconPin} from '../icons';
 import type {Bot, Group, Session, SubAgent} from '../api';
+import {type BotSection, DEFAULT_BOT_SECTIONS} from '../sections';
 
 export type RosterEntry = {
   bot: Bot;
@@ -68,6 +69,9 @@ export function BotRoster({
   hiddenBotIds = [],
   groups = [],
   activeGroupId = null,
+  sections = DEFAULT_BOT_SECTIONS,
+  sectionAssignments = {},
+  collapsedSections = [],
   onSelect,
   onSelectGroup,
   onTogglePin,
@@ -75,6 +79,8 @@ export function BotRoster({
   onDuplicateBot,
   onEditBot,
   onDeleteBot,
+  onToggleSection,
+  onRenameSection,
 }: {
   bots: Bot[];
   activeBotId: string | null;
@@ -85,6 +91,9 @@ export function BotRoster({
   hiddenBotIds?: string[];
   groups?: Group[];
   activeGroupId?: string | null;
+  sections?: BotSection[];
+  sectionAssignments?: Record<string, string | null>;
+  collapsedSections?: string[];
   onSelect: (id: string) => void;
   onSelectGroup?: (gid: string) => void;
   onTogglePin?: (bot: Bot) => void;
@@ -92,9 +101,12 @@ export function BotRoster({
   onDuplicateBot?: (bot: Bot) => void;
   onEditBot?: (bot: Bot) => void;
   onDeleteBot?: (bot: Bot) => void;
+  onToggleSection?: (sectionId: string) => void;
+  onRenameSection?: (section: BotSection) => void;
 }) {
   const pinnedSet = new Set(pinnedBotIds);
   const hiddenSet = new Set(hiddenBotIds);
+  const collapsedSet = useMemo(() => new Set(collapsedSections), [collapsedSections]);
 
   const makeEntry = (bot: Bot): RosterEntry => {
     const last = lastMessageFor(sessions, bot.id);
@@ -118,27 +130,49 @@ export function BotRoster({
   const mainEntries = bots.filter(b => !pinnedSet.has(b.id) && !hiddenSet.has(b.id)).map(makeEntry);
   const hiddenEntries = bots.filter(b => hiddenSet.has(b.id)).map(makeEntry);
 
-  const getCategory = (b: Bot): string => {
-    if (b.category && b.category.trim()) return b.category.trim();
+  const getBotSectionId = (b: Bot): string => {
+    if (sectionAssignments[b.id]) return sectionAssignments[b.id]!;
+    if (b.category && b.category.trim()) {
+      const match = sections.find(s => s.name.toLowerCase() === b.category!.toLowerCase());
+      if (match) return match.id;
+    }
     const txt = `${b.name} ${b.title || ''} ${b.id}`.toLowerCase();
     if (txt.includes('cursor') || txt.includes('coder') || txt.includes('code') || txt.includes('dev')) {
-      return 'Cursor';
+      const dev = sections.find(s => s.name.toLowerCase() === 'dev' || s.name.toLowerCase() === 'cursor');
+      if (dev) return dev.id;
     }
     if (txt.includes('governor') || txt.includes('policy') || txt.includes('safety') || txt.includes('audit')) {
-      return 'Governance';
+      const gov = sections.find(s => s.name.toLowerCase() === 'governance');
+      if (gov) return gov.id;
     }
-    return 'Ops';
+    const ops = sections.find(s => s.name.toLowerCase() === 'ops');
+    if (ops) return ops.id;
+    return sections[0]?.id || 'sec-ops';
   };
 
-  const categories = useMemo(() => {
-    const map = new Map<string, RosterEntry[]>();
-    for (const e of mainEntries) {
-      const cat = getCategory(e.bot);
-      if (!map.has(cat)) map.set(cat, []);
-      map.get(cat)!.push(e);
+  const sectionGroups = useMemo(() => {
+    const map = new Map<string, { section: BotSection; entries: RosterEntry[] }>();
+    for (const sec of sections) {
+      map.set(sec.id, { section: sec, entries: [] });
     }
-    return Array.from(map.entries());
-  }, [mainEntries]);
+    const unassigned: RosterEntry[] = [];
+    for (const e of mainEntries) {
+      const secId = getBotSectionId(e.bot);
+      if (map.has(secId)) {
+        map.get(secId)!.entries.push(e);
+      } else {
+        unassigned.push(e);
+      }
+    }
+    const result = Array.from(map.values()).filter(g => g.entries.length > 0);
+    if (unassigned.length > 0) {
+      result.push({
+        section: { id: 'unassigned', name: 'Unassigned' },
+        entries: unassigned,
+      });
+    }
+    return result;
+  }, [sections, mainEntries, sectionAssignments]);
 
   const renderBotItem = (e: RosterEntry) => (
     <ListItem
@@ -225,35 +259,45 @@ export function BotRoster({
           </VStack>
         ) : null}
 
-        {/* Collapsible Category Headings */}
-        {categories.length > 0 ? (
-          categories.map(([catName, catEntries]) => (
-            <VStack key={catName} gap={1}>
-              <Collapsible
-                defaultIsOpen={true}
-                trigger={
-                  <HStack
-                    gap={2}
-                    vAlign="center"
-                    justify="between"
-                    width="100%"
-                    paddingInline={2}
-                    paddingBlock={1}
-                    style={{cursor: 'pointer'}}
-                  >
-                    <Text type="supporting" size="xsm" weight="semibold" color="secondary">
-                      {catName.toUpperCase()}
-                    </Text>
-                    <Badge label={`${catEntries.length}`} variant="neutral" />
-                  </HStack>
-                }
-              >
-                <List density="compact">
-                  {catEntries.map(renderBotItem)}
-                </List>
-              </Collapsible>
-            </VStack>
-          ))
+        {/* Collapsible Section Headings */}
+        {sectionGroups.length > 0 ? (
+          sectionGroups.map(group => {
+            const isCollapsed = collapsedSet.has(group.section.id);
+            return (
+              <VStack key={group.section.id} gap={1} data-sidebar-group={group.section.id}>
+                <Collapsible
+                  defaultIsOpen={!isCollapsed}
+                  onOpenChange={() => onToggleSection?.(group.section.id)}
+                  trigger={
+                    <HStack
+                      gap={2}
+                      vAlign="center"
+                      justify="between"
+                      width="100%"
+                      paddingInline={2}
+                      paddingBlock={1}
+                      style={{cursor: 'pointer'}}
+                      onContextMenu={e => {
+                        if (group.section.id !== 'unassigned') {
+                          e.preventDefault();
+                          onRenameSection?.(group.section);
+                        }
+                      }}
+                    >
+                      <Text type="supporting" size="xsm" weight="semibold" color="secondary">
+                        {group.section.name.toUpperCase()}
+                      </Text>
+                      <Badge label={`${group.entries.length}`} variant="neutral" />
+                    </HStack>
+                  }
+                >
+                  <List density="compact">
+                    {group.entries.map(renderBotItem)}
+                  </List>
+                </Collapsible>
+              </VStack>
+            );
+          })
         ) : pinnedEntries.length === 0 ? (
           <HStack gap={2} padding={2}>
             <Text type="supporting">
