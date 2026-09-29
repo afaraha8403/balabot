@@ -38,8 +38,9 @@ import {SecretRequestCard} from './SecretRequestCard';
 import {OpenUIRenderer} from './openui/OpenUIRenderer';
 import {SkillLibraryDialog} from './SkillLibraryDialog';
 import {GroupChatDialog} from './GroupChatDialog';
-import {BotCreationDialog} from './BotCreationDialog';
-import {BotEditDialog} from './BotEditDialog';
+import {BotSettings} from './BotSettings';
+import {CreateBotForm} from './CreateBotForm';
+import {ClearConversationDialog} from './ClearConversationDialog';
 import {BotDeleteDialog} from './BotDeleteDialog';
 import {OrphansDialog} from './OrphansDialog';
 import {useMediaQuery} from '@astryxdesign/core/hooks';
@@ -219,9 +220,8 @@ export default function App() {
   const [showComputer, setShowComputer] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
-  const [showBotCreation, setShowBotCreation] = useState(false);
-  const [editBot, setEditBot] = useState<Bot | null>(null);
   const [deleteBotTarget, setDeleteBotTarget] = useState<Bot | null>(null);
+  const [clearTarget, setClearTarget] = useState<Bot | null>(null);
   const [showOrphans, setShowOrphans] = useState(false);
   const [, setExcluded] = useState<string[]>([]);
   const [pinnedBotIds, setPinnedBotIds] = useState<string[]>(() => loadPinnedBots());
@@ -325,14 +325,10 @@ export default function App() {
   // Responsive breakpoint under 1024px
   const isNarrow = useMediaQuery('(max-width: 1023px)');
 
-  // Right Context Panel mode ('screen' | 'settings') and collapsed state
-  const [rightPanelMode, setRightPanelMode] = useState<'screen' | 'settings'>('screen');
+  // Right Context Panel mode ('screen' | 'settings' | 'create') and collapsed state
+  const [rightPanelMode, setRightPanelMode] = useState<'screen' | 'settings' | 'create'>('screen');
   const [hideRightPanel, setHideRightPanel] = useState(false);
   const [miniFrame, setMiniFrame] = useState<ComputerFrame | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editTitle, setEditTitle] = useState('');
-  const [editDesc, setEditDesc] = useState('');
-  const [savingSettings, setSavingSettings] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   // Live sub-agent rows
@@ -498,10 +494,7 @@ export default function App() {
   }, []);
 
   const onClearConversation = useCallback((bot: Bot) => {
-    setSessions(prev =>
-      prev.map(s => (s.botId === bot.id ? {...s, messages: []} : s))
-    );
-    setBanner(`Cleared conversation with ${bot.name}.`);
+    setClearTarget(bot);
   }, []);
 
   const onArchiveBot = useCallback((bot: Bot) => {
@@ -515,8 +508,9 @@ export default function App() {
         name: `${bot.name} copy`,
         role: bot.title || bot.description || 'Specialist bot',
       });
-      setBanner(`Proposal created for "${bot.name} copy" — opening Create Bot dialog.`);
-      setShowBotCreation(true);
+      setBanner(`Proposal created for "${bot.name} copy" — opening Create Bot in right panel.`);
+      setRightPanelMode('create');
+      setHideRightPanel(false);
     } catch (err) {
       setBanner(`Could not duplicate bot: ${(err as Error).message}`);
     }
@@ -604,7 +598,8 @@ export default function App() {
       // Cmd/Ctrl+N: New Bot / new chat
       else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !e.shiftKey) {
         e.preventDefault();
-        setShowBotCreation(true);
+        setRightPanelMode('create');
+        setHideRightPanel(false);
       }
       // Cmd/Ctrl+B: Compact sidebar toggle
       else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b' && !e.altKey && !e.shiftKey) {
@@ -714,13 +709,6 @@ export default function App() {
 
   const activeBot = bots.find(b => b.id === activeBotId) ?? null;
 
-  useEffect(() => {
-    if (activeBot) {
-      setEditName(activeBot.name);
-      setEditTitle(activeBot.title || '');
-      setEditDesc(activeBot.description || '');
-    }
-  }, [activeBot]);
 
   const activeSession = useMemo(() => {
     if (!activeBotId) return null;
@@ -966,7 +954,10 @@ export default function App() {
                 size="sm"
                 variant="ghost"
                 icon={<IconCreateBot />}
-                onClick={() => setShowBotCreation(true)}
+                onClick={() => {
+                  setRightPanelMode('create');
+                  setHideRightPanel(false);
+                }}
               />
               <IconButton
                 label="Minimize bots"
@@ -1041,8 +1032,11 @@ export default function App() {
               sectionAssignments={sectionAssignments}
               collapsedSections={collapsedSections}
               onToggleSection={toggleSection}
-              onRenameSection={setRenameSectionTarget}
-              onEditBot={setEditBot}
+              onEditBot={bot => {
+                setActiveBotId(bot.id);
+                setRightPanelMode('settings');
+                setHideRightPanel(false);
+              }}
               onDeleteBot={setDeleteBotTarget}
             />
           </div>
@@ -1650,107 +1644,52 @@ export default function App() {
         {/* ── Region 3: 384px Sliding Contextual Side-panel ── */}
         <aside
           data-testid="side-panel"
-          data-panel={hideRightPanel || !activeBot ? 'closed' : rightPanelMode}
+          data-panel={hideRightPanel || (!activeBot && rightPanelMode !== 'create') ? 'closed' : rightPanelMode}
           className="polaris-side-panel"
           style={{
-            width: hideRightPanel || !activeBot ? 0 : 384,
-            minWidth: hideRightPanel || !activeBot ? 0 : undefined,
-            maxWidth: hideRightPanel || !activeBot ? 0 : 384,
+            width: hideRightPanel || (!activeBot && rightPanelMode !== 'create') ? 0 : 384,
+            minWidth: hideRightPanel || (!activeBot && rightPanelMode !== 'create') ? 0 : undefined,
+            maxWidth: hideRightPanel || (!activeBot && rightPanelMode !== 'create') ? 0 : 384,
           }}
         >
-          {activeBot && !hideRightPanel ? (
+          {!hideRightPanel && (activeBot || rightPanelMode === 'create') ? (
             <div className="rk-scroll" style={{height: '100%', overflowY: 'auto', padding: '16px 20px', boxSizing: 'border-box'}}>
-              {/* Header */}
-              <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px'}}>
-                <span style={{fontSize: '13.5px', color: 'var(--muted-foreground)', fontWeight: 500}}>
-                  {rightPanelMode === 'settings' ? 'Settings' : `${activeBot.name}'s screen`}
-                </span>
-                <div style={{display: 'flex', alignItems: 'center', gap: '4px'}}>
-                  <IconButton
-                    label={rightPanelMode === 'settings' ? 'Show computer screen' : 'Show settings'}
-                    size="sm"
-                    variant="ghost"
-                    icon={rightPanelMode === 'settings' ? <IconAgentComputer /> : <IconGear />}
-                    onClick={() => setRightPanelMode(prev => (prev === 'settings' ? 'screen' : 'settings'))}
-                  />
-                  <IconButton
-                    label="Close panel"
-                    size="sm"
-                    variant="ghost"
-                    icon={<IconClose />}
-                    onClick={() => setHideRightPanel(true)}
-                  />
-                </div>
-              </div>
-
-              {/* Mode content */}
-              {rightPanelMode === 'settings' ? (
+              {rightPanelMode === 'create' ? (
+                <CreateBotForm
+                  onCancel={() => setHideRightPanel(true)}
+                  onFleetChanged={() => void reloadBots()}
+                />
+              ) : rightPanelMode === 'settings' && activeBot ? (
+                <BotSettings
+                  bot={activeBot}
+                  onClose={() => setRightPanelMode('screen')}
+                  onUpdated={() => void reloadBots()}
+                  onOpenKnowledge={() => setShowPanel(true)}
+                />
+              ) : activeBot ? (
                 <VStack gap={3}>
-                  <TextInput label="Name" value={editName} onChange={setEditName} size="sm" />
-                  <TextInput label="Title / Role" value={editTitle} onChange={setEditTitle} size="sm" />
-                  <VStack gap={1} align="start" width="100%">
-                    <Text type="supporting" size="xsm" weight="medium">
-                      Description & Instructions
-                    </Text>
-                    <textarea
-                      value={editDesc}
-                      onChange={e => setEditDesc(e.target.value)}
-                      rows={6}
-                      style={{
-                        width: '100%',
-                        padding: 'var(--spacing-2)',
-                        fontFamily: 'inherit',
-                        fontSize: 'var(--font-size-xs)',
-                        backgroundColor: 'var(--muted)',
-                        color: 'inherit',
-                        border: '1px solid var(--border)',
-                        borderRadius: 'var(--radius-md)',
-                        resize: 'vertical',
-                      }}
-                    />
-                  </VStack>
-                  <HStack gap={2}>
-                    <Button
-                      label={savingSettings ? 'Saving…' : 'Save changes'}
-                      variant="primary"
-                      size="sm"
-                      isDisabled={savingSettings}
-                      onClick={async () => {
-                        setSavingSettings(true);
-                        try {
-                          await updateBot(activeBot.id, {
-                            name: editName.trim() || activeBot.name,
-                            title: editTitle.trim(),
-                            description: editDesc.trim(),
-                          });
-                          await reloadBots();
-                          setBanner(`Saved settings for ${editName.trim() || activeBot.name}`);
-                          setRightPanelMode('screen');
-                        } catch (err) {
-                          setBanner(`Failed to save settings: ${(err as Error).message}`);
-                        } finally {
-                          setSavingSettings(false);
-                        }
-                      }}
-                    />
-                    <Button
-                      label="Cancel"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setRightPanelMode('screen')}
-                    />
-                  </HStack>
-                  <Divider />
-                  <Button
-                    label={`${activeBot.name} Memory & Knowledge`}
-                    size="sm"
-                    variant="ghost"
-                    icon={<IconBotKnowledge />}
-                    onClick={() => setShowPanel(true)}
-                  />
-                </VStack>
-              ) : (
-                <VStack gap={3}>
+                  {/* Header */}
+                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px'}}>
+                    <span style={{fontSize: '13.5px', color: 'var(--muted-foreground)', fontWeight: 500}}>
+                      {`${activeBot.name}'s screen`}
+                    </span>
+                    <div style={{display: 'flex', alignItems: 'center', gap: '4px'}}>
+                      <IconButton
+                        label="Show settings"
+                        size="sm"
+                        variant="ghost"
+                        icon={<IconGear />}
+                        onClick={() => setRightPanelMode('settings')}
+                      />
+                      <IconButton
+                        label="Close panel"
+                        size="sm"
+                        variant="ghost"
+                        icon={<IconClose />}
+                        onClick={() => setHideRightPanel(true)}
+                      />
+                    </div>
+                  </div>
                   <HStack gap={2} vAlign="center" justify="between">
                     <HStack gap={2} vAlign="center">
                       <BotAvatar
@@ -1821,7 +1760,7 @@ export default function App() {
                     </Text>
                   </VStack>
                 </VStack>
-              )}
+              ) : null}
             </div>
           ) : null}
         </aside>
@@ -1897,18 +1836,20 @@ export default function App() {
             onFleetsChanged={() => void reloadBots()}
           />
         ) : null}
-        {showBotCreation ? (
-          <BotCreationDialog
-            bots={bots}
-            onClose={() => setShowBotCreation(false)}
-            onFleetChanged={() => void reloadBots()}
-          />
-        ) : null}
-        {editBot ? (
-          <BotEditDialog
-            bot={editBot}
-            onClose={() => setEditBot(null)}
-            onUpdated={onBotEdited}
+        {clearTarget ? (
+          <ClearConversationDialog
+            bot={clearTarget}
+            onCancel={() => setClearTarget(null)}
+            onConfirm={async () => {
+              if (activeBotId === clearTarget.id) {
+                stop();
+              }
+              setSessions(prev =>
+                prev.map(s => (s.botId === clearTarget.id ? {...s, messages: []} : s))
+              );
+              setBanner(`Cleared conversation with ${clearTarget.name}.`);
+              setClearTarget(null);
+            }}
           />
         ) : null}
         {deleteBotTarget ? (
@@ -1966,8 +1907,10 @@ export default function App() {
             navigateTo(`/app/${encodeURIComponent(botId)}`);
           }}
           onAction={action => {
-            if (action === 'new-bot') setShowBotCreation(true);
-            else if (action === 'new-group') {
+            if (action === 'new-bot') {
+              setRightPanelMode('create');
+              setHideRightPanel(false);
+            } else if (action === 'new-group') {
               setActiveGroupId(null);
               setShowGroups(true);
             } else if (action === 'open-skills') setShowSkills(true);
