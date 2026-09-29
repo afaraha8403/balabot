@@ -12,7 +12,7 @@ import {Button} from '@astryxdesign/core/Button';
 import {HStack} from '@astryxdesign/core/Stack';
 import {Text} from '@astryxdesign/core/Text';
 import {IconAttach, IconClose, IconFile, IconMicrophone} from './icons';
-import {Plus} from 'lucide-react';
+import {Plus, Box, Paperclip, X, Bot as BotIcon, Users, Radio} from 'lucide-react';
 import {HoldEverythingControl} from './HoldEverythingControl';
 import {
   uploadAttachment,
@@ -24,6 +24,30 @@ import {
 } from './api';
 
 const ATTACHMENT_ACCEPT = '.txt,.md,.pdf,.png,.jpg,.jpeg,.gif,.webp,.json,.csv,.py,.js,.ts,.html,.css';
+
+export type ComposerMentionKind = 'bot' | 'group' | 'routine' | 'connector' | 'everyone';
+
+export type ComposerMention = {
+  kind: ComposerMentionKind;
+  id: string;
+  name: string;
+  subtitle?: string;
+  color?: string;
+};
+
+function MentionChipIcon({ mention }: { mention: ComposerMention }) {
+  if (mention.kind === 'bot') {
+    return <BotIcon size={13} strokeWidth={1.7} className="shrink-0 text-muted-foreground/70" />;
+  }
+  if (mention.kind === 'group' || mention.kind === 'everyone') {
+    return <Users size={13} strokeWidth={1.7} className="shrink-0 text-muted-foreground/70" />;
+  }
+  return <Radio size={13} strokeWidth={1.7} className="shrink-0 text-muted-foreground/70" />;
+}
+
+export type ComposerAttachment = Attachment & {
+  previewUrl?: string;
+};
 
 type Props = {
   isStreaming: boolean;
@@ -66,9 +90,19 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState('');
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [selectedSkill, setSelectedSkill] = useState<SkillEntry | null>(null);
+  const [selectedMentions, setSelectedMentions] = useState<ComposerMention[]>([]);
   const dragDepth = useRef(0);
   const [draggingFiles, setDraggingFiles] = useState(false);
+
+  function removeLastChip() {
+    if (selectedMentions.length > 0) {
+      setSelectedMentions(current => current.slice(0, -1));
+      return;
+    }
+    if (selectedSkill) setSelectedSkill(null);
+  }
 
   function isFileDrag(dataTransfer: Pick<DataTransfer, 'types' | 'items'> | null): boolean {
     if (!dataTransfer) return false;
@@ -191,17 +225,32 @@ export function Composer({
   const addFiles = async (files: File[]) => {
     const uploaded = await Promise.all(
       files.map(async f => {
+        const previewUrl = f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined;
         try {
-          return await uploadAttachment(f);
+          const res = await uploadAttachment(f);
+          return {
+            ...res,
+            previewUrl,
+          };
         } catch {
           return {
             id: `a_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             name: f.name,
+            size: f.size,
+            mime_type: f.type,
+            previewUrl,
           };
         }
       }),
     );
     setAttachments(prev => [...prev, ...uploaded]);
+  };
+
+  const removeAttachment = (attachment: ComposerAttachment) => {
+    if (attachment.previewUrl) {
+      URL.revokeObjectURL(attachment.previewUrl);
+    }
+    setAttachments(prev => prev.filter(x => x.id !== attachment.id));
   };
 
   const triggers: ChatComposerTrigger[] = useMemo(() => {
@@ -299,20 +348,38 @@ export function Composer({
       ) : null}
 
       {attachments.length > 0 ? (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+        <div className="mb-3 flex flex-wrap gap-2" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
           {attachments.map(a => (
-            <div key={a.id} className="polaris-attachment-chip">
-              <IconFile />
-              <span style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div
+              key={a.id}
+              className="polaris-attachment-chip flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-1.5 text-[13px] text-foreground/75"
+              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+            >
+              {a.previewUrl ? (
+                <img
+                  src={a.previewUrl}
+                  alt={a.name}
+                  className="h-8 w-8 rounded object-cover"
+                  style={{ height: '32px', width: '32px', borderRadius: '4px', objectFit: 'cover' }}
+                />
+              ) : (
+                <Paperclip size={14} strokeWidth={1.8} />
+              )}
+              <span
+                className="max-w-[180px] truncate"
+                style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                dir="auto"
+              >
                 {a.name}
               </span>
               <button
                 type="button"
                 aria-label={`Remove ${a.name}`}
-                onClick={() => setAttachments(prev => prev.filter(x => x.id !== a.id))}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--muted-foreground)', display: 'inline-flex' }}
+                onClick={() => removeAttachment(a)}
+                className="text-muted-foreground hover:text-foreground"
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--muted-foreground)', display: 'inline-flex', padding: 0 }}
               >
-                <IconClose />
+                <X size={13} strokeWidth={2} />
               </button>
             </div>
           ))}
@@ -347,13 +414,73 @@ export function Composer({
           <Plus size={16} strokeWidth={2} />
         </button>
 
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+        <div
+          className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5"
+          style={{ flex: 1, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}
+        >
+          {selectedSkill ? (
+            <span
+              data-testid="skill-chip"
+              className="polaris-token-chip inline-flex max-w-full items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[13px] text-foreground"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              <Box size={13} strokeWidth={1.7} className="shrink-0 text-muted-foreground/70" />
+              <span dir="auto" className="truncate">
+                {selectedSkill.name}
+              </span>
+              <button
+                type="button"
+                aria-label={`Remove skill ${selectedSkill.name}`}
+                onClick={() => setSelectedSkill(null)}
+                className="text-muted-foreground hover:text-foreground"
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--muted-foreground)', display: 'inline-flex', padding: 0 }}
+              >
+                <X size={12} strokeWidth={2} />
+              </button>
+            </span>
+          ) : null}
+          {selectedMentions.map(mention => (
+            <span
+              key={`${mention.kind}:${mention.id}`}
+              data-testid="mention-chip"
+              data-mention-kind={mention.kind}
+              className="polaris-token-chip inline-flex max-w-full items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[13px] text-foreground"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              <MentionChipIcon mention={mention} />
+              <span dir="auto" className="truncate">
+                {mention.name}
+              </span>
+              <button
+                type="button"
+                aria-label={`Remove mention ${mention.name}`}
+                onClick={() =>
+                  setSelectedMentions(current =>
+                    current.filter(m => `${m.kind}:${m.id}` !== `${mention.kind}:${mention.id}`),
+                  )
+                }
+                className="text-muted-foreground hover:text-foreground"
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--muted-foreground)', display: 'inline-flex', padding: 0 }}
+              >
+                <X size={12} strokeWidth={2} />
+              </button>
+            </span>
+          ))}
           <textarea
             ref={textareaRef}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onPaste={handlePaste}
             onKeyDown={(e) => {
+              if (
+                e.key === 'Backspace' &&
+                value.length === 0 &&
+                (selectedSkill !== null || selectedMentions.length > 0)
+              ) {
+                e.preventDefault();
+                removeLastChip();
+                return;
+              }
               if (e.key === 'Enter' && !e.shiftKey && !(e.nativeEvent.isComposing || e.keyCode === 229)) {
                 e.preventDefault();
                 submit();
