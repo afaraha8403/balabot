@@ -10,6 +10,8 @@ import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 import {ThinkingOrb} from 'thinking-orbs';
 import {BotRowMenu} from '../BotRowMenu';
+import {BotAvatar} from '../BotAvatar';
+import {GroupAvatar} from '../GroupAvatar';
 import {IconConceal, IconGroupChat, IconPin} from '../icons';
 import type {Bot, Group, Session, SubAgent} from '../api';
 import {type BotSection, DEFAULT_BOT_SECTIONS} from '../sections';
@@ -208,7 +210,12 @@ export function BotRoster({
         </VStack>
       }
       startContent={
-        <Avatar name={e.bot.name} size="md" tooltip={false} />
+        <BotAvatar
+          identity={e.bot.id}
+          color={e.bot.color}
+          size={38}
+          status={e.isTyping ? 'working' : undefined}
+        />
       }
       endContent={
         <VStack gap={1} align="end">
@@ -334,7 +341,17 @@ export function BotRoster({
                       </Text>
                     }
                     startContent={
-                      <Avatar name={g.name} size="md" tooltip={false} />
+                      <GroupAvatar
+                        members={g.members.map(m => {
+                          const b = bots.find(bot => bot.id === m || bot.name === m);
+                          return {
+                            botId: b?.id ?? m,
+                            name: b?.name ?? m,
+                            color: b?.color ?? '#3B82F6',
+                          };
+                        })}
+                        size={38}
+                      />
                     }
                     endContent={
                       <VStack gap={1} align="end">

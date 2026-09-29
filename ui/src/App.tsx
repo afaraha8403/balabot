@@ -55,6 +55,8 @@ import {
   renameBotSection,
 } from './sections';
 import {NewBotSectionDialog, RenameBotSectionDialog} from './SectionDialogs';
+import {BotAvatar} from './BotAvatar';
+import {GroupAvatar} from './GroupAvatar';
 import {BotRoster} from './screens/BotRoster';
 import {AgentsScreen} from './screens/AgentsScreen';
 import {MemoryScreen} from './screens/MemoryScreen';
@@ -1125,7 +1127,12 @@ export default function App() {
                     setHideRightPanel(false);
                   }}
                 >
-                  <Avatar name={activeBot.name} size="sm" tooltip={false} />
+                  <BotAvatar
+                    identity={activeBot.id}
+                    color={activeBot.color}
+                    size={30}
+                    status={isStreaming ? 'working' : undefined}
+                  />
                   <div style={{display: 'flex', flexDirection: 'column', minWidth: 0}}>
                     <span style={{fontWeight: 600, fontSize: '14px', color: 'var(--foreground)'}}>
                       {activeBot.name}
@@ -1704,7 +1711,12 @@ export default function App() {
                 <VStack gap={3}>
                   <HStack gap={2} vAlign="center" justify="between">
                     <HStack gap={2} vAlign="center">
-                      <Avatar name={activeBot.name} size="sm" tooltip={false} />
+                      <BotAvatar
+                        identity={activeBot.id}
+                        color={activeBot.color}
+                        size={28}
+                        status={isStreaming ? 'working' : undefined}
+                      />
                       <Text type="body" weight="semibold">
                         {activeBot.name}&apos;s screen
                       </Text>
