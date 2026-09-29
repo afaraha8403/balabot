@@ -11,6 +11,10 @@ import {IconWarning} from './icons';
 import {BotAvatar} from './BotAvatar';
 import {ComputerMaintenanceActions} from './ComputerMaintenanceActions';
 import {TeachComputerOverlayControl} from './TeachComputerOverlayControl';
+import {ComputerWorkspace} from './ComputerWorkspace';
+import {TerminalApp} from './TerminalApp';
+import {FilesApp} from './FilesApp';
+import {mapTeachPointer} from './coordinate-scaling';
 import {
   getComputerFrame,
   sendComputerAction,
@@ -192,8 +196,8 @@ export function AgentComputerDialog({bot, onClose}: Props) {
     const img = imgRef.current;
     if (!img || !frame?.width || !frame.height) return;
     const rect = img.getBoundingClientRect();
-    const x = Math.round(((e.clientX - rect.left) / rect.width) * frame.width);
-    const y = Math.round(((e.clientY - rect.top) / rect.height) * frame.height);
+    const screen = {width: frame.width, height: frame.height};
+    const {x, y} = mapTeachPointer(e.clientX, e.clientY, rect, screen);
     void act({action: 'click', x, y});
   };
 
@@ -488,220 +492,119 @@ export function AgentComputerDialog({bot, onClose}: Props) {
           <Banner status="error" title="Could not reach the screen endpoint" description={error} />
         ) : null}
 
-        {/* Main Workspace Area (Screen vs Terminal vs Files) */}
-        <div style={{flex: 1, minHeight: '23.75rem', position: 'relative', overflow: 'hidden'}}>
-          {activeApp === 'screen' ? (
-            isLoading && !frame ? (
-              <VStack gap={3} align="center" justify="center" height="fill">
-                <Spinner size="lg" label="Loading screen" />
-              </VStack>
-            ) : !frame ? (
-              <EmptyState
-                title="No screen yet"
-                description="The frame endpoint has not returned a usable screen."
-              />
-            ) : frame.b64 ? (
-              <img
-                ref={imgRef}
-                src={`data:image/png;base64,${frame.b64}`}
-                alt={`${bot.name} live screen`}
-                onClick={onImageClick}
-                style={{
-                  width: '100%',
-                  height: 'auto',
-                  cursor: inputsEnabled ? 'crosshair' : 'default',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--border)',
-                }}
-              />
-            ) : (
-              <EmptyState
-                isCompact
-                title="Screen unavailable"
-                description={frame.note ?? 'No frame data returned.'}
-                icon={<IconWarning />}
-              />
-            )
-          ) : activeApp === 'terminal' ? (
+        {/* Main Desktop Body (ComputerWorkspace with Screen, TerminalApp, FilesApp & Floating Dock) */}
+        <div style={{flex: 1, minHeight: '23.75rem', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column'}}>
+          <ComputerWorkspace
+            botId={bot.id}
+            hasControl={inputsEnabled}
+            dock={!isRecording}
+            terminalContent={<TerminalApp botId={bot.id} botName={bot.name} />}
+            filesContent={<FilesApp botId={bot.id} botName={bot.name} />}
+          >
             <div
-              className="rk-scroll"
               style={{
+                position: 'relative',
                 width: '100%',
                 height: '100%',
-                minHeight: '23.75rem',
-                backgroundColor: 'var(--background)',
-                color: 'var(--foreground)',
-                fontFamily: 'var(--font-family-code, monospace)',
-                fontSize: 'var(--font-size-xs)',
-                padding: 'var(--spacing-4)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border)',
-                overflowY: 'auto',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: '#000000',
+                overflow: 'hidden',
               }}
             >
-              <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)'}}>
-                {terminalHistory.map((line, idx) => (
-                  <div key={idx}>{line}</div>
-                ))}
-                <form onSubmit={executeTerminal} style={{display: 'flex', gap: 'var(--spacing-2)', marginTop: 'var(--spacing-2)'}}>
-                  <span>[hermes@balabot-agent ~]$</span>
-                  <input
-                    type="text"
-                    value={terminalCommand}
-                    onChange={e => setTerminalCommand(e.target.value)}
-                    placeholder="Type bash command…"
+              {isLoading && !frame ? (
+                <VStack gap={3} align="center" justify="center" height="fill">
+                  <Spinner size="lg" label="Loading screen" />
+                </VStack>
+              ) : !frame ? (
+                <EmptyState
+                  title="No screen yet"
+                  description="The frame endpoint has not returned a usable screen."
+                />
+              ) : frame.b64 ? (
+                <div style={{position: 'relative', maxWidth: '100%', maxHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+                  <img
+                    ref={imgRef}
+                    src={`data:image/png;base64,${frame.b64}`}
+                    alt={`${bot.name} live screen`}
+                    onClick={onImageClick}
                     style={{
-                      flex: 1,
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'inherit',
-                      outline: 'none',
-                      fontFamily: 'inherit',
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      objectFit: 'contain',
+                      cursor: inputsEnabled ? 'crosshair' : 'default',
+                      borderRadius: 'var(--radius-md)',
+                      display: 'block',
                     }}
                   />
-                </form>
-              </div>
+                </div>
+              ) : (
+                <EmptyState
+                  isCompact
+                  title="Screen unavailable"
+                  description={frame.note ?? 'No frame data returned.'}
+                  icon={<IconWarning />}
+                />
+              )}
             </div>
-          ) : (
-            <div
-              className="rk-scroll"
-              style={{
-                width: '100%',
-                height: '100%',
-                minHeight: '23.75rem',
-                backgroundColor: 'var(--card)',
-                color: 'var(--foreground)',
-                padding: 'var(--spacing-4)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border)',
-                overflowY: 'auto',
-              }}
-            >
-              <Text type="supporting" weight="semibold">
-                Workspace Files — /opt/data/profiles/{bot.id}/
-              </Text>
-              <VStack gap={2} style={{marginTop: 'var(--spacing-3)'}}>
-                {[
-                  {name: 'AGENTS.md', size: '1.2 KB', type: 'Markdown'},
-                  {name: 'SOUL.md', size: '2.0 KB', type: 'Markdown'},
-                  {name: 'memory_store.db', size: '512 B', type: 'SQLite Database'},
-                  {name: 'rules/', size: 'Directory', type: 'Folder'},
-                ].map(file => (
-                  <HStack
-                    key={file.name}
-                    justify="between"
-                    padding={2}
-                    style={{
-                      borderBottom: '1px solid var(--border)',
-                      backgroundColor: 'var(--muted)',
-                      borderRadius: 'var(--radius-sm)',
-                    }}
-                  >
-                    <span>{file.name}</span>
-                    <span style={{color: 'var(--muted-foreground)', fontSize: 'var(--font-size-xs)'}}>
-                      {file.size} · {file.type}
-                    </span>
-                  </HStack>
-                ))}
-              </VStack>
-            </div>
-          )}
+          </ComputerWorkspace>
         </div>
 
-        {/* Interactive Take-Over inputs (visible on Screen app) */}
-        {activeApp === 'screen' ? (
-          <HStack gap={2} vAlign="end" wrap="wrap">
-            <TextInput
-              label="Type text"
-              value={textValue}
-              onChange={setTextValue}
-              placeholder="Text to type on the agent computer"
-              size="sm"
-              isDisabled={!inputsEnabled}
-            />
-            <Button
-              label="Send text"
-              variant="primary"
-              size="sm"
-              isDisabled={!inputsEnabled || !textValue.trim()}
-              isLoading={busy}
-              onClick={() => {
-                void act({action: 'type', text: textValue});
-                setTextValue('');
-              }}
-            />
-            <TextInput
-              label="Key"
-              value={keyValue}
-              onChange={setKeyValue}
-              placeholder="e.g. Enter"
-              size="sm"
-              isDisabled={!inputsEnabled}
-            />
-            <Button
-              label="Press key"
-              size="sm"
-              isDisabled={!inputsEnabled || !keyValue.trim()}
-              isLoading={busy}
-              onClick={() => {
-                void act({action: 'key', key: keyValue});
-                setKeyValue('');
-              }}
-            />
-            <Button
-              label="Scroll down"
-              size="sm"
-              isDisabled={!inputsEnabled}
-              isLoading={busy}
-              onClick={() => void act({action: 'scroll', amount: 3})}
-            />
-            <Button
-              label="Scroll up"
-              size="sm"
-              isDisabled={!inputsEnabled}
-              isLoading={busy}
-              onClick={() => void act({action: 'scroll', amount: -3})}
-            />
-          </HStack>
-        ) : null}
-
-        {/* Polaris ComputerWorkspace Floating Dock */}
-        <div
-          data-testid="computer-workspace-dock"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 'var(--spacing-2)',
-            padding: 'var(--spacing-1-5) var(--spacing-3)',
-            backgroundColor: 'var(--card)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-xl)',
-            boxShadow: '0 var(--spacing-1) var(--spacing-4) var(--overlay)',
-            backdropFilter: 'blur(var(--spacing-2))',
-            alignSelf: 'center',
-            marginTop: 'var(--spacing-2)',
-          }}
-        >
-          <Button
-            label="Live Screen"
-            variant={activeApp === 'screen' ? 'primary' : 'ghost'}
+        {/* Interactive Take-Over inputs */}
+        <HStack gap={2} vAlign="end" wrap="wrap" style={{marginTop: '8px', zIndex: 10}}>
+          <TextInput
+            label="Type text"
+            value={textValue}
+            onChange={setTextValue}
+            placeholder="Text to type on the agent computer"
             size="sm"
-            onClick={() => setActiveApp('screen')}
+            isDisabled={!inputsEnabled}
           />
           <Button
-            label="Terminal"
-            variant={activeApp === 'terminal' ? 'primary' : 'ghost'}
+            label="Send text"
+            variant="primary"
             size="sm"
-            onClick={() => setActiveApp('terminal')}
+            isDisabled={!inputsEnabled || !textValue.trim()}
+            isLoading={busy}
+            onClick={() => {
+              void act({action: 'type', text: textValue});
+              setTextValue('');
+            }}
+          />
+          <TextInput
+            label="Key"
+            value={keyValue}
+            onChange={setKeyValue}
+            placeholder="e.g. Enter"
+            size="sm"
+            isDisabled={!inputsEnabled}
           />
           <Button
-            label="Files"
-            variant={activeApp === 'files' ? 'primary' : 'ghost'}
+            label="Press key"
             size="sm"
-            onClick={() => setActiveApp('files')}
+            isDisabled={!inputsEnabled || !keyValue.trim()}
+            isLoading={busy}
+            onClick={() => {
+              void act({action: 'key', key: keyValue});
+              setKeyValue('');
+            }}
           />
-        </div>
+          <Button
+            label="Scroll down"
+            size="sm"
+            isDisabled={!inputsEnabled}
+            isLoading={busy}
+            onClick={() => void act({action: 'scroll', amount: 3})}
+          />
+          <Button
+            label="Scroll up"
+            size="sm"
+            isDisabled={!inputsEnabled}
+            isLoading={busy}
+            onClick={() => void act({action: 'scroll', amount: -3})}
+          />
+        </HStack>
       </VStack>
       </div>
     </div>
