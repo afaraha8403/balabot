@@ -1,6 +1,7 @@
 import {type ComponentType, useEffect, useRef, useState} from 'react';
 import {Brain, CloudDownload, Cpu, Gauge, Monitor, Settings, Volume2, X} from 'lucide-react';
 import {ModelSettingsOverlay} from './ModelSettingsOverlay';
+import {MemorySettingsOverlay} from './MemorySettingsOverlay';
 
 export type SettingsSection =
   | 'general'
@@ -267,9 +268,7 @@ export function SettingsOverlay({
               ))}
 
               {section === 'memory' && (renderMemory ? renderMemory() : (
-                <div data-testid="memory-settings" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
-                  <p style={{color: 'var(--muted-foreground)', fontSize: '14px'}}>Vector provider and knowledge base storage.</p>
-                </div>
+                <MemorySettingsOverlay embedded onClose={onClose} />
               ))}
 
               {section === 'voice' && (renderVoice ? renderVoice() : (
