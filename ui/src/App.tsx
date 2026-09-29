@@ -58,6 +58,8 @@ import {
 import {NewBotSectionDialog, RenameBotSectionDialog} from './SectionDialogs';
 import {BotAvatar} from './BotAvatar';
 import {GroupAvatar} from './GroupAvatar';
+import {SpaceSwitcher} from './SpaceSwitcher';
+import {UserMenuPopover} from './UserMenuPopover';
 import {BotRoster} from './screens/BotRoster';
 import {AgentsScreen} from './screens/AgentsScreen';
 import {MemoryScreen} from './screens/MemoryScreen';
@@ -318,6 +320,8 @@ export default function App() {
       localStorage.setItem('balabot-bots-sidebar-collapsed', String(val));
     } catch {}
   }, []);
+
+  const sidebarEdgeDragRef = useRef<{ startX: number; mode: 'expand' | 'collapse' } | null>(null);
 
   // Mobile sidebar drawer state under 1024px
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -970,6 +974,11 @@ export default function App() {
             </div>
           </div>
 
+          {/* Quick Space Switcher Popover */}
+          <div style={{padding: '10px 14px 2px 14px'}}>
+            <SpaceSwitcher />
+          </div>
+
           {/* Quick Space Search & Filter Input */}
           <div style={{padding: '10px 14px 8px 14px'}}>
             <TextInput
@@ -1061,12 +1070,24 @@ export default function App() {
                 onClick={() => setShowSessions(true)}
               />
             </HStack>
-            <HStack gap={1} vAlign="center">
-              <Avatar name="Ali" size="sm" tooltip={false} />
-              <Text type="supporting" size="sm" weight="medium">
-                Ali
-              </Text>
-            </HStack>
+            <UserMenuPopover
+              userName="Ali"
+              onNavigateArtifacts={() => {
+                setScreen('chat');
+                navigateTo('/app/artifacts');
+              }}
+              onOpenSettings={() => setShowPanel(true)}
+              onOpenUsage={() => {
+                setScreen('cost');
+                navigateTo('/app/cost');
+              }}
+              onSignOut={() => {
+                try {
+                  localStorage.removeItem('balabot-dashboard.key');
+                  window.location.reload();
+                } catch {}
+              }}
+            />
           </div>
         </aside>
 
@@ -1078,7 +1099,36 @@ export default function App() {
           aria-label={sidebarCollapsed ? 'Show bots' : 'Hide bots'}
           aria-pressed={!sidebarCollapsed}
           className="polaris-edge-drag"
-          onClick={toggleSidebar}
+          onPointerDown={event => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            sidebarEdgeDragRef.current = {
+              startX: event.clientX,
+              mode: sidebarCollapsed ? 'expand' : 'collapse',
+            };
+          }}
+          onPointerMove={event => {
+            const drag = sidebarEdgeDragRef.current;
+            if (!drag) return;
+            const delta = event.clientX - drag.startX;
+            if (drag.mode === 'expand' && delta >= 24) {
+              sidebarEdgeDragRef.current = null;
+              setSidebarCollapsedPref(false);
+            } else if (drag.mode === 'collapse' && delta <= -24) {
+              sidebarEdgeDragRef.current = null;
+              setSidebarCollapsedPref(true);
+            }
+          }}
+          onPointerUp={event => {
+            const drag = sidebarEdgeDragRef.current;
+            sidebarEdgeDragRef.current = null;
+            if (!drag) return;
+            if (Math.abs(event.clientX - drag.startX) < 24) {
+              toggleSidebar();
+            }
+          }}
+          onPointerCancel={() => {
+            sidebarEdgeDragRef.current = null;
+          }}
         />
 
         {/* ── Region 2: flex-1 Main Transcript & Work Surface ── */}
