@@ -3140,10 +3140,15 @@ app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
 
 @app.get("/{full_path:path}")
 def spa(full_path: str):
+    if full_path.startswith("api/") or full_path == "api":
+        raise HTTPException(status_code=404, detail="api endpoint not found")
     candidate = DIST / full_path
     if full_path and candidate.is_file():
         return FileResponse(candidate)
-    return FileResponse(DIST / "index.html")
+    index_file = DIST / "index.html"
+    if index_file.is_file():
+        return FileResponse(index_file)
+    raise HTTPException(status_code=404, detail="SPA index.html not found; run npm run build in ui/")
 
 
 if __name__ == "__main__":

@@ -241,3 +241,169 @@ body,
 .rk-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-hover);
 }
+
+/* Window Chrome Drag Regions mirroring Polaris */
+.app-drag {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+@keyframes polaris-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* 3-Region Responsive Workstation Shell (Wave 2) */
+.polaris-shell {
+  position: relative;
+  display: flex;
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+.polaris-sidebar {
+  width: 316px;
+  min-width: 316px;
+  max-width: 316px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--sidebar);
+  border-right: 1px solid var(--sidebar-border);
+  transition: width 150ms ease-out, transform 200ms ease-out, opacity 150ms ease-out;
+  box-sizing: border-box;
+  z-index: 30;
+  overflow: hidden;
+}
+
+.polaris-sidebar[data-collapsed="true"] {
+  width: 0px !important;
+  min-width: 0px !important;
+  max-width: 0px !important;
+  overflow: hidden !important;
+  border-right: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Mobile Drawer under 1024px */
+@media (max-width: 1023px) {
+  .polaris-sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 316px;
+    max-width: calc(100vw - 48px);
+    z-index: 40;
+    transform: translateX(-100%);
+    box-shadow: none;
+  }
+
+  .polaris-sidebar[data-mobile-open="true"] {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+  }
+}
+
+.polaris-mobile-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  background: var(--overlay);
+  backdrop-filter: blur(2px);
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.polaris-edge-drag {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 312px;
+  width: 8px;
+  z-index: 45;
+  cursor: ew-resize;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.polaris-edge-drag[data-collapsed="true"] {
+  left: 0px;
+}
+
+@media (max-width: 1023px) {
+  .polaris-edge-drag {
+    display: none !important;
+  }
+}
+
+.polaris-main {
+  display: flex;
+  flex: 1 1 0%;
+  min-width: 0;
+  height: 100%;
+  flex-direction: column;
+  background-color: var(--background);
+  position: relative;
+  overflow: hidden;
+}
+
+.polaris-side-panel {
+  position: relative;
+  width: 384px;
+  min-width: 384px;
+  max-width: 384px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--background);
+  border-left: 1px solid var(--sidebar-border);
+  transition: width 150ms ease-out, min-width 150ms ease-out, max-width 150ms ease-out;
+  box-sizing: border-box;
+  overflow: hidden;
+  z-index: 20;
+}
+
+.polaris-side-panel[data-panel="closed"] {
+  width: 0px !important;
+  min-width: 0px !important;
+  max-width: 0px !important;
+  border-left: 0 !important;
+  pointer-events: none !important;
+}
+
+@media (max-width: 1023px) {
+  .polaris-side-panel {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: 100%;
+    max-width: 384px;
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+  }
+
+  .polaris-side-panel[data-panel="closed"] {
+    width: 0px !important;
+    max-width: 0px !important;
+    box-shadow: none;
+  }
+}
