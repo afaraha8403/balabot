@@ -139,6 +139,7 @@ export function serializeComposerPrompt(
 
 export type ComposerAttachment = Attachment & {
   previewUrl?: string;
+  isQueued?: boolean;
 };
 
 type Props = {
@@ -518,6 +519,7 @@ export function Composer({
           return {
             ...res,
             previewUrl,
+            isQueued: isStreaming,
           };
         } catch {
           return {
@@ -526,6 +528,7 @@ export function Composer({
             size: f.size,
             mime_type: f.type,
             previewUrl,
+            isQueued: isStreaming,
           };
         }
       }),
@@ -696,6 +699,11 @@ export function Composer({
               {!activeBotHasVision && (a.mime_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(a.name)) ? (
                 <span className="text-[11.5px] text-amber-500 font-medium">
                   (no vision capability — cannot be seen)
+                </span>
+              ) : null}
+              {a.isQueued || isStreaming ? (
+                <span className="text-[11.5px] text-muted-foreground font-medium">
+                  queued for the next step
                 </span>
               ) : null}
               <button
