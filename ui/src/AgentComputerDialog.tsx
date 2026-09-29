@@ -12,6 +12,7 @@ import {BotAvatar} from './BotAvatar';
 import {ComputerMaintenanceActions} from './ComputerMaintenanceActions';
 import {TeachComputerOverlayControl} from './TeachComputerOverlayControl';
 import {TeachRecordingChrome} from './TeachRecordingChrome';
+import {TeachCaptureOverlay} from './TeachCaptureOverlay';
 import {ComputerWorkspace} from './ComputerWorkspace';
 import {TerminalApp} from './TerminalApp';
 import {FilesApp} from './FilesApp';
@@ -530,6 +531,15 @@ export function AgentComputerDialog({bot, onClose}: Props) {
                       display: 'block',
                     }}
                   />
+                  {isRecording ? (
+                    <TeachCaptureOverlay
+                      botId={bot.id}
+                      enabled={isRecording}
+                      screenWidth={frame.width}
+                      screenHeight={frame.height}
+                      onActionCaptured={step => setRecordedSteps(prev => [...prev, step])}
+                    />
+                  ) : null}
                 </div>
               ) : (
                 <EmptyState
