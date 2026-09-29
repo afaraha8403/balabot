@@ -69,6 +69,7 @@ import {DecisionsScreen} from './screens/DecisionsScreen';
 import {GovernanceScreen} from './screens/GovernanceScreen';
 import {OpsScreen} from './screens/OpsScreen';
 import {CostScreen} from './screens/CostScreen';
+import {ArtifactsPage} from './ArtifactsPage';
 import {CommandPalette, isCommandPaletteHotkey} from './CommandPalette';
 import {InterventionCard} from './InterventionCard';
 import {DraftCard, parseDraftsFromContent} from './DraftCard';
@@ -411,7 +412,9 @@ export default function App() {
 
       // Deep link resolution from current URL
       const currentRoute = parseRoute(window.location.pathname, window.location.search);
-      if (currentRoute.kind === 'app' && currentRoute.botId) {
+      if (currentRoute.kind === 'artifacts') {
+        // Artifacts gallery route
+      } else if (currentRoute.kind === 'app' && currentRoute.botId) {
         if (sorted.some(b => b.id === currentRoute.botId)) {
           setActiveBotId(currentRoute.botId);
         } else if (sorted.length > 0) {
@@ -439,7 +442,9 @@ export default function App() {
 
   // Synchronize route changes from History navigation (popstate/forward/back)
   useEffect(() => {
-    if (route.kind === 'app') {
+    if (route.kind === 'artifacts') {
+      // Handled at top-level view
+    } else if (route.kind === 'app') {
       if (route.botId) {
         if (route.botId !== activeBotId && bots.some(b => b.id === route.botId)) {
           setActiveBotId(route.botId);
@@ -916,6 +921,16 @@ export default function App() {
     return (
       <Theme theme={balabotTheme} mode={themeMode}>
         <ShellSkeleton />
+      </Theme>
+    );
+  }
+
+  if (route.kind === 'artifacts') {
+    return (
+      <Theme theme={balabotTheme} mode={themeMode}>
+        <div className="h-screen w-screen overflow-hidden bg-background text-foreground" data-rakazo-app-state="ready">
+          <ArtifactsPage artifactId={route.artifactId} bots={bots} />
+        </div>
       </Theme>
     );
   }
@@ -2208,6 +2223,8 @@ export default function App() {
             } else if (action === 'nav-cost') {
               setScreen('cost');
               navigateTo('/app/cost');
+            } else if (action === 'nav-artifacts') {
+              navigateTo('/app/artifacts');
             } else if (action === 'toggle-theme') handleSetTheme(themeMode === 'light' ? 'dark' : 'light');
           }}
         />

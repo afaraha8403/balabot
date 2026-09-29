@@ -9,6 +9,7 @@ import {useEffect, useState} from 'react';
 export type AppRoute =
   | { kind: 'app'; botId?: string }
   | { kind: 'group'; groupId: string }
+  | { kind: 'artifacts'; artifactId?: string }
   | { kind: 'screen'; screen: string; botId?: string };
 
 /**
@@ -22,6 +23,15 @@ export function parseRoute(pathname: string, search: string = ''): AppRoute {
 
   if (screenParam) {
     return { kind: 'screen', screen: screenParam };
+  }
+
+  // /app/artifacts or /artifacts, optionally with /:artifactId
+  if (clean === '/app/artifacts' || clean === '/artifacts') {
+    return { kind: 'artifacts' };
+  }
+  if (clean.startsWith('/app/artifacts/')) {
+    const artifactId = clean.slice('/app/artifacts/'.length).split('/')[0];
+    return { kind: 'artifacts', artifactId: decodeURIComponent(artifactId) };
   }
 
   // /app/g/:groupId
@@ -59,6 +69,10 @@ export function routeToUrl(route: AppRoute): string {
   switch (route.kind) {
     case 'group':
       return `/app/g/${encodeURIComponent(route.groupId)}`;
+    case 'artifacts':
+      return route.artifactId
+        ? `/app/artifacts/${encodeURIComponent(route.artifactId)}`
+        : '/app/artifacts';
     case 'screen':
       return `/app/${encodeURIComponent(route.screen)}`;
     case 'app':

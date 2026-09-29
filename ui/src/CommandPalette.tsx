@@ -215,6 +215,17 @@ export function CommandPalette({
         },
       },
       {
+        id: 'action-artifacts',
+        category: 'Actions',
+        label: 'Artifacts Gallery',
+        subtitle: 'View generated reports, specs, and documents',
+        icon: <IconSkills size="sm" color="accent" />,
+        onExecute: () => {
+          onAction('nav-artifacts');
+          onClose();
+        },
+      },
+      {
         id: 'action-governance',
         category: 'Actions',
         label: 'Governance & Audit Ledger',
