@@ -23,6 +23,7 @@ import {
 } from './api';
 
 const ATTACHMENT_ACCEPT = '.txt,.md,.pdf,.png,.jpg,.jpeg,.gif,.webp,.json,.csv,.py,.js,.ts,.html,.css';
+const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB upload ceiling
 
 export type ComposerMentionKind = 'bot' | 'group' | 'routine' | 'connector' | 'everyone';
 
@@ -165,6 +166,7 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<SkillEntry | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<ComposerMention[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -464,8 +466,19 @@ export function Composer({
   };
 
   const addFiles = async (files: File[]) => {
+    setAttachmentError(null);
+    const validFiles: File[] = [];
+    for (const f of files) {
+      if (f.size > MAX_FILE_SIZE_BYTES) {
+        setAttachmentError(`File "${f.name}" is too large (${(f.size / (1024 * 1024)).toFixed(1)} MB). Exceeds the 25 MB limit.`);
+        continue;
+      }
+      validFiles.push(f);
+    }
+    if (validFiles.length === 0) return;
+
     const uploaded = await Promise.all(
-      files.map(async f => {
+      validFiles.map(async f => {
         const previewUrl = f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined;
         try {
           const res = await uploadAttachment(f);
@@ -590,6 +603,23 @@ export function Composer({
             }}
             className="shrink-0 text-muted-foreground hover:text-foreground"
             style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--muted-foreground)', display: 'inline-flex', padding: 0 }}
+          >
+            <X size={13} strokeWidth={2} />
+          </button>
+        </div>
+      ) : null}
+
+      {attachmentError ? (
+        <div
+          data-testid="composer-attachment-error"
+          className="polaris-attachment-error mb-2 flex items-center justify-between gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-[13px] text-destructive"
+        >
+          <span>{attachmentError}</span>
+          <button
+            type="button"
+            aria-label="Dismiss error"
+            onClick={() => setAttachmentError(null)}
+            className="shrink-0 text-destructive hover:opacity-80"
           >
             <X size={13} strokeWidth={2} />
           </button>
