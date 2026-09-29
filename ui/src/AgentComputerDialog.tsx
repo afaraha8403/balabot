@@ -8,6 +8,9 @@ import {TextInput} from '@astryxdesign/core/TextInput';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {Spinner} from '@astryxdesign/core/Spinner';
 import {IconWarning} from './icons';
+import {BotAvatar} from './BotAvatar';
+import {ComputerMaintenanceActions} from './ComputerMaintenanceActions';
+import {TeachComputerOverlayControl} from './TeachComputerOverlayControl';
 import {
   getComputerFrame,
   sendComputerAction,
@@ -242,47 +245,139 @@ export function AgentComputerDialog({bot, onClose}: Props) {
         }}
       >
         <VStack gap={3} padding={4} height="fill" style={{position: 'relative', minHeight: '100%', flex: 1}}>
-          {/* Top Control Bar: Reset & Teach task */}
-          <HStack gap={2} vAlign="center" justify="between" wrap="wrap">
-          <HStack gap={2} vAlign="center">
-            <Button
-              label={isResetting ? "Resetting…" : "Reset Computer"}
-              variant="secondary"
-              size="sm"
-              isLoading={isResetting}
-              onClick={() => void handleResetComputer()}
+        {/* Polaris Top Chrome Bar */}
+        <div
+          data-testid="computer-chrome"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '16px',
+            borderBottom: '1px solid var(--sidebar-border, var(--border))',
+            padding: '12px 18px',
+            flexShrink: 0,
+            backgroundColor: 'var(--background)',
+          }}
+        >
+          <div style={{display: 'flex', minWidth: 0, flex: 1, alignItems: 'center', gap: '12px'}}>
+            <BotAvatar
+              color={bot.color}
+              identity={bot.id}
+              size={28}
             />
-            <Button
-              label="Refresh frame"
-              variant="ghost"
-              size="sm"
-              onClick={async () => {
-                const f = await getComputerFrame(bot.id);
-                setFrame(f);
-              }}
-            />
-          </HStack>
+            <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '15.5px', fontWeight: 500, color: 'var(--foreground)'}} dir="auto">
+              {bot.name}
+            </span>
+            {inputsEnabled ? (
+              <span
+                style={{
+                  borderRadius: '9999px',
+                  backgroundColor: 'rgba(78, 203, 113, 0.15)',
+                  padding: '3px 11px',
+                  fontSize: '13px',
+                  color: 'var(--success)',
+                  fontWeight: 500,
+                }}
+              >
+                You have control
+              </span>
+            ) : null}
+          </div>
 
-          {!isRecording ? (
-            <Button
-              label="Teach a task"
-              variant="primary"
-              size="sm"
-              aria-label="Teach a task"
-              data-testid="teach-start-button"
-              onClick={() => setIsTeachingOpen(prev => !prev)}
-            />
-          ) : (
-            <Button
-              label="Stop teaching"
-              variant="destructive"
-              size="sm"
-              aria-label="Stop teaching"
-              data-testid="teach-stop-button"
-              onClick={() => void handleStopTeaching()}
-            />
-          )}
-        </HStack>
+          <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+            <button
+              type="button"
+              aria-label="Stop"
+              data-testid="computer-overlay-stop"
+              onClick={() => {
+                /* stop run */
+              }}
+              style={{
+                padding: '5px 12px',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border)',
+                backgroundColor: 'transparent',
+                color: 'var(--foreground)',
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
+            >
+              Stop
+            </button>
+
+            {isRecording ? (
+              <button
+                type="button"
+                data-testid="teach-stop-button"
+                aria-label="Stop teaching"
+                onClick={() => void handleStopTeaching()}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border)',
+                  backgroundColor: 'transparent',
+                  color: 'var(--foreground)',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Stop teaching
+              </button>
+            ) : (
+              <TeachComputerOverlayControl
+                botId={bot.id}
+                busy={busy}
+                onStartRecording={goal => {
+                  setTeachGoal(goal);
+                  setIsRecording(true);
+                  setRecordingSecondsRemaining(600);
+                  setRecordedSteps([]);
+                }}
+              />
+            )}
+
+            {!isRecording ? (
+              <ComputerMaintenanceActions
+                botId={bot.id}
+                onChanged={async () => {
+                  const f = await getComputerFrame(bot.id);
+                  setFrame(f);
+                }}
+              />
+            ) : null}
+
+            <button
+              type="button"
+              aria-label="Close computer"
+              onClick={onClose}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '28px',
+                height: '28px',
+                borderRadius: 'var(--radius-sm)',
+                border: 'none',
+                backgroundColor: 'transparent',
+                color: 'var(--muted-foreground)',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = 'var(--accent)';
+                e.currentTarget.style.color = 'var(--foreground)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = 'var(--muted-foreground)';
+              }}
+            >
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        </div>
 
         {/* Polaris TeachComputerOverlay Dialog/Popover */}
         {isTeachingOpen ? (
