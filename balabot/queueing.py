@@ -21,11 +21,23 @@ Design (binding):
   insert time; drain returns them in `seq` order. Two messages queued
   during one busy turn arrive in the order they were sent.
 
-- AT-MOST-ONCE: drain claims rows with a conditional UPDATE
+- AT-MOST-ONCE: drain/claim rows with a conditional UPDATE
   (`... AND delivered_at IS NULL`) and only returns rows the UPDATE
   actually flipped. A row is delivered zero or one times, never twice,
   even if drain is called again before the turn finishes or after a
   crash between claim and send.
+
+- HONEST DELIVERY (server leg): the server CLAIMS undelivered rows at
+  the top of a chat turn (claimed_at set, delivered_at still NULL). The
+  row only flips to `delivered_at` when the upstream model turn actually
+  consumes it (HTTP 200). If the upstream refuses/errors, the server
+  releases the claim (claimed_at cleared) so the message returns to
+  `queued` and is retried on the next turn — a drained message is never
+  reported delivered while the model never consumed it. queue_state()
+  exposes per-message delivery_state (`queued` | `draining` | `delivered`)
+  plus the routing taken (`injected: False, path: "next_turn"` — mid-turn
+  injection does not exist, so the durable next-turn mailbox is the honest
+  fallback and the API says exactly that).
 
 - HONEST FAILURE: if the queue cannot persist (unwritable store path,
   missing database directory, locked file), enqueue raises
@@ -84,6 +96,7 @@ CREATE TABLE IF NOT EXISTS queue_messages (
     content      TEXT NOT NULL,
     enqueued_at  TEXT NOT NULL,
     seq          INTEGER NOT NULL,
+    claimed_at   TEXT,
     delivered_at TEXT
 );
 CREATE TABLE IF NOT EXISTS queue_turns (
@@ -110,14 +123,24 @@ class MessageQueue:
         self._path = Path(db_path) if db_path is not None else _env_db_path()
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._conn = sqlite3.connect(str(self._path), isolation_level=None,
-                                         timeout=2.0)
+            self._conn = sqlite3.connect(
+                str(self._path), isolation_level=None, timeout=2.0
+            )
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._conn.executescript(_SCHEMA)
+            # Pre-existing store files were created before claimed_at existed;
+            # add the column rather than forcing a rebuild (old rows are just
+            # not claimed, which is the correct resting state for queued msgs).
+            try:
+                self._conn.execute(
+                    "ALTER TABLE queue_messages ADD COLUMN claimed_at TEXT"
+                )
+            except sqlite3.OperationalError:
+                pass  # column already present
         except (sqlite3.Error, OSError) as exc:
             raise QueueStoreUnavailable(
-                f"queue store unavailable at {self._path}: "
-                f"{type(exc).__name__}: {exc}") from exc
+                f"queue store unavailable at {self._path}: {type(exc).__name__}: {exc}"
+            ) from exc
 
     def close(self) -> None:
         self._conn.close()
@@ -143,25 +166,34 @@ class MessageQueue:
 
     def mark_busy(self, session_id: str) -> None:
         """The agent's turn started. Persisted so a restart mid-turn stays busy."""
-        self._write(lambda: self._conn.execute(
-            "INSERT INTO queue_turns (session_id, busy) VALUES (?, 1) "
-            "ON CONFLICT(session_id) DO UPDATE SET busy = 1", (session_id,)))
+        self._write(
+            lambda: self._conn.execute(
+                "INSERT INTO queue_turns (session_id, busy) VALUES (?, 1) "
+                "ON CONFLICT(session_id) DO UPDATE SET busy = 1",
+                (session_id,),
+            )
+        )
 
     def mark_idle(self, session_id: str) -> None:
-        self._write(lambda: self._conn.execute(
-            "INSERT INTO queue_turns (session_id, busy) VALUES (?, 0) "
-            "ON CONFLICT(session_id) DO UPDATE SET busy = 0", (session_id,)))
+        self._write(
+            lambda: self._conn.execute(
+                "INSERT INTO queue_turns (session_id, busy) VALUES (?, 0) "
+                "ON CONFLICT(session_id) DO UPDATE SET busy = 0",
+                (session_id,),
+            )
+        )
 
     def is_busy(self, session_id: str) -> bool:
         row = self._conn.execute(
-            "SELECT busy FROM queue_turns WHERE session_id = ?",
-            (session_id,)).fetchone()
+            "SELECT busy FROM queue_turns WHERE session_id = ?", (session_id,)
+        ).fetchone()
         return bool(row and row[0])
 
     # ── enqueue ───────────────────────────────────────────────────────────
 
-    def enqueue(self, session_id: str, content: str,
-                message_id: str | None = None) -> dict:
+    def enqueue(
+        self, session_id: str, content: str, message_id: str | None = None
+    ) -> dict:
         """Queue one message for `session_id`. Durable before return.
 
         Raises QueueStoreUnavailable if the write cannot persist — the
@@ -175,79 +207,162 @@ class MessageQueue:
         at = _now_iso()
 
         existing = self._conn.execute(
-            "SELECT message_id, session_id, content, enqueued_at, seq, delivered_at "
-            "FROM queue_messages WHERE message_id = ?", (mid,)).fetchone()
+            "SELECT message_id, session_id, content, enqueued_at, seq, "
+            "claimed_at, delivered_at "
+            "FROM queue_messages WHERE message_id = ?",
+            (mid,),
+        ).fetchone()
         if existing is not None:
             if existing[1] != session_id:
-                raise QueueError(f"message_id {mid!r} already queued for another session")
+                raise QueueError(
+                    f"message_id {mid!r} already queued for another session"
+                )
             return self._row_to_dict(existing)
 
         def _do() -> None:
             next_seq = self._conn.execute(
                 "SELECT COALESCE(MAX(seq), 0) + 1 FROM queue_messages "
-                "WHERE session_id = ?", (session_id,)).fetchone()[0]
+                "WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0]
             self._conn.execute(
                 "INSERT INTO queue_messages (message_id, session_id, content, "
-                "enqueued_at, seq, delivered_at) VALUES (?, ?, ?, ?, ?, NULL)",
-                (mid, session_id, content, at, next_seq))
+                "enqueued_at, seq, claimed_at, delivered_at) "
+                "VALUES (?, ?, ?, ?, ?, NULL, NULL)",
+                (mid, session_id, content, at, next_seq),
+            )
 
         self._write(_do)
-        return {"message_id": mid, "session_id": session_id, "content": content,
-                "enqueued_at": at, "seq": self._conn.execute(
-                    "SELECT seq FROM queue_messages WHERE message_id = ?",
-                    (mid,)).fetchone()[0],
-                "delivered_at": None}
+        return {
+            "message_id": mid,
+            "session_id": session_id,
+            "content": content,
+            "enqueued_at": at,
+            "seq": self._conn.execute(
+                "SELECT seq FROM queue_messages WHERE message_id = ?", (mid,)
+            ).fetchone()[0],
+            "claimed_at": None,
+            "delivered_at": None,
+        }
 
-    # ── drain ─────────────────────────────────────────────────────────────
+    # ── claim / drain (honest delivery) ──────────────────────────────────
 
-    def drain(self, session_id: str) -> list[dict]:
-        """Pop all undelivered messages for `session_id` in FIFO order.
+    def claim(self, session_id: str) -> list[dict]:
+        """Claim undelivered messages for `session_id` in FIFO order.
 
-        Each row is claimed atomically with a conditional UPDATE checked
-        by rowcount, so a row can only ever be returned once (at-most-once).
+        Claiming stamps `claimed_at` but NOT `delivered_at`. The row is
+        held in the mailbox as "draining" until the caller either confirms
+        the model consumed it (mark_delivered) or releases the claim
+        (release_claims) — a drained message whose turn the model never
+        consumed is never reported delivered. At-most-once is preserved:
+        a claimed row is not returned again by a second claim.
         """
         rows = self._conn.execute(
-            "SELECT message_id, session_id, content, enqueued_at, seq, delivered_at "
+            "SELECT message_id, session_id, content, enqueued_at, seq, "
+            "claimed_at, delivered_at "
             "FROM queue_messages WHERE session_id = ? AND delivered_at IS NULL "
-            "ORDER BY seq ASC", (session_id,)).fetchall()
-        delivered: list[dict] = []
+            "ORDER BY seq ASC",
+            (session_id,),
+        ).fetchall()
+        claimed: list[dict] = []
         for row in rows:
+            now = _now_iso()
+            with self._conn:
+                cur = self._conn.execute(
+                    "UPDATE queue_messages SET claimed_at = ? "
+                    "WHERE message_id = ? AND delivered_at IS NULL "
+                    "AND claimed_at IS NULL",
+                    (now, row[0]),
+                )
+                if cur.rowcount != 1:
+                    continue  # another drainer claimed it first
+                claimed.append(
+                    {
+                        **self._row_to_dict(row),
+                        "claimed_at": now,
+                        "delivery_state": "draining",
+                    }
+                )
+        return claimed
+
+    def mark_delivered(self, session_id: str, message_ids: list[str]) -> int:
+        """Confirm delivery: the model consumed these claimed messages."""
+        if not message_ids:
+            return 0
+        now = _now_iso()
+        n = 0
+        for mid in message_ids:
             with self._conn:
                 cur = self._conn.execute(
                     "UPDATE queue_messages SET delivered_at = ? "
-                    "WHERE message_id = ? AND delivered_at IS NULL",
-                    (_now_iso(), row[0]))
-                if cur.rowcount != 1:
-                    continue  # another drainer claimed it first
-                delivered.append({**self._row_to_dict(row),
-                                  "delivered_at": _now_iso()})
-        return delivered
+                    "WHERE session_id = ? AND message_id = ? AND delivered_at IS NULL",
+                    (now, session_id, mid),
+                )
+                n += cur.rowcount
+        return n
 
-    def drain_messages(self, session_id: str, from_bot: str = "user",
-                       to_bot: str = "") -> tuple[list[dict], list[str]]:
-        """Drain undelivered messages for `session_id`, returning (messages, sse_frames).
+    def release_claims(self, session_id: str) -> int:
+        """Un-claim messages the model never consumed; they return to `queued`
+        and are retried on the next turn."""
+        with self._conn:
+            cur = self._conn.execute(
+                "UPDATE queue_messages SET claimed_at = NULL "
+                "WHERE session_id = ? AND delivered_at IS NULL "
+                "AND claimed_at IS NOT NULL",
+                (session_id,),
+            )
+            return cur.rowcount
+
+    def drain(self, session_id: str) -> list[dict]:
+        """Pop all undelivered messages for `session_id` in FIFO order and mark
+        them DELIVERED immediately.
+
+        Each row is claimed atomically with a conditional UPDATE checked by
+        rowcount, so a row can only ever be returned once (at-most-once). The
+        stateless/direct caller gets the old immediate-delivery contract; the
+        server chat leg uses claim() + mark_delivered()/release_claims()
+        instead so delivered is only reported when the model consumed the turn.
+        """
+        msgs = self.claim(session_id)
+        if msgs:
+            self.mark_delivered(session_id, [m["message_id"] for m in msgs])
+            for m in msgs:
+                m["delivered_at"] = m["claimed_at"]
+                m["delivery_state"] = "delivered"
+        return msgs
+
+    def drain_messages(
+        self, session_id: str, from_bot: str = "user", to_bot: str = ""
+    ) -> tuple[list[dict], list[str]]:
+        """Claim undelivered messages for `session_id`, returning (messages, sse_frames).
 
         Frames use the existing `event: handoff` grammar (ui/src/api.ts
         parses {from, to, summary, at}) — no new event type is invented.
-        Delivery state is committed in the same pass, so draining is
-        at-most-once even across restarts.
+        The claim is at-most-once even across restarts; actual `delivered`
+        marking is the caller's job (confirmed or released honestly).
         """
-        msgs = self.drain(session_id)
+        msgs = self.claim(session_id)
         frames: list[str] = []
         for m in msgs:
-            frames.append(format_handoff_frame(
-                from_bot, to_bot or m["session_id"],
-                summary=m["content"], at=m["enqueued_at"]))
+            frames.append(
+                format_handoff_frame(
+                    from_bot,
+                    to_bot or m["session_id"],
+                    summary=m["content"],
+                    at=m["enqueued_at"],
+                )
+            )
         return msgs, frames
 
-    def drain_sse_frames(self, session_id: str, from_bot: str = "user",
-                         to_bot: str = "") -> list[str]:
-        """Drain as ready-to-yield SSE frames the UI already parses.
+    def drain_sse_frames(
+        self, session_id: str, from_bot: str = "user", to_bot: str = ""
+    ) -> list[str]:
+        """Claim and format the undelivered messages as ready-to-yield SSE
+        frames the UI already parses.
 
         Frames use the existing `event: handoff` grammar (ui/src/api.ts
         parses {from, to, summary, at}) — no new event type is invented.
-        Delivery state is committed in the same pass, so draining is
-        at-most-once even across restarts.
+        The claim is at-most-once even across restarts.
         """
         _, frames = self.drain_messages(session_id, from_bot=from_bot, to_bot=to_bot)
         return frames
@@ -258,26 +373,74 @@ class MessageQueue:
         return self._conn.execute(
             "SELECT COUNT(*) FROM queue_messages "
             "WHERE session_id = ? AND delivered_at IS NULL",
-            (session_id,)).fetchone()[0]
+            (session_id,),
+        ).fetchone()[0]
 
     def queue_state(self, session_id: str) -> dict:
-        """Honest queue state for the UI: busy flag + pending messages in order."""
+        """Honest queue state for the UI: busy flag + per-message delivery state.
+
+        `pending` is the undelivered mailbox in FIFO order. Every entry carries
+        `delivery_state` ("queued" | "draining") and the routing the message
+        actually took (`injected: False, path: "next_turn"` — mid-turn injection
+        does not exist, so the durable next-turn mailbox is the honest fallback).
+        `delivery` summarises the counts and `last_delivered` shows recent
+        confirmed deliveries so a client can observe the delivered verb.
+        """
         rows = self._conn.execute(
-            "SELECT message_id, content, enqueued_at, seq FROM queue_messages "
-            "WHERE session_id = ? AND delivered_at IS NULL ORDER BY seq ASC",
-            (session_id,)).fetchall()
+            "SELECT message_id, content, enqueued_at, seq, claimed_at, delivered_at "
+            "FROM queue_messages WHERE session_id = ? ORDER BY seq ASC",
+            (session_id,),
+        ).fetchall()
+        pending: list[dict] = []
+        delivered: list[dict] = []
+        for r in rows:
+            if r[5] is None:  # delivered_at not set → still in the mailbox
+                pending.append(
+                    {
+                        "message_id": r[0],
+                        "content": r[1],
+                        "enqueued_at": r[2],
+                        "seq": r[3],
+                        "delivery_state": ("draining" if r[4] else "queued"),
+                        "injected": False,
+                        "path": "next_turn",
+                    }
+                )
+            else:
+                delivered.append(
+                    {
+                        "message_id": r[0],
+                        "content": r[1],
+                        "enqueued_at": r[2],
+                        "seq": r[3],
+                        "delivered_at": r[5],
+                        "delivery_state": "delivered",
+                        "injected": False,
+                        "path": "next_turn",
+                    }
+                )
         return {
             "session_id": session_id,
             "busy": self.is_busy(session_id),
-            "pending_count": len(rows),
-            "pending": [{"message_id": r[0], "content": r[1],
-                         "enqueued_at": r[2], "seq": r[3]} for r in rows],
+            "pending_count": len(pending),
+            "delivery": {
+                "queued": sum(1 for p in pending if p["delivery_state"] == "queued"),
+                "draining": sum(
+                    1 for p in pending if p["delivery_state"] == "draining"
+                ),
+                "delivered": len(delivered),
+            },
+            "pending": pending,
+            "last_delivered": delivered[-10:],
         }
 
     def require_session(self, session_id: str) -> None:
-        if self._conn.execute(
-                "SELECT 1 FROM queue_turns WHERE session_id = ?",
-                (session_id,)).fetchone() is None:
+        if (
+            self._conn.execute(
+                "SELECT 1 FROM queue_turns WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            is None
+        ):
             raise UnknownSession(f"unknown session {session_id!r}")
 
     # ── internals ─────────────────────────────────────────────────────────
@@ -288,13 +451,20 @@ class MessageQueue:
             self._conn.commit()
         except (sqlite3.Error, OSError) as exc:
             raise QueueStoreUnavailable(
-                f"queue store write failed at {self._path}: "
-                f"{type(exc).__name__}: {exc}") from exc
+                f"queue store write failed at {self._path}: {type(exc).__name__}: {exc}"
+            ) from exc
 
     @staticmethod
     def _row_to_dict(row) -> dict:
-        return {"message_id": row[0], "session_id": row[1], "content": row[2],
-                "enqueued_at": row[3], "seq": row[4], "delivered_at": row[5]}
+        return {
+            "message_id": row[0],
+            "session_id": row[1],
+            "content": row[2],
+            "enqueued_at": row[3],
+            "seq": row[4],
+            "claimed_at": row[5],
+            "delivered_at": row[6],
+        }
 
 
 # ----------------------------------------------------------------------
@@ -341,6 +511,7 @@ def verify_queue_integrity() -> bool:
 if __name__ == "__main__":
     import sys
     import json
+
     argv = sys.argv[1:]
     if argv[:1] == ["backup"]:
         dest = argv[1] if len(argv) > 1 else None

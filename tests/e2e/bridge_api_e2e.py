@@ -31,6 +31,7 @@ import argparse
 import ast
 import base64
 import json
+import os
 import pathlib
 import re
 import secrets
@@ -228,24 +229,405 @@ def w1_14_sse_drain_grammar() -> None:
             delete(f"/api/sessions/{sid}")
 
 
-# ── W1-2 / W1-9 / W1-11: not built yet — registered honestly ─────────────────
-def w1_pending() -> None:
-    pending(
-        "W1-2 drained msg not delivered w/o model",
-        "W1",
-        "needs upstream-refusing stub; delivery marking not exposed",
+# ── W1-9 / W1-2 / W1-11: the durable steering mailbox + honest delivery ─────
+# The three rows share one store: balabot.queueing's durable per-session
+# SQLite queue. The harness brings the :9119 server up under a repo-local
+# BALABOT_QUEUE_DB (tests/e2e/_scratch/w1/queue.db) so it can
+# - prove W1-9 with a REAL process restart (the steer must survive the server
+#   dying and coming back, i.e. it lives in the store, not in a request),
+# - prove W1-2 with a turn the model never consumed (the client aborts before
+#   any model output — the drained message must NOT be reported delivered and
+#   the delivery state must be readable from GET /api/queue),
+# - prove W1-11 by asserting the fallback routing is stated honestly in API
+#   state (injected=false, path=next_turn) instead of claiming the steer
+#   landed mid-turn.
+# The server is restored to its original configuration afterwards. No product
+# code is touched; the harness only sets env on its own server invocation.
+
+W1_SCRATCH = REPO / "tests" / "e2e" / "_scratch" / "w1"
+W1_SERVER_LOG = W1_SCRATCH / "server.log"
+W1_QUEUE_DB = W1_SCRATCH / "queue.db"
+
+
+def _qstate(body: str) -> dict:
+    """Parse a queue response into the queue-state dict (GET 'state' vs POST 'queue')."""
+    try:
+        d = json.loads(body)
+    except Exception:
+        return {}
+    if isinstance(d, dict):
+        if isinstance(d.get("state"), dict):
+            return d["state"]
+        if isinstance(d.get("queue"), dict):
+            return d["queue"]
+    return {}
+
+
+def _pending_has(state: dict, needle: str) -> bool:
+    return any(needle in str(p.get("content", "")) for p in state.get("pending", []))
+
+
+def _port_pid() -> int | None:
+    """The PID listening on :9119, if any (Windows netstat)."""
+    try:
+        out = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=15
+        ).stdout
+    except Exception:
+        return None
+    for line in out.splitlines():
+        if "127.0.0.1:9119" in line and "LISTENING" in line.upper():
+            parts = line.split()
+            try:
+                return int(parts[-1])
+            except ValueError:
+                continue
+    return None
+
+
+def _stop_server(pid: int | None) -> str:
+    if not pid:
+        return "no pid"
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/PID", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except Exception:
+        return "kill failed"
+    deadline = time.time() + 20
+    while time.time() < deadline and _port_pid() == pid:
+        time.sleep(0.5)
+    return f"stopped {pid}"
+
+
+def _start_server(env: dict) -> bool:
+    """Launch ui/server.py detached from the repo root; True once :9119 is healthy."""
+    W1_SCRATCH.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(W1_SERVER_LOG, "a", encoding="utf-8") as log:
+            subprocess.Popen(
+                [sys.executable, "ui/server.py"],
+                cwd=str(REPO),
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+                close_fds=True,
+            )
+    except Exception:
+        return False
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(BASE + "/healthz", timeout=3) as r:
+                if r.status == 200:
+                    return True
+        except Exception:
+            pass
+        time.sleep(1.5)
+    return False
+
+
+def _w1_scratch_env() -> dict:
+    env = os.environ.copy()
+    env["BALABOT_QUEUE_DB"] = str(W1_QUEUE_DB)
+    return env
+
+
+def _restart_w1_server(env: dict) -> bool:
+    _stop_server(_port_pid())
+    return _start_server(env)
+
+
+def _restore_server() -> None:
+    """Kill the scratch-env server and relaunch with the original env so the
+    rest of the harness rows (and the operator's deployment) see the original
+    configuration — including the default queue store, not the scratch one."""
+    _stop_server(_port_pid())
+    env = os.environ.copy()
+    env.pop("BALABOT_QUEUE_DB", None)
+    _start_server(env)
+
+
+def _mk_w1_session(bot: str, sid: str) -> bool:
+    st, body = post(
+        "/api/sessions", {"botId": bot, "id": sid, "title": "w1 mailbox probe"}
     )
-    pending(
-        "W1-9 steering mailbox durable store",
-        "W1",
-        "steering mailbox (pending_steer persistence) not implemented",
-    )
-    pending(
-        "W1-11 halt-and-replan fallback honest",
-        "W1",
-        "mid-turn injection investigation unresolved; fallback path "
-        "not exposed as API state",
-    )
+    return st == 200 and json.loads(body).get("created") is True
+
+
+def _abort_chat_turn(body: dict) -> str:
+    """POST /api/chat and abort the connection as soon as the drain frames
+    start — the honest 'turn the model never consumed' case. Returns a short
+    transcript of what the client saw before it walked away."""
+    import http.client
+
+    conn = http.client.HTTPConnection("127.0.0.1", 9119, timeout=60)
+    try:
+        conn.putrequest("POST", "/api/chat")
+        conn.putheader("Authorization", _auth_header())
+        conn.putheader("Content-Type", "application/json")
+        conn.putheader("Accept", "text/event-stream")
+        conn.endheaders(json.dumps(body).encode())
+        resp = conn.getresponse()
+        head = b""
+        try:
+            head = resp.read(64)  # first drain/jev frames — then we disconnect
+        except Exception:
+            pass
+        status = resp.status
+        return f"aborted after {len(head)}b (HTTP {status})"
+    except Exception as exc:
+        return f"abort err {type(exc).__name__}: {exc}"
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def w1_09_steering_mailbox_durable() -> None:
+    """W1-9 — a steer submitted mid-turn lives in a DURABLE mailbox, survives a
+    real server restart (it is in the store, not in the in-flight request),
+    drains into the model on the next turn, and is then gone from pending.
+    Fails if: the steer lived only in the in-flight request (lost on restart),
+    or the mailbox is not the source the next turn drains from, or the store
+    claims it delivered while it is still pending."""
+    tag = secrets.token_hex(4)
+    sid = f"zz-api-w1s9-{tag}"
+    sentinel = f"W1S9-STEER-{tag}"
+    created = _mk_w1_session("governor", sid)
+    held = survived = delivered = emptied = False
+    detail = []
+    try:
+        st, body = post(
+            f"/api/queue/{sid}",
+            {"content": f"{sentinel} steer", "message_id": f"w1s9-{tag}"},
+        )
+        state = _qstate(body)
+        held = (
+            st == 200
+            and _pending_has(state, sentinel)
+            and state.get("delivery", {}).get("queued", 0) >= 1
+        )
+        detail.append(f"held={held}")
+
+        if not held:
+            check(
+                "W1-9 steering mailbox durable store",
+                False,
+                " ".join(detail),
+                fails_if="the steer is not held at all — it lives only in the "
+                "in-flight request",
+            )
+            return
+
+        # 1. REAL process restart on the SAME store file.
+        if not _restart_w1_server(_w1_scratch_env()):
+            pending(
+                "W1-9 steering mailbox durable store",
+                "W1",
+                "server restart for the durability proof failed "
+                f"(see {W1_SERVER_LOG.name})",
+            )
+            return
+        st, body = get(f"/api/queue/{sid}")
+        after = _qstate(body)
+        survived = st == 200 and _pending_has(after, sentinel)
+        detail.append(f"survived_restart={survived}")
+
+        # 2. The next real turn drains it into the model.
+        status, stream = sse_post_chat(
+            {
+                "bot_id": "governor",
+                "session_id": sid,
+                "messages": [
+                    {"role": "user", "content": "Reply with exactly one word: ok"}
+                ],
+            }
+        )
+        delivered = status == 200 and sentinel in stream
+        detail.append(f"delivered_to_model={delivered}")
+
+        # 3. The mailbox no longer holds it.
+        st, body = get(f"/api/queue/{sid}")
+        post_state = _qstate(body)
+        emptied = (
+            st == 200
+            and post_state.get("pending_count", 1) == 0
+            and post_state.get("delivery", {}).get("delivered", 0) >= 1
+        )
+        detail.append(
+            f"emptied={emptied} "
+            f"pending={post_state.get('pending_count')} "
+            f"delivered={post_state.get('delivery', {}).get('delivered')}"
+        )
+
+        check(
+            "W1-9 steering mailbox durable store",
+            held and survived and delivered and emptied,
+            " ".join(detail),
+            fails_if="the steer was lost on restart (in-memory/request-only), "
+            "or was never drained into the model, or the store claims delivery "
+            "while it is still pending",
+        )
+    finally:
+        if created:
+            delete(f"/api/sessions/{sid}")
+
+
+def w1_02_drained_msg_not_delivered_without_model() -> None:
+    """W1-2 — a message drained from the mailbox whose turn the model never
+    consumed (the client aborts before any model output) must NOT be reported
+    delivered. The delivery state is read back from GET /api/queue — observable,
+    never inferred. Fails if: the drain marked the message delivered before the
+    model consumed the turn, or left it stuck 'draining' (claim never released),
+    or the delivery state is not exposed by the API."""
+    tag = secrets.token_hex(4)
+    sid = f"zz-api-w1s2-{tag}"
+    sentinel = f"W1S2-STEER-{tag}"
+    created = _mk_w1_session("governor", sid)
+    try:
+        st, body = post(
+            f"/api/queue/{sid}",
+            {"content": f"{sentinel} steer", "message_id": f"w1s2-{tag}"},
+        )
+        st0 = _qstate(body)
+        queued = (
+            st == 200
+            and _pending_has(st0, sentinel)
+            and st0.get("delivery", {}).get("delivered", -1) == 0
+        )
+
+        _abort_chat_turn(
+            {
+                "bot_id": "governor",
+                "session_id": sid,
+                "messages": [{"role": "user", "content": "begin a turn"}],
+            }
+        )
+
+        settled = None
+        for _ in range(20):
+            time.sleep(0.7)
+            _, body = get(f"/api/queue/{sid}")
+            s = _qstate(body)
+            entries = [
+                p for p in s.get("pending", []) if sentinel in str(p.get("content", ""))
+            ]
+            if entries and entries[0].get("delivery_state") in ("queued", "delivered"):
+                settled = entries[0].get("delivery_state")
+                break
+            if entries and entries[0].get("delivery_state") == "draining":
+                settled = "draining"
+                break
+            if not entries and s.get("delivery", {}).get("delivered", 0) >= 1:
+                settled = "delivered"
+                break
+
+        st, body = get(f"/api/queue/{sid}")
+        st1 = _qstate(body)
+        pend = [
+            p for p in st1.get("pending", []) if sentinel in str(p.get("content", ""))
+        ]
+        ok = (
+            queued
+            and bool(pend)
+            and pend[0].get("delivery_state") == "queued"
+            and st1.get("delivery", {}).get("delivered", 0) == 0
+        )
+        check(
+            "W1-2 drained msg not delivered w/o model",
+            ok,
+            f"queued={queued} settled={settled} delivery={st1.get('delivery')}",
+            fails_if="a drained message is reported delivered while the model "
+            "never consumed the turn, or is stuck mid-claim, or delivery state "
+            "is not observable",
+        )
+    finally:
+        if created:
+            delete(f"/api/sessions/{sid}")
+
+
+def w1_11_fallback_state_honest() -> None:
+    """W1-11 — mid-turn injection into an already-open model stream does not
+    exist in this product, so a steer's real path is the fallback: it waits in
+    the durable mailbox for the next model turn. The API must STATE that
+    honestly (injected=false, path=next_turn, delivery_state=queued, delivered=0)
+    instead of silently claiming the steer landed.
+    Fails if: the enqueue response or the queue state claims injection/delivery
+    for a steer that only sits queued."""
+    tag = secrets.token_hex(4)
+    sid = f"zz-api-w1s11-{tag}"
+    sentinel = f"W1S11-STEER-{tag}"
+    created = _mk_w1_session("governor", sid)
+    try:
+        st, body = post(
+            f"/api/queue/{sid}",
+            {"content": f"{sentinel} steer", "message_id": f"w1s11-{tag}"},
+        )
+        d = json.loads(body) if body.startswith("{") else {}
+        routing = d.get("routing") or {}
+        state = d.get("queue") or {}
+        pend = [
+            p for p in state.get("pending", []) if sentinel in str(p.get("content", ""))
+        ]
+        entry = pend[0] if pend else {}
+        honest = (
+            st == 200
+            and routing.get("injected") is False
+            and routing.get("path") == "next_turn"
+            and entry.get("delivery_state") == "queued"
+            and state.get("delivery", {}).get("delivered", -1) == 0
+        )
+        check(
+            "W1-11 halt-and-replan fallback honest",
+            honest,
+            f"routing={routing} entry={entry.get('delivery_state')} "
+            f"delivered={state.get('delivery', {}).get('delivered')}",
+            fails_if="mid-turn injection unavailable but the API claims the "
+            "steer was injected or delivered when it only sits queued for the "
+            "next turn",
+        )
+    finally:
+        if created:
+            delete(f"/api/sessions/{sid}")
+
+
+def w1_scenarios() -> None:
+    """W1-9 / W1-2 / W1-11 — the steering mailbox, against a server running on
+    a repo-local durable queue store. The server is restored afterwards."""
+    W1_SCRATCH.mkdir(parents=True, exist_ok=True)
+    for p in (
+        W1_QUEUE_DB,
+        pathlib.Path(str(W1_QUEUE_DB) + "-wal"),
+        pathlib.Path(str(W1_QUEUE_DB) + "-shm"),
+    ):
+        if p.exists():
+            p.unlink()
+    if not _restart_w1_server(_w1_scratch_env()):
+        for n in (
+            "W1-9 steering mailbox durable store",
+            "W1-2 drained msg not delivered w/o model",
+            "W1-11 halt-and-replan fallback honest",
+        ):
+            pending(
+                n,
+                "W1",
+                "could not bring up :9119 with a repo-local queue store "
+                f"(see {W1_SERVER_LOG.name})",
+            )
+        return
+    try:
+        w1_09_steering_mailbox_durable()
+        w1_02_drained_msg_not_delivered_without_model()
+        w1_11_fallback_state_honest()
+    finally:
+        _restore_server()
 
 
 # ── W2-11: server transcript is the assembly source ──────────────────────────
@@ -1722,7 +2104,7 @@ def main() -> int:
         return 2
 
     w1_14_sse_drain_grammar()
-    w1_pending()
+    w1_scenarios()
     w2_11_server_is_assembly_source()
     w2_14_delete_is_server_side()
     w2_pending()

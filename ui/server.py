@@ -27,6 +27,7 @@ Auth: HTTP basic (user `ali`). Password is read from
 C:/Users/ali/secrets/balabot-dashboard.key, falling back to
 $BALABOT_DASHBOARD_PASSWORD. Never logged.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -50,26 +51,37 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
-ROOT = pathlib.Path(os.environ.get("BALABOT_HOME",
-                                   r"C:/Users/ali/workspace/balabot"))
+ROOT = pathlib.Path(os.environ.get("BALABOT_HOME", r"C:/Users/ali/workspace/balabot"))
 # Host layout: ui/ is a sibling of the repo's other dirs → ROOT/ui/dist.
 # In-container: server.py is copied to /opt/balabot/ui/ and BALABOT_HOME is
 # /opt/balabot → ROOT/ui/dist resolves there too. Same expression, both ways.
 DIST = ROOT / "ui" / "dist"
-ENV_FILE = (pathlib.Path(os.environ["BALABOT_ENV_FILE"])
-            if os.environ.get("BALABOT_ENV_FILE")
-            else ROOT / ".env")
+ENV_FILE = (
+    pathlib.Path(os.environ["BALABOT_ENV_FILE"])
+    if os.environ.get("BALABOT_ENV_FILE")
+    else ROOT / ".env"
+)
 UPSTREAM = "http://127.0.0.1:8642"
 CONTAINER = "balabot-balabot-1"
 PROFILES = ["principal", "governor"]
 
 BOT_META = {
-    "principal": {"name": "Principal", "title": "Principal bot — runtime ops & growth",
-                  "icon": "🧭", "color": "blue", "order": 0,
-                  "description": "Runs the system: health, recovery, agent growth."},
-    "governor": {"name": "Governor", "title": "Governor — the decision ledger",
-                 "icon": "⚖️", "color": "teal", "order": 1,
-                 "description": "Keeps the shared OKF decision ledger every agent reads."},
+    "principal": {
+        "name": "Principal",
+        "title": "Principal bot — runtime ops & growth",
+        "icon": "🧭",
+        "color": "blue",
+        "order": 0,
+        "description": "Runs the system: health, recovery, agent growth.",
+    },
+    "governor": {
+        "name": "Governor",
+        "title": "Governor — the decision ledger",
+        "icon": "⚖️",
+        "color": "teal",
+        "order": 1,
+        "description": "Keeps the shared OKF decision ledger every agent reads.",
+    },
 }
 
 API_KEY = os.environ.get("API_SERVER_KEY", "")
@@ -85,12 +97,14 @@ if not API_KEY:
     )
 
 DASHBOARD_USER = "ali"
-KEY_FILE = (pathlib.Path(os.environ["BALABOT_DASHBOARD_KEY_FILE"])
-            if os.environ.get("BALABOT_DASHBOARD_KEY_FILE")
-            else pathlib.Path(r"C:/Users/ali/secrets/balabot-dashboard.key"))
-DASHBOARD_PASSWORD = (os.environ.get("BALABOT_DASHBOARD_PASSWORD", "")
-                      or (KEY_FILE.read_text(encoding="utf-8").strip()
-                          if KEY_FILE.exists() else ""))
+KEY_FILE = (
+    pathlib.Path(os.environ["BALABOT_DASHBOARD_KEY_FILE"])
+    if os.environ.get("BALABOT_DASHBOARD_KEY_FILE")
+    else pathlib.Path(r"C:/Users/ali/secrets/balabot-dashboard.key")
+)
+DASHBOARD_PASSWORD = os.environ.get("BALABOT_DASHBOARD_PASSWORD", "") or (
+    KEY_FILE.read_text(encoding="utf-8").strip() if KEY_FILE.exists() else ""
+)
 if not DASHBOARD_PASSWORD:
     raise SystemExit(
         "No dashboard password — refusing to start (tried env "
@@ -102,15 +116,17 @@ security = HTTPBasic(auto_error=False)
 
 
 def _unauth(detail: str = "auth required"):
-    return HTTPException(status_code=401, detail=detail,
-                         headers={"WWW-Authenticate": "Basic"})
+    return HTTPException(
+        status_code=401, detail=detail, headers={"WWW-Authenticate": "Basic"}
+    )
 
 
 def require_auth(creds: HTTPBasicCredentials | None = Depends(security)):
     if not creds:
         raise _unauth()
-    ok = secrets.compare_digest(creds.username, DASHBOARD_USER) and \
-        secrets.compare_digest(creds.password, DASHBOARD_PASSWORD)
+    ok = secrets.compare_digest(
+        creds.username, DASHBOARD_USER
+    ) and secrets.compare_digest(creds.password, DASHBOARD_PASSWORD)
     if not ok:
         raise _unauth("bad credentials")
     return True
@@ -127,8 +143,9 @@ async def auth_gate(request: Request, call_next):
     try:
         require_auth(creds)
     except HTTPException as exc:
-        return JSONResponse({"detail": exc.detail}, status_code=401,
-                            headers=exc.headers)
+        return JSONResponse(
+            {"detail": exc.detail}, status_code=401, headers=exc.headers
+        )
     return await call_next(request)
 
 
@@ -151,7 +168,10 @@ def _docker_exec(script: str, timeout: float = 15.0) -> str | None:
     try:
         r = subprocess.run(
             ["docker", "exec", CONTAINER, "sh", "-c", script],
-            capture_output=True, text=True, timeout=timeout)
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
         if r.returncode != 0:
             return None
         return r.stdout
@@ -165,8 +185,12 @@ def unavailable(reason: str):
 
 def container_ok() -> bool:
     try:
-        r = subprocess.run(["docker", "ps", "--format", "{{.Names}}"],
-                           capture_output=True, text=True, timeout=10)
+        r = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         return CONTAINER in r.stdout.split()
     except Exception:
         return False
@@ -182,7 +206,8 @@ def svc_states() -> dict[str, dict]:
         # phantom services as down and make a healthy fleet look broken.
         out = _docker_exec(
             "for s in cloudflared dashboard main-hermes gateway-default; do "
-            "echo \"$s|$(/command/s6-svstat /run/service/$s 2>&1)\"; done")
+            'echo "$s|$(/command/s6-svstat /run/service/$s 2>&1)"; done'
+        )
         states: dict[str, dict] = {}
         if out is None:
             return states
@@ -194,7 +219,11 @@ def svc_states() -> dict[str, dict]:
                 secs = raw.split("(", 1)[1].split(")")[0]
                 try:
                     n = int(secs.split()[-1])
-                    uptime = f"{n // 86400}d {n % 86400 // 3600}h" if n >= 3600 else f"{n // 60}m"
+                    uptime = (
+                        f"{n // 86400}d {n % 86400 // 3600}h"
+                        if n >= 3600
+                        else f"{n // 60}m"
+                    )
                 except Exception:
                     uptime = ""
             detail = raw.split(", normally", 1)[0]
@@ -211,8 +240,11 @@ def svc_states() -> dict[str, dict]:
 def models_for(profile: str) -> str | None:
     """Model id from the upstream /v1/models for one profile."""
     try:
-        r = httpx.get(f"{UPSTREAM}/p/{profile}/v1/models",
-                      headers={"Authorization": f"Bearer {API_KEY}"}, timeout=8)
+        r = httpx.get(
+            f"{UPSTREAM}/p/{profile}/v1/models",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            timeout=8,
+        )
         if r.status_code == 200:
             data = r.json().get("data") or []
             return data[0]["id"] if data else None
@@ -225,7 +257,8 @@ def sqlite_json(db_path: str, sql: str) -> list | None:
     """Query a sqlite db inside the container; returns rows as dicts or None."""
     script = (
         "python3 -c \"import sqlite3,json;c=sqlite3.connect('" + db_path + "');"
-        "print(json.dumps([list(map(str,r)) for r in c.execute('" + sql + "')]))\"")
+        "print(json.dumps([list(map(str,r)) for r in c.execute('" + sql + "')]))\""
+    )
     out = _docker_exec(script)
     if out is None:
         return None
@@ -274,25 +307,33 @@ def fleet():
 
     agents = []
     for p in PROFILES:
-        agents.append({
-            "id": p, "name": BOT_META[p]["name"],
-            "state": agent_state(),
-            "model": models_for(p) if live else None,
-        })
+        agents.append(
+            {
+                "id": p,
+                "name": BOT_META[p]["name"],
+                "state": agent_state(),
+                "model": models_for(p) if live else None,
+            }
+        )
 
     # The product UI boots by calling /api/fleet and reading `bots` (falling back to
     # /api/bots only if the call THROWS). Returning a fleet shape without `bots`
     # succeeds with an undefined list, so the roster renders empty -- "No bots in
     # the roster yet." -- and the fallback never runs. Serve the full bot objects here.
-    bots = [_bot_row(p, meta)
-            for p, meta in sorted(_all_bot_meta().items(),
-                                  key=lambda kv: kv[1].get("order", 999))]
+    bots = [
+        _bot_row(p, meta)
+        for p, meta in sorted(
+            _all_bot_meta().items(), key=lambda kv: kv[1].get("order", 999)
+        )
+    ]
 
-    return {"fleet": "balabot",
-            "bots": bots,
-            "agents": agents,
-            "excluded": [],  # nothing is excluded on this surface
-            "container": {"running": live, "name": CONTAINER}}
+    return {
+        "fleet": "balabot",
+        "bots": bots,
+        "agents": agents,
+        "excluded": [],  # nothing is excluded on this surface
+        "container": {"running": live, "name": CONTAINER},
+    }
 
 
 # ── agents screen ────────────────────────────────────────────────────────────
@@ -301,25 +342,46 @@ def agents():
     if not container_ok():
         return unavailable("balabot container is not running — no agent data")
     states = svc_states()
-    tree = [{
-        "id": "user-ali", "name": "Ali", "tier": "user", "status": "live",
-        "role": "Principal human operator",
-        "children": [{
-            "id": "principal", "name": "Principal", "tier": "principal",
-            "status": "live" if states.get("gateway-default", {}).get("state") == "running"
-                      or states.get("main-hermes", {}).get("state") == "running" else "dormant",
-            "role": f"Runtime ops & agent growth — model {models_for('principal') or 'unknown'}",
-            "children": [{
-                "id": "governor", "name": "Governor", "tier": "governor",
-                "status": "live" if states.get("gateway-default", {}).get("state") == "running"
-                          or states.get("main-hermes", {}).get("state") == "running" else "dormant",
-                "role": f"OKF decision ledger — model {models_for('governor') or 'unknown'}",
-            }],
-        }],
-    }]
-    return {"available": True, "tree": tree,
-            "note": "Only the shipped principal and governor exist in this install; "
-                    "persistent agents and sub-agents have not been provisioned yet."}
+    tree = [
+        {
+            "id": "user-ali",
+            "name": "Ali",
+            "tier": "user",
+            "status": "live",
+            "role": "Principal human operator",
+            "children": [
+                {
+                    "id": "principal",
+                    "name": "Principal",
+                    "tier": "principal",
+                    "status": "live"
+                    if states.get("gateway-default", {}).get("state") == "running"
+                    or states.get("main-hermes", {}).get("state") == "running"
+                    else "dormant",
+                    "role": f"Runtime ops & agent growth — model {models_for('principal') or 'unknown'}",
+                    "children": [
+                        {
+                            "id": "governor",
+                            "name": "Governor",
+                            "tier": "governor",
+                            "status": "live"
+                            if states.get("gateway-default", {}).get("state")
+                            == "running"
+                            or states.get("main-hermes", {}).get("state") == "running"
+                            else "dormant",
+                            "role": f"OKF decision ledger — model {models_for('governor') or 'unknown'}",
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    return {
+        "available": True,
+        "tree": tree,
+        "note": "Only the shipped principal and governor exist in this install; "
+        "persistent agents and sub-agents have not been provisioned yet.",
+    }
 
 
 # ── ops screen ───────────────────────────────────────────────────────────────
@@ -332,33 +394,58 @@ def ops():
     # Real services only. There is no per-profile gateway -- one multiplexed
     # "gateway-default" fronts every profile -- so listing them would invent
     # services and show a healthy fleet as broken.
-    for name, label in [("main-hermes", "Hermes main"), ("dashboard", "Dashboard"),
-                        ("gateway-default", "Gateway (default)"),
-                        ("cloudflared", "Cloudflare tunnel")]:
+    for name, label in [
+        ("main-hermes", "Hermes main"),
+        ("dashboard", "Dashboard"),
+        ("gateway-default", "Gateway (default)"),
+        ("cloudflared", "Cloudflare tunnel"),
+    ]:
         s = states.get(name)
         if s is None:
-            services.append({"id": name, "name": label, "state": "down",
-                             "detail": "service not reported", "uptime": "—"})
+            services.append(
+                {
+                    "id": name,
+                    "name": label,
+                    "state": "down",
+                    "detail": "service not reported",
+                    "uptime": "—",
+                }
+            )
             continue
         # The tunnel is intentionally DOWN until the gateway scheduler raises it
         # (it exits 0, not with a fault). Report that as "dormant" -- calling it
         # "down" reads as an outage when it is the designed resting state.
-        if name == "cloudflared" and s.get("state") == "down" and "exitcode 0" in s.get("detail", ""):
-            services.append({"id": name, "name": label, "state": "dormant",
-                             "detail": "not raised — dormant by design until the gateway schedules it",
-                             "uptime": "—"})
+        if (
+            name == "cloudflared"
+            and s.get("state") == "down"
+            and "exitcode 0" in s.get("detail", "")
+        ):
+            services.append(
+                {
+                    "id": name,
+                    "name": label,
+                    "state": "dormant",
+                    "detail": "not raised — dormant by design until the gateway schedules it",
+                    "uptime": "—",
+                }
+            )
             continue
         services.append({"id": name, "name": label, **s})
-    return {"available": True, "services": services,
-            "note": "cloudflared is dormant (exit 0) until the gateway scheduler raises it; "
-                    "that is its designed resting state, not a fault."}
+    return {
+        "available": True,
+        "services": services,
+        "note": "cloudflared is dormant (exit 0) until the gateway scheduler raises it; "
+        "that is its designed resting state, not a fault.",
+    }
 
 
 # ── memory screen ────────────────────────────────────────────────────────────
 @app.get("/api/memory")
 def memory():
     if not container_ok():
-        return unavailable("balabot container is not running — cannot read the memory store")
+        return unavailable(
+            "balabot container is not running — cannot read the memory store"
+        )
     # Verified against the live container: /opt/data/profiles/principal/ holds
     # memory_store.db (tables: facts, entities, fact_entities, memory_banks,
     # facts_fts*). There is no mem_<p>.db anywhere in the container.
@@ -371,25 +458,44 @@ def memory():
         "(select group_concat(e.name, ', ') from fact_entities fe "
         "join entities e on e.entity_id = fe.entity_id "
         "where fe.fact_id = f.fact_id) "
-        "from facts f order by f.updated_at desc limit 200")
+        "from facts f order by f.updated_at desc limit 200",
+    )
     if facts is None:
-        return unavailable("could not read the holographic store "
-                           "(memory_store.db) inside the container")
+        return unavailable(
+            "could not read the holographic store "
+            "(memory_store.db) inside the container"
+        )
     if not facts:
-        return unavailable("the holographic memory store is empty — "
-                           "no facts have been recorded yet")
-    rows = [{"id": f[0], "content": f[1], "entity": f[7] or "—",
-             "resolvedTo": "—", "trust": float(f[4] or 0),
-             "sources": int(f[5] or 0), "updatedAt": str(f[6]),
-             "category": f[2] or "", "tags": f[3] or ""} for f in facts]
+        return unavailable(
+            "the holographic memory store is empty — no facts have been recorded yet"
+        )
+    rows = [
+        {
+            "id": f[0],
+            "content": f[1],
+            "entity": f[7] or "—",
+            "resolvedTo": "—",
+            "trust": float(f[4] or 0),
+            "sources": int(f[5] or 0),
+            "updatedAt": str(f[6]),
+            "category": f[2] or "",
+            "tags": f[3] or "",
+        }
+        for f in facts
+    ]
     counts = sqlite_json(
         "/opt/data/profiles/principal/memory_store.db",
-        "select (select count(*) from entities), (select count(*) from memory_banks)")
-    return {"available": True, "facts": rows, "profile": "principal",
-            "entitiesCount": int(counts[0][0]) if counts else None,
-            "note": "Entity names come from the real entities/fact_entities "
-                    "tables; the store has no 'resolvedTo' concept, so that "
-                    "column is always '—'. category/tags are shown as-is."}
+        "select (select count(*) from entities), (select count(*) from memory_banks)",
+    )
+    return {
+        "available": True,
+        "facts": rows,
+        "profile": "principal",
+        "entitiesCount": int(counts[0][0]) if counts else None,
+        "note": "Entity names come from the real entities/fact_entities "
+        "tables; the store has no 'resolvedTo' concept, so that "
+        "column is always '—'. category/tags are shown as-is.",
+    }
 
 
 # ── cost screen ──────────────────────────────────────────────────────────────
@@ -404,22 +510,34 @@ def cost():
             f"/opt/data/profiles/{p}/state.db",
             "select model, billing_provider, sum(api_call_count), "
             "sum(input_tokens), sum(output_tokens), sum(estimated_cost_usd) "
-            "from session_model_usage group by model, billing_provider")
+            "from session_model_usage group by model, billing_provider",
+        )
         if rows is None:
             continue
         for model, provider, calls, tin, tout, spend in rows:
             empty = False
-            rows_out.append({"id": f"{p}:{model}", "profile": p,
-                             "provider": provider or "unknown", "model": model,
-                             "spend": round(float(spend or 0), 6),
-                             "calls": int(calls or 0),
-                             "tokens": int(tin or 0) + int(tout or 0)})
+            rows_out.append(
+                {
+                    "id": f"{p}:{model}",
+                    "profile": p,
+                    "provider": provider or "unknown",
+                    "model": model,
+                    "spend": round(float(spend or 0), 6),
+                    "calls": int(calls or 0),
+                    "tokens": int(tin or 0) + int(tout or 0),
+                }
+            )
     if empty:
-        return unavailable("no billing API is wired and the session usage tables "
-                           "are empty — nothing has been spent to report yet")
-    return {"available": True, "rows": rows_out,
-            "note": "Estimated cost from Hermes' own session_model_usage tables; "
-                    "no external billing API is connected."}
+        return unavailable(
+            "no billing API is wired and the session usage tables "
+            "are empty — nothing has been spent to report yet"
+        )
+    return {
+        "available": True,
+        "rows": rows_out,
+        "note": "Estimated cost from Hermes' own session_model_usage tables; "
+        "no external billing API is connected.",
+    }
 
 
 # ── governance + decisions: honest unavailability for now ────────────────────
@@ -429,13 +547,18 @@ def governance():
         return unavailable("balabot container is not running")
     out = _docker_exec(
         "find /opt/data -maxdepth 4 \\( -type d -iname '*ledger*' -o -type d -iname '*kb*' "
-        "-o -type d -iname '*governance*' \\) 2>/dev/null | head -5")
+        "-o -type d -iname '*governance*' \\) 2>/dev/null | head -5"
+    )
     if out and out.strip():
-        return unavailable(f"a ledger directory ({out.strip().splitlines()[0]}) exists "
-                           "but no structured OKF entry reader is wired yet — "
-                           "reporting unavailable rather than guessing")
-    return unavailable("the governor's OKF decision ledger is empty — no ledger "
-                       "directory or entries exist under /opt/data yet")
+        return unavailable(
+            f"a ledger directory ({out.strip().splitlines()[0]}) exists "
+            "but no structured OKF entry reader is wired yet — "
+            "reporting unavailable rather than guessing"
+        )
+    return unavailable(
+        "the governor's OKF decision ledger is empty — no ledger "
+        "directory or entries exist under /opt/data yet"
+    )
 
 
 @app.get("/api/decisions")
@@ -444,12 +567,17 @@ def decisions():
         return unavailable("balabot container is not running")
     out = _docker_exec(
         "find /opt/data -maxdepth 4 \\( -iname '*decision*' -o -iname '*.jev' "
-        "-o -iname '*jev*log*' \\) 2>/dev/null | head -5")
+        "-o -iname '*jev*log*' \\) 2>/dev/null | head -5"
+    )
     if out and out.strip():
-        return unavailable(f"decision artifacts exist ({out.strip().splitlines()[0]}) "
-                           "but no structured reader is wired yet")
-    return unavailable("no Jev/TypeSafe decision log exists yet — decisions are "
-                       "classified in-session and nothing is persisted to disk")
+        return unavailable(
+            f"decision artifacts exist ({out.strip().splitlines()[0]}) "
+            "but no structured reader is wired yet"
+        )
+    return unavailable(
+        "no Jev/TypeSafe decision log exists yet — decisions are "
+        "classified in-session and nothing is persisted to disk"
+    )
 
 
 # ── Jev: hard dependency, so its health is first-class ───────────────────────
@@ -463,6 +591,7 @@ def jev_health():
     # check_jev_health lives in balabot.jev, NOT re-exported by bootstrap —
     # importing it from bootstrap raises ImportError (the route 500'd on it).
     from balabot.jev import check_jev_health  # noqa: E402
+
     return check_jev_health().to_dict()
 
 
@@ -470,6 +599,7 @@ def jev_health():
 def jev_incidents():
     """Recorded Jev incidents, oldest first — the Principal's incident feed."""
     from balabot.bootstrap import list_jev_incidents  # noqa: E402
+
     rows = list_jev_incidents("principal")
     return {"incidents": rows, "count": len(rows)}
 
@@ -479,6 +609,7 @@ def jev_incidents():
 def growth_ledger(name: str = "governor"):
     """Governor's frustration ledger and calculated frustration rate."""
     from balabot.growth import read_frustration_entries, frustration_rate
+
     entries = read_frustration_entries(name)
     rate = frustration_rate(entries)
     return {
@@ -494,6 +625,7 @@ def growth_ledger(name: str = "governor"):
 def growth_run(name: str = "principal", ledger_name: str = "governor"):
     """Principal's growth review job over the accumulated frustration ledger."""
     from balabot.growth import growth_job
+
     proposal = growth_job(name=name, ledger_name=ledger_name)
     return {"available": True, "job": proposal}
 
@@ -502,20 +634,29 @@ def growth_run(name: str = "principal", ledger_name: str = "governor"):
 def growth_audit(name: str = "principal"):
     """Growth loop audit trail of principal changes."""
     from balabot.growth import read_audit_entries
+
     entries = read_audit_entries(name)
-    return {"available": True, "persona": name, "entries": entries, "count": len(entries)}
+    return {
+        "available": True,
+        "persona": name,
+        "entries": entries,
+        "count": len(entries),
+    }
 
 
 @app.post("/api/growth/audit")
 async def growth_audit_record(request: Request):
     """Record a change into the growth loop audit trail."""
     from balabot.growth import record_audit_entry, GrowthError
+
     body = await request.json()
     action = body.get("action")
     target = body.get("target")
     description = body.get("description")
     if not (action and target and description):
-        raise HTTPException(status_code=400, detail="action, target, description are required")
+        raise HTTPException(
+            status_code=400, detail="action, target, description are required"
+        )
     try:
         entry = record_audit_entry(
             action=action,
@@ -537,6 +678,7 @@ async def growth_audit_record(request: Request):
 async def growth_audit_rollback(change_id: str, request: Request):
     """Roll back a recorded growth change."""
     from balabot.growth import rollback_audit_entry, GrowthError
+
     body = {}
     try:
         body = await request.json()
@@ -583,7 +725,9 @@ async def upload_attachment(request: Request):
         try:
             # Quick check: if content-length is definitely way over 10 MiB
             if int(content_length) > ATTACHMENT_MAX_BYTES * 2:
-                raise HTTPException(status_code=413, detail="attachment exceeds 10 MiB limit")
+                raise HTTPException(
+                    status_code=413, detail="attachment exceeds 10 MiB limit"
+                )
         except ValueError:
             pass
 
@@ -606,7 +750,9 @@ async def upload_attachment(request: Request):
                 break
             total_read += len(chunk)
             if total_read > ATTACHMENT_MAX_BYTES:
-                raise HTTPException(status_code=413, detail="attachment exceeds 10 MiB limit")
+                raise HTTPException(
+                    status_code=413, detail="attachment exceeds 10 MiB limit"
+                )
             chunks.append(chunk)
 
         data = b"".join(chunks)
@@ -624,7 +770,9 @@ async def upload_attachment(request: Request):
             if "," in raw_b64 and raw_b64.startswith("data:"):
                 raw_b64 = raw_b64.split(",", 1)[1]
             if len(raw_b64) > ATTACHMENT_MAX_BYTES * 2:
-                raise HTTPException(status_code=413, detail="attachment exceeds 10 MiB limit")
+                raise HTTPException(
+                    status_code=413, detail="attachment exceeds 10 MiB limit"
+                )
             try:
                 data = base64.b64decode(raw_b64, validate=True)
             except Exception:
@@ -635,7 +783,9 @@ async def upload_attachment(request: Request):
             data = b""
 
         if len(data) > ATTACHMENT_MAX_BYTES:
-            raise HTTPException(status_code=413, detail="attachment exceeds 10 MiB limit")
+            raise HTTPException(
+                status_code=413, detail="attachment exceeds 10 MiB limit"
+            )
 
         dest_path.write_bytes(data)
         size = len(data)
@@ -695,14 +845,19 @@ def _computer_run(snippet: str, timeout: float = 30.0) -> dict:
     """Run the computer bridge inside the container; return parsed JSON."""
     out = _docker_exec(f"python3 - <<'PY'\n{snippet}\nPY", timeout=timeout)
     if out is None:
-        return {"ok": False, "state": "error",
-                "reason": "could not exec in the balabot container "
-                          "(is it running?)"}
+        return {
+            "ok": False,
+            "state": "error",
+            "reason": "could not exec in the balabot container (is it running?)",
+        }
     try:
         return json.loads(out.strip())
     except json.JSONDecodeError:
-        return {"ok": False, "state": "error",
-                "reason": f"container bridge returned non-JSON: {out[:300]}"}
+        return {
+            "ok": False,
+            "state": "error",
+            "reason": f"container bridge returned non-JSON: {out[:300]}",
+        }
 
 
 @app.get("/api/computer/{bot_id}/frame")
@@ -712,15 +867,23 @@ def computer_frame(bot_id: str):
     res = _computer_run(
         "import json\n"
         "from balabot import computer\n"
-        f"print(json.dumps(computer.frame({bot_id!r})))")
+        f"print(json.dumps(computer.frame({bot_id!r})))"
+    )
     if not res.get("ok"):
-        return {"available": False,
-                "state": res.get("state", "error"),
-                "reason": res.get("reason", "frame capture failed")}
+        return {
+            "available": False,
+            "state": res.get("state", "error"),
+            "reason": res.get("reason", "frame capture failed"),
+        }
     return {
-        "available": True, "ok": True, "state": "ready",
-        "b64": res["b64"], "width": res["width"], "height": res["height"],
-        "captureId": res.get("capture_id"), "capturedAt": res["capturedAt"],
+        "available": True,
+        "ok": True,
+        "state": "ready",
+        "b64": res["b64"],
+        "width": res["width"],
+        "height": res["height"],
+        "captureId": res.get("capture_id"),
+        "capturedAt": res["capturedAt"],
         "mime": res["mime"],
     }
 
@@ -738,14 +901,23 @@ async def computer_action(bot_id: str, request: Request):
         "import json\n"
         "from balabot import computer\n"
         f"print(json.dumps(computer.act({bot_id!r}, json.loads({spec!r}))))",
-        timeout=60.0)
+        timeout=60.0,
+    )
     if not res.get("ok"):
-        return {"available": False,
-                "state": res.get("state", "error"),
-                "reason": res.get("reason", "action failed")}
-    return {"available": True, "ok": True, "state": res.get("state", "ready"),
-            "applied": res.get("applied"), "tool": res.get("tool"),
-            "frame": res.get("frame"), "note": res.get("note")}
+        return {
+            "available": False,
+            "state": res.get("state", "error"),
+            "reason": res.get("reason", "action failed"),
+        }
+    return {
+        "available": True,
+        "ok": True,
+        "state": res.get("state", "ready"),
+        "applied": res.get("applied"),
+        "tool": res.get("tool"),
+        "frame": res.get("frame"),
+        "note": res.get("note"),
+    }
 
 
 @app.post("/api/computer/{bot_id}/reset")
@@ -756,12 +928,20 @@ async def computer_reset(bot_id: str):
         "import json\n"
         "from balabot import computer\n"
         f"print(json.dumps(computer.reset({bot_id!r})))",
-        timeout=30.0)
+        timeout=30.0,
+    )
     if not res.get("ok"):
-        return {"available": False, "state": res.get("state", "error"),
-                "reason": res.get("reason", "reset failed")}
-    return {"available": True, "ok": True, "state": res.get("state", "ready"),
-            "message": res.get("message")}
+        return {
+            "available": False,
+            "state": res.get("state", "error"),
+            "reason": res.get("reason", "reset failed"),
+        }
+    return {
+        "available": True,
+        "ok": True,
+        "state": res.get("state", "ready"),
+        "message": res.get("message"),
+    }
 
 
 # ── agent intervention flow ──────────────────────────────────────────────────
@@ -770,12 +950,14 @@ async def computer_reset(bot_id: str):
 @app.get("/api/interventions")
 def list_interventions():
     from balabot.intervention import list_interventions as iv_list
+
     return {"ok": True, "interventions": iv_list()}
 
 
 @app.get("/api/intervention/{resume_token}")
 def get_intervention(resume_token: str):
     from balabot.intervention import state as iv_state, InterventionError
+
     try:
         rec = iv_state(resume_token)
         return {"ok": True, "record": rec}
@@ -786,6 +968,7 @@ def get_intervention(resume_token: str):
 @app.get("/api/intervention/active/{bot_id}")
 def get_active_intervention_for_bot(bot_id: str):
     from balabot.intervention import active_for_bot, InterventionError
+
     try:
         rec = active_for_bot(bot_id)
         return {"ok": True, "record": rec}
@@ -795,7 +978,13 @@ def get_active_intervention_for_bot(bot_id: str):
 
 @app.post("/api/intervention/pause")
 async def pause_bot_endpoint(request: Request):
-    from balabot.intervention import request_intervention, enqueue_intervention, active_for_bot, InterventionError
+    from balabot.intervention import (
+        request_intervention,
+        enqueue_intervention,
+        active_for_bot,
+        InterventionError,
+    )
+
     try:
         body = await request.json()
     except Exception:
@@ -819,6 +1008,7 @@ async def pause_bot_endpoint(request: Request):
 @app.post("/api/intervention/{resume_token}/resolve")
 async def resolve_intervention_endpoint(resume_token: str, request: Request):
     from balabot.intervention import resolve_intervention, InterventionError
+
     try:
         body = await request.json()
     except Exception:
@@ -836,6 +1026,7 @@ async def resolve_intervention_endpoint(resume_token: str, request: Request):
 @app.post("/api/intervention/{resume_token}/end")
 def end_intervention_endpoint(resume_token: str):
     from balabot.intervention import end_turn, InterventionError
+
     try:
         rec = end_turn(resume_token)
         return {"ok": True, "record": rec}
@@ -916,7 +1107,7 @@ async def create_routine(bot_id: str, request: Request):
         raise HTTPException(status_code=400, detail="title is required")
     routines = _get_bot_routines(bot_id)
     new_r = {
-        "id": f"rt_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}",
+        "id": f"rt_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}",
         "botId": bot_id,
         "title": title,
         "schedule": body.get("schedule", "Daily"),
@@ -937,11 +1128,16 @@ async def update_routine(bot_id: str, routine_id: str, request: Request):
     for r in routines:
         if r["id"] == routine_id:
             found = r
-            if "title" in body: found["title"] = body["title"]
-            if "schedule" in body: found["schedule"] = body["schedule"]
-            if "enabled" in body: found["enabled"] = bool(body["enabled"])
-            if "lastRun" in body: found["lastRun"] = body["lastRun"]
-            if "prompt" in body: found["prompt"] = body["prompt"]
+            if "title" in body:
+                found["title"] = body["title"]
+            if "schedule" in body:
+                found["schedule"] = body["schedule"]
+            if "enabled" in body:
+                found["enabled"] = bool(body["enabled"])
+            if "lastRun" in body:
+                found["lastRun"] = body["lastRun"]
+            if "prompt" in body:
+                found["prompt"] = body["prompt"]
             break
     if not found:
         raise HTTPException(status_code=404, detail="routine not found")
@@ -957,11 +1153,11 @@ def delete_routine(bot_id: str, routine_id: str):
     return {"ok": True, "deleted": True}
 
 
-
 # ── message queueing (durable per-session message queue) ────────────────────
 def _chat_queue():
     try:
         from balabot.queueing import MessageQueue
+
         return MessageQueue()
     except Exception:
         return None
@@ -996,17 +1192,41 @@ async def enqueue_session_message(session_id: str, request: Request):
         try:
             store_payload: dict = {
                 "session_id": session_id,
-                "messages": [{"role": "user", "content": content, "message_id": msg.get("message_id")}],
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": content,
+                        "message_id": msg.get("message_id"),
+                    }
+                ],
             }
             bot_id = body.get("bot_id") or body.get("botId")
             if bot_id:
                 store_payload["bot_id"] = bot_id
             res = _chat_append_session_state(store_payload)
-            for rec in (res.get("recorded_messages") or []):
+            for rec in res.get("recorded_messages") or []:
                 _broadcast_session_message(session_id, rec)
         except Exception:
             pass
-        return {"ok": True, "message": msg, "queue": q.queue_state(session_id)}
+        state = q.queue_state(session_id)
+        return {
+            "ok": True,
+            "message": msg,
+            "queue": state,
+            # Honest routing: mid-turn injection does not exist in this product,
+            # so a steer submitted mid-turn is held in the durable mailbox and
+            # delivered at the next model turn. State it explicitly — never
+            # silently claim the steer landed.
+            "routing": {
+                "injected": False,
+                "path": "next_turn",
+                "delivery_state": state["pending"][0]["delivery_state"]
+                if state["pending"]
+                else "queued",
+                "note": "mid-turn injection unavailable — steer waits in the "
+                "durable mailbox for the next model turn",
+            },
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -1023,8 +1243,7 @@ async def enqueue_session_message(session_id: str, request: Request):
 # See kb/plans/org-registry-schema.md.
 
 
-def _org_run(snippet: str, payload: dict | None = None,
-             timeout: float = 30.0) -> dict:
+def _org_run(snippet: str, payload: dict | None = None, timeout: float = 30.0) -> dict:
     """Run an org-registry snippet INSIDE the container; return parsed JSON.
 
     Never raises. The snippet is executed as `python3 -` (source on stdin),
@@ -1038,28 +1257,46 @@ def _org_run(snippet: str, payload: dict | None = None,
     non-JSON, or the snippet printing {"ok": false}) a structured error dict
     is returned — the honest-unavailable contract.
     """
-    argv = ["docker", "exec", "-i", "-w", "/opt/balabot",
-            "-e", "PYTHONPATH=/opt/balabot", "-e", "BALABOT_DATA_ROOT=/opt/data"]
+    argv = [
+        "docker",
+        "exec",
+        "-i",
+        "-w",
+        "/opt/balabot",
+        "-e",
+        "PYTHONPATH=/opt/balabot",
+        "-e",
+        "BALABOT_DATA_ROOT=/opt/data",
+    ]
     if payload is not None:
         # Environment variable, not argv: the value never appears in a
         # process command line (which is world-readable via /proc).
         argv += ["-e", "_BALABOT_ORG_PAYLOAD=" + json.dumps(payload)]
     argv += [CONTAINER, "python3", "-"]
     try:
-        r = subprocess.run(argv, input=snippet,
-                           capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(
+            argv, input=snippet, capture_output=True, text=True, timeout=timeout
+        )
     except Exception:
-        return {"ok": False, "error": "container_unreachable",
-                "reason": "could not exec in the balabot container "
-                          "(is it running?)"}
+        return {
+            "ok": False,
+            "error": "container_unreachable",
+            "reason": "could not exec in the balabot container (is it running?)",
+        }
     if r.returncode != 0:
-        return {"ok": False, "error": "container_snippet_failed",
-                "reason": (r.stderr or r.stdout)[-300:]}
+        return {
+            "ok": False,
+            "error": "container_snippet_failed",
+            "reason": (r.stderr or r.stdout)[-300:],
+        }
     try:
         parsed = json.loads(r.stdout.strip().splitlines()[-1])
     except Exception:
-        return {"ok": False, "error": "non_json_bridge",
-                "reason": f"container bridge returned non-JSON: {r.stdout[-300:]}"}
+        return {
+            "ok": False,
+            "error": "non_json_bridge",
+            "reason": f"container bridge returned non-JSON: {r.stdout[-300:]}",
+        }
     if isinstance(parsed, dict) and parsed.get("ok") is False:
         return parsed
     if isinstance(parsed, dict):
@@ -1067,8 +1304,9 @@ def _org_run(snippet: str, payload: dict | None = None,
     return {"ok": True, "data": parsed}
 
 
-async def _org_run_async(snippet: str, payload: dict | None = None,
-                         timeout: float = 30.0) -> dict:
+async def _org_run_async(
+    snippet: str, payload: dict | None = None, timeout: float = 30.0
+) -> dict:
     """Non-blocking asynchronous execution of container snippets.
 
     Dispatches to _org_run via asyncio.to_thread so long-running container
@@ -1089,21 +1327,21 @@ async def _org_run_async(snippet: str, payload: dict | None = None,
 # JSON via the _BALABOT_ORG_PAYLOAD environment variable and is parsed inside
 # the container — never string-interpolated into the source, never argv.
 
+
 def _wrap(snippet: str, with_payload: bool) -> str:
     head = "import json, sys\n"
     if with_payload:
         head += "payload = json.loads(os.environ.pop('_BALABOT_ORG_PAYLOAD'))\n"
-        return head.replace("import json, sys",
-                            "import json, os, sys") + snippet
+        return head.replace("import json, sys", "import json, os, sys") + snippet
     return head + snippet
 
 
-_ORGS_LIST_SNIPPET = '''\
+_ORGS_LIST_SNIPPET = """\
 from balabot import orgs
 print(json.dumps({'orgs': sorted(orgs.list_orgs(), key=lambda o: o['id'])}))
-'''
+"""
 
-_ORGS_VIEW_SNIPPET = '''\
+_ORGS_VIEW_SNIPPET = """\
 from balabot import orgs
 reg = orgs.load()
 org_members = {oid: o.get('members', []) for oid, o in reg['orgs'].items()}
@@ -1127,16 +1365,16 @@ for s in reg['secrets']:
                  'fingerprint': s.get('fingerprint', '…'),
                  'granted_to': sorted(set(granted_to))})
 print(json.dumps({'rows': rows}))
-'''
+"""
 
-_ORGS_GRANTS_LIST_SNIPPET = '''\
+_ORGS_GRANTS_LIST_SNIPPET = """\
 from balabot import orgs
 print(json.dumps({'grants': orgs.load()['grants']}))
-'''
+"""
 
 # The secret VALUE arrives in `payload` (via stdin) and is used here, inside
 # the container, exactly once. Only the fingerprint and grant ids leave.
-_ORGS_SAVE_SNIPPET = '''\
+_ORGS_SAVE_SNIPPET = """\
 from balabot import orgs
 reg = orgs.load()
 org = payload['org']
@@ -1187,9 +1425,9 @@ else:
     print(json.dumps({'fingerprint': record.get('fingerprint'),
                       'grant_ids': [g['id'] for g in made],
                       'granted_to': granted_to}))
-'''
+"""
 
-_ORGS_GRANT_CREATE_SNIPPET = '''\
+_ORGS_GRANT_CREATE_SNIPPET = """\
 from balabot import orgs
 resource = payload['resource']
 try:
@@ -1208,9 +1446,9 @@ except ValueError as exc:
 except KeyError as exc:
     print(json.dumps({'ok': False, 'error': 'unknown_org',
                       'detail': str(exc), 'status': 404}))
-'''
+"""
 
-_ORGS_GRANT_REVOKE_SNIPPET = '''\
+_ORGS_GRANT_REVOKE_SNIPPET = """\
 from balabot import orgs
 gid = payload['grant_id']
 if not orgs.revoke(gid):
@@ -1219,15 +1457,17 @@ if not orgs.revoke(gid):
 else:
     row = next(g for g in orgs.load()['grants'] if g['id'] == gid)
     print(json.dumps({'grant': row}))
-'''
+"""
 
 ORG_KINDS = ("secret", "skill", "workspace", "display")
 
 
 def _org_status_error(res: dict):
     """Raise the HTTP status the container-side snippet asked for."""
-    raise HTTPException(status_code=int(res.get("status") or 503),
-                        detail=res.get("detail") or res.get("reason", "container error"))
+    raise HTTPException(
+        status_code=int(res.get("status") or 503),
+        detail=res.get("detail") or res.get("reason", "container error"),
+    )
 
 
 # Pending access requests, per bot profile, drained by the /api/chat SSE stream
@@ -1256,11 +1496,13 @@ def _drain_org_request_frames(profile: str) -> list[str]:
     pending = _org_request_queue.pop(profile, [])
     for item in pending:
         kind = item.get("kind", "secret_request")
-        payload = {"name": item.get("name", ""),
-                   "description": item.get("description", ""),
-                   "requestedBy": item.get("bot", ""),
-                   "bot": item.get("bot", ""),
-                   "request_id": item["id"]}
+        payload = {
+            "name": item.get("name", ""),
+            "description": item.get("description", ""),
+            "requestedBy": item.get("bot", ""),
+            "bot": item.get("bot", ""),
+            "request_id": item["id"],
+        }
         if kind == "secret_access_request":
             payload["reason"] = item.get("reason", "")
         frames.append(f"event: {kind}\ndata: {json.dumps(payload)}\n\n")
@@ -1269,9 +1511,18 @@ def _drain_org_request_frames(profile: str) -> list[str]:
 
 def _org_meta_only(record: dict) -> dict:
     """Whitelist the fields that may leave the backend. No value, ever."""
-    return {k: record.get(k) for k in
-            ("name", "org", "description", "fingerprint", "created_at",
-             "rotated_at") if k in record}
+    return {
+        k: record.get(k)
+        for k in (
+            "name",
+            "org",
+            "description",
+            "fingerprint",
+            "created_at",
+            "rotated_at",
+        )
+        if k in record
+    }
 
 
 @app.get("/api/orgs")
@@ -1283,9 +1534,11 @@ def orgs_list():
         return unavailable(res.get("reason", "could not read the org registry"))
     rows = res.get("orgs") or []
     if not rows:
-        return unavailable("no organizations are registered yet — "
-                           "register one via the registry CLI or POST /api/org/grants "
-                           "after creating it (python -m balabot.orgs)")
+        return unavailable(
+            "no organizations are registered yet — "
+            "register one via the registry CLI or POST /api/org/grants "
+            "after creating it (python -m balabot.orgs)"
+        )
     return {"available": True, "orgs": rows}
 
 
@@ -1302,35 +1555,48 @@ async def org_secret_save(request: Request):
     value = body.get("value")
     org = body.get("org") or ""
     if not name or not isinstance(value, str) or not value or not org:
-        raise HTTPException(status_code=400,
-                            detail="name, value and org are required")
+        raise HTTPException(status_code=400, detail="name, value and org are required")
     share_scope = body.get("share_scope") or "one"
     if share_scope not in ("one", "all", "choose", "another_org"):
-        raise HTTPException(status_code=400,
-                            detail="share_scope must be one|all|choose|another_org")
+        raise HTTPException(
+            status_code=400, detail="share_scope must be one|all|choose|another_org"
+        )
     bots = [b for b in (body.get("bots") or []) if isinstance(b, str)]
     target_org = body.get("target_org")
     if share_scope in ("one", "choose") and not bots:
-        raise HTTPException(status_code=400,
-                            detail="share_scope one/choose requires bots")
+        raise HTTPException(
+            status_code=400, detail="share_scope one/choose requires bots"
+        )
     if not container_ok():
         return unavailable("balabot container is not running — cannot store secrets")
     # The value arrives via stdin JSON (payload), never argv and never
     # interpolated into a shell command line.
-    res = await _org_run_async(_wrap(_ORGS_SAVE_SNIPPET, True), payload={
-        "name": name, "org": org, "value": value, "share_scope": share_scope,
-        "bots": bots, "target_org": target_org,
-        "description": body.get("description") or "",
-    })
+    res = await _org_run_async(
+        _wrap(_ORGS_SAVE_SNIPPET, True),
+        payload={
+            "name": name,
+            "org": org,
+            "value": value,
+            "share_scope": share_scope,
+            "bots": bots,
+            "target_org": target_org,
+            "description": body.get("description") or "",
+        },
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
-        return unavailable(res.get("reason", "could not store the secret in the container"))
-    return {"saved": True, "name": name,
-            "fingerprint": res.get("fingerprint", "…"),
-            "granted_to": res.get("granted_to", []),
-            "share_scope": share_scope,
-            "grant_ids": res.get("grant_ids", [])}
+        return unavailable(
+            res.get("reason", "could not store the secret in the container")
+        )
+    return {
+        "saved": True,
+        "name": name,
+        "fingerprint": res.get("fingerprint", "…"),
+        "granted_to": res.get("granted_to", []),
+        "share_scope": share_scope,
+        "grant_ids": res.get("grant_ids", []),
+    }
 
 
 @app.get("/api/org/secrets")
@@ -1362,11 +1628,17 @@ async def org_grants_create(request: Request):
     resource = body.get("resource") or {}
     if not container_ok():
         return unavailable("balabot container is not running — cannot create grants")
-    res = await _org_run_async(_wrap(_ORGS_GRANT_CREATE_SNIPPET, True), payload={
-        "subject_bot": body.get("subject_bot"),
-        "subject_org": body.get("subject_org"), "resource": resource,
-        "scope": body.get("scope"), "access": body.get("access"),
-        "created_by": body.get("created_by")})
+    res = await _org_run_async(
+        _wrap(_ORGS_GRANT_CREATE_SNIPPET, True),
+        payload={
+            "subject_bot": body.get("subject_bot"),
+            "subject_org": body.get("subject_org"),
+            "resource": resource,
+            "scope": body.get("scope"),
+            "access": body.get("access"),
+            "created_by": body.get("created_by"),
+        },
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -1378,8 +1650,9 @@ async def org_grants_create(request: Request):
 def org_grants_revoke(grant_id: str):
     if not container_ok():
         return unavailable("balabot container is not running — cannot revoke grants")
-    res = _org_run(_wrap(_ORGS_GRANT_REVOKE_SNIPPET, True),
-                   payload={"grant_id": grant_id})
+    res = _org_run(
+        _wrap(_ORGS_GRANT_REVOKE_SNIPPET, True), payload={"grant_id": grant_id}
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -1406,22 +1679,29 @@ async def org_requests_enqueue(request: Request):
     bot = body.get("bot") or ""
     kind = body.get("kind") or "secret_request"
     if kind not in ("secret_request", "secret_access_request"):
-        raise HTTPException(status_code=400, detail="kind must be secret_request "
-                             "or secret_access_request")
+        raise HTTPException(
+            status_code=400,
+            detail="kind must be secret_request or secret_access_request",
+        )
     if not bot:
         raise HTTPException(status_code=400, detail="bot is required")
     name = body.get("name") or ""
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
-    item = enqueue_org_request(bot, {
-        "kind": kind, "bot": bot, "name": name,
-        "description": body.get("description") or "",
-        "reason": body.get("reason") or "",
-    })
+    item = enqueue_org_request(
+        bot,
+        {
+            "kind": kind,
+            "bot": bot,
+            "name": name,
+            "description": body.get("description") or "",
+            "reason": body.get("reason") or "",
+        },
+    )
     return {"queued": True, "request": item}
 
 
-_SKILLS_PIN_SNIPPET = '''\
+_SKILLS_PIN_SNIPPET = """\
 from balabot import skills_registry
 name = payload.get("name")
 unpin = payload.get("unpin", False)
@@ -1435,9 +1715,9 @@ try:
     print(json.dumps({"ok": True, "record": rec}))
 except Exception as exc:
     print(json.dumps({"ok": False, "reason": str(exc)}))
-'''
+"""
 
-_SKILLS_PROMOTE_SNIPPET = '''\
+_SKILLS_PROMOTE_SNIPPET = """\
 from balabot import skills_registry
 name = payload.get("name")
 share = payload.get("share", "org")
@@ -1450,9 +1730,9 @@ try:
     print(json.dumps({"ok": True, "record": rec}))
 except Exception as exc:
     print(json.dumps({"ok": False, "reason": str(exc)}))
-'''
+"""
 
-_SKILLS_CURATE_SNIPPET = '''\
+_SKILLS_CURATE_SNIPPET = """\
 from balabot import skills_registry
 dry_run = payload.get("dry_run", False)
 try:
@@ -1460,7 +1740,7 @@ try:
     print(json.dumps({"ok": True, "report": report}))
 except Exception as exc:
     print(json.dumps({"ok": False, "reason": str(exc)}))
-'''
+"""
 
 
 @app.post("/api/org/skills/pin")
@@ -1477,7 +1757,9 @@ async def org_skills_pin(request: Request):
     unpin = False
     if "pinned" in body:
         unpin = not bool(body["pinned"])
-    res = await _org_run_async(_wrap(_SKILLS_PIN_SNIPPET, True), payload={"name": name, "unpin": unpin})
+    res = await _org_run_async(
+        _wrap(_SKILLS_PIN_SNIPPET, True), payload={"name": name, "unpin": unpin}
+    )
     if not res.get("ok"):
         return unavailable(res.get("reason", "could not pin skill"))
     return {"ok": True, "record": res.get("record")}
@@ -1495,7 +1777,9 @@ async def org_skills_promote(request: Request):
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
     share = body.get("share", "org")
-    res = await _org_run_async(_wrap(_SKILLS_PROMOTE_SNIPPET, True), payload={"name": name, "share": share})
+    res = await _org_run_async(
+        _wrap(_SKILLS_PROMOTE_SNIPPET, True), payload={"name": name, "share": share}
+    )
     if not res.get("ok"):
         return unavailable(res.get("reason", "could not promote skill"))
     return {"ok": True, "record": res.get("record")}
@@ -1510,7 +1794,9 @@ async def org_skills_curate(request: Request):
     except Exception:
         body = {}
     dry_run = bool(body.get("dry_run", False))
-    res = await _org_run_async(_wrap(_SKILLS_CURATE_SNIPPET, True), payload={"dry_run": dry_run})
+    res = await _org_run_async(
+        _wrap(_SKILLS_CURATE_SNIPPET, True), payload={"dry_run": dry_run}
+    )
     if not res.get("ok"):
         return unavailable(res.get("reason", "curator pass failed"))
     return {"ok": True, "report": res.get("report")}
@@ -1572,15 +1858,18 @@ def skills_library(bot: str = ""):
     if bot and bot not in PROFILES:
         raise HTTPException(status_code=404, detail=f"unknown bot {bot}")
     if not container_ok():
-        return unavailable("balabot container is not running "
-                           "- cannot read the skill trees")
+        return unavailable(
+            "balabot container is not running - cannot read the skill trees"
+        )
     targets = [bot] if bot else PROFILES
     library: dict[str, dict] = {}
     for prof in targets:
         rows = _skill_rows(prof)
         if rows is None:
-            library[prof] = {"available": False,
-                             "reason": f"could not read the skill tree for {prof}"}
+            library[prof] = {
+                "available": False,
+                "reason": f"could not read the skill tree for {prof}",
+            }
             continue
         # Classification uses only what is CERTAIN from disk. An earlier pass
         # inferred "authored in this profile" from the absence of a category
@@ -1591,20 +1880,31 @@ def skills_library(bot: str = ""):
         # install, and `learned` stays EMPTY until real curator state exists.
         brought, learned = [], []
         for r in rows:
-            source = ("ships with BalaBot" if r["category"] == "balabot"
-                      else "ships with this install")
-            brought.append({"name": r["name"], "source": source,
-                            "category": r["category"] or "(uncategorised)",
-                            "description": r["description"], "state": "active"})
+            source = (
+                "ships with BalaBot"
+                if r["category"] == "balabot"
+                else "ships with this install"
+            )
+            brought.append(
+                {
+                    "name": r["name"],
+                    "source": source,
+                    "category": r["category"] or "(uncategorised)",
+                    "description": r["description"],
+                    "state": "active",
+                }
+            )
         library[prof] = {
             "available": True,
             "learned": learned,
             "brought": brought,
             "total": len(rows),
-            "note": (f"{len(brought)} skills installed in this profile. Nothing is "
-                     "attributed to the self-improvement loop: there is no curator "
-                     "state yet, and a skill's origin is not inferable from disk "
-                     "alone, so only installed skills are reported."),
+            "note": (
+                f"{len(brought)} skills installed in this profile. Nothing is "
+                "attributed to the self-improvement loop: there is no curator "
+                "state yet, and a skill's origin is not inferable from disk "
+                "alone, so only installed skills are reported."
+            ),
         }
     if bot:
         return library[bot]
@@ -1619,12 +1919,12 @@ def skills_library(bot: str = ""):
 # chat uses; the serial order is enforced by a plain for-loop, not by hope.
 
 
-_GROUPS_LIST_SNIPPET = '''\
+_GROUPS_LIST_SNIPPET = """\
 from balabot import groups
 print(json.dumps({'groups': groups.list_groups()}))
-'''
+"""
 
-_GROUPS_CREATE_SNIPPET = '''\
+_GROUPS_CREATE_SNIPPET = """\
 from balabot import groups
 try:
     g = groups.create_group(
@@ -1638,9 +1938,9 @@ try:
 except groups.GroupsError as exc:
     print(json.dumps({'ok': False, 'error': 'bad_request',
                       'detail': str(exc), 'status': 400}))
-'''
+"""
 
-_GROUPS_GET_SNIPPET = '''\
+_GROUPS_GET_SNIPPET = """\
 from balabot import groups
 try:
     g = groups.get_group(payload['gid'])
@@ -1649,9 +1949,9 @@ except groups.GroupsError as exc:
                       'detail': str(exc), 'status': 404}))
     raise SystemExit(0)
 print(json.dumps({'group': g}))
-'''
+"""
 
-_GROUPS_DELETE_SNIPPET = '''\
+_GROUPS_DELETE_SNIPPET = """\
 from balabot import groups
 gid = payload['gid']
 if not groups.delete_group(gid):
@@ -1659,9 +1959,9 @@ if not groups.delete_group(gid):
                       'detail': f'no group {gid!r}', 'status': 404}))
 else:
     print(json.dumps({'deleted': True}))
-'''
+"""
 
-_GROUPS_APPLY_SNIPPET = '''\
+_GROUPS_APPLY_SNIPPET = """\
 from balabot import groups
 try:
     g = groups.apply_turn_results(payload['gid'], payload['text'],
@@ -1675,7 +1975,7 @@ print(json.dumps({'group': {
     'transcript': g['transcript'][-40:],
     'sessions': {m: {'len': len(g['sessions'][m]['messages'])}
                  for m in g['members']}}}))
-'''
+"""
 
 
 def _fleet_bot_ids() -> list[str]:
@@ -1688,11 +1988,15 @@ def _group_public(g: dict) -> dict:
     without sessions — treat them as empty)."""
     sessions = g.get("sessions") or {}
     return {
-        "id": g["id"], "name": g["name"], "members": g["members"],
-        "computerAgent": g["computer_agent"], "round": g["round"],
+        "id": g["id"],
+        "name": g["name"],
+        "members": g["members"],
+        "computerAgent": g["computer_agent"],
+        "round": g["round"],
         "transcript": g.get("transcript", []),
-        "sessionLens": {m: len(sessions[m]["messages"])
-                        for m in g["members"] if m in sessions},
+        "sessionLens": {
+            m: len(sessions[m]["messages"]) for m in g["members"] if m in sessions
+        },
         "createdAt": g["created_at"],
     }
 
@@ -1719,11 +2023,15 @@ async def groups_create(request: Request):
         raise HTTPException(status_code=400, detail="name and members are required")
     if not container_ok():
         return unavailable("balabot container is not running — cannot create groups")
-    res = await _org_run_async(_wrap(_GROUPS_CREATE_SNIPPET, True), payload={
-        "name": name, "members": members,
-        "computer_agent": body.get("computer_agent"),
-        "known_bots": _fleet_bot_ids(),
-    })
+    res = await _org_run_async(
+        _wrap(_GROUPS_CREATE_SNIPPET, True),
+        payload={
+            "name": name,
+            "members": members,
+            "computer_agent": body.get("computer_agent"),
+            "known_bots": _fleet_bot_ids(),
+        },
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -1782,10 +2090,12 @@ async def groups_turn(gid: str, request: Request):
         return unavailable(res.get("reason", "could not read the group"))
     g = res["group"]
     from balabot.groups import mention_targets  # noqa: E402
+
     targets = mention_targets(text, g["members"]) or list(g["members"])
     tail = g["transcript"][-6:]
-    context = "\n".join(f"{e['from']}: {e['text']}"
-                        for e in tail if e.get("kind") != "error")
+    context = "\n".join(
+        f"{e['from']}: {e['text']}" for e in tail if e.get("kind") != "error"
+    )
 
     results = []
     for bot in targets:
@@ -1793,18 +2103,25 @@ async def groups_turn(gid: str, request: Request):
             {"role": m["role"], "content": m["content"]}
             for m in g["sessions"][bot]["messages"]
         ]
-        content = ((f"[Group chat '{g['name']}' — recent transcript]\n"
-                    f"{context}\n\n") if context else "") + text
+        content = (
+            (f"[Group chat '{g['name']}' — recent transcript]\n{context}\n\n")
+            if context
+            else ""
+        ) + text
         try:
-            answer = await _upstream_turn(bot, history + [{"role": "user",
-                                                           "content": content}])
+            answer = await _upstream_turn(
+                bot, history + [{"role": "user", "content": content}]
+            )
             results.append({"bot": bot, "text": answer})
         except Exception as exc:  # noqa: BLE001 — honest per-member error row
-            results.append({"bot": bot, "error": True,
-                            "detail": f"{type(exc).__name__}: {exc}"})
+            results.append(
+                {"bot": bot, "error": True, "detail": f"{type(exc).__name__}: {exc}"}
+            )
 
-    apply_res = await _org_run_async(_wrap(_GROUPS_APPLY_SNIPPET, True), payload={
-        "gid": gid, "text": text, "results": results})
+    apply_res = await _org_run_async(
+        _wrap(_GROUPS_APPLY_SNIPPET, True),
+        payload={"gid": gid, "text": text, "results": results},
+    )
     if not apply_res.get("ok"):
         if apply_res.get("status"):
             _org_status_error(apply_res)
@@ -1815,12 +2132,13 @@ async def groups_turn(gid: str, request: Request):
 async def _upstream_turn(profile: str, messages: list[dict]) -> str:
     """Non-streaming single turn against the profile's OpenAI-compatible API."""
     url = f"{UPSTREAM}/p/{profile}/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {API_KEY}",
-               "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=15.0)) as client:
-        r = await client.post(url, json={"model": profile, "messages": messages,
-                                         "stream": False},
-                              headers=headers)
+        r = await client.post(
+            url,
+            json={"model": profile, "messages": messages, "stream": False},
+            headers=headers,
+        )
         if r.status_code != 200:
             raise RuntimeError(f"backend {r.status_code}: {r.text[:200]}")
         data = r.json()
@@ -1838,16 +2156,16 @@ async def _upstream_turn(profile: str, messages: list[dict]) -> str:
 # file (/opt/data/fleet/bots.json) the adapter reads, so a created bot
 # appears in /api/fleet + /api/bots with no host-side state.
 
-_PROPOSALS_LIST_SNIPPET = '''\
+_PROPOSALS_LIST_SNIPPET = """\
 from balabot import bot_creation
 try:
     bot_creation.drain_spool()
 except Exception:
     pass
 print(json.dumps({'proposals': bot_creation.list_proposals()}))
-'''
+"""
 
-_PROPOSALS_DRAIN_SNIPPET = '''\
+_PROPOSALS_DRAIN_SNIPPET = """\
 from balabot import bot_creation
 drained = []
 try:
@@ -1855,9 +2173,9 @@ try:
 except Exception:
     pass
 print(json.dumps({'drained': drained, 'proposals': bot_creation.list_proposals()}))
-'''
+"""
 
-_PROPOSE_SNIPPET = '''\
+_PROPOSE_SNIPPET = """\
 from balabot import bot_creation
 try:
     p = bot_creation.propose_bot(
@@ -1870,9 +2188,9 @@ except bot_creation.CreationError as exc:
                       'detail': str(exc), 'status': 400}))
     raise SystemExit(0)
 print(json.dumps({'proposal': p}))
-'''
+"""
 
-_APPROVE_SNIPPET = '''\
+_APPROVE_SNIPPET = """\
 from balabot import bot_creation
 try:
     p = bot_creation.approve_proposal(payload['pid'], approved_by='user')
@@ -1881,9 +2199,9 @@ except bot_creation.CreationError as exc:
                       'detail': str(exc), 'status': 400}))
     raise SystemExit(0)
 print(json.dumps({'proposal': p}))
-'''
+"""
 
-_REJECT_SNIPPET = '''\
+_REJECT_SNIPPET = """\
 from balabot import bot_creation
 try:
     p = bot_creation.reject_proposal(payload['pid'])
@@ -1892,9 +2210,9 @@ except bot_creation.CreationError as exc:
                       'detail': str(exc), 'status': 400}))
     raise SystemExit(0)
 print(json.dumps({'proposal': p}))
-'''
+"""
 
-_CREATE_BOT_SNIPPET = '''\
+_CREATE_BOT_SNIPPET = """\
 import json, os, pathlib
 from balabot import bot_creation, orgs
 fleet_path = pathlib.Path('/opt/data/fleet/bots.json')
@@ -1940,7 +2258,7 @@ print(json.dumps({'proposal': {k: row[k] for k in
                    'approved_by', 'status', 'created_result')},
                   'bot': row['bot'],
                   'org_members': members}))
-'''
+"""
 
 _CREATED_BOTS_SNIPPET = """python3 - <<'PY'
 import json, pathlib
@@ -1989,7 +2307,11 @@ def bot_proposals_drain():
     res = _org_run(_wrap(_PROPOSALS_DRAIN_SNIPPET, False))
     if not res.get("ok"):
         return unavailable(res.get("reason", "could not drain proposals spool"))
-    return {"available": True, "drained": res.get("drained", []), "proposals": res.get("proposals", [])}
+    return {
+        "available": True,
+        "drained": res.get("drained", []),
+        "proposals": res.get("proposals", []),
+    }
 
 
 @app.post("/api/bot-proposals")
@@ -2005,14 +2327,21 @@ async def bot_proposals_create(request: Request):
         raise HTTPException(status_code=400, detail="name and role are required")
     proposed_by = body.get("proposed_by") or "user"
     if proposed_by != "user" and proposed_by not in _all_bot_meta():
-        raise HTTPException(status_code=404,
-                            detail=f"unknown proposing bot {proposed_by!r}")
+        raise HTTPException(
+            status_code=404, detail=f"unknown proposing bot {proposed_by!r}"
+        )
     if not container_ok():
         return unavailable("balabot container is not running — cannot file proposals")
-    res = await _org_run_async(_wrap(_PROPOSE_SNIPPET, True), payload={
-        "name": name, "role": role, "proposed_by": proposed_by,
-        "reason": body.get("reason") or "",
-        "model": body.get("model")})
+    res = await _org_run_async(
+        _wrap(_PROPOSE_SNIPPET, True),
+        payload={
+            "name": name,
+            "role": role,
+            "proposed_by": proposed_by,
+            "reason": body.get("reason") or "",
+            "model": body.get("model"),
+        },
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -2052,17 +2381,22 @@ def bot_proposals_create_bot(pid: str):
     the point of creation, not just assumed from the route."""
     if not container_ok():
         return unavailable("balabot container is not running — cannot create bots")
-    res = _org_run(_wrap(_CREATE_BOT_SNIPPET, True), payload={"pid": pid},
-                   timeout=120.0)
+    res = _org_run(
+        _wrap(_CREATE_BOT_SNIPPET, True), payload={"pid": pid}, timeout=120.0
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
         return unavailable(res.get("reason", "could not create the bot"))
-    return {"created": True, "bot": res["bot"], "proposal": res["proposal"],
-            "org_members": res.get("org_members", [])}
+    return {
+        "created": True,
+        "bot": res["bot"],
+        "proposal": res["proposal"],
+        "org_members": res.get("org_members", []),
+    }
 
 
-_PROPOSAL_DELETE_SNIPPET = '''\
+_PROPOSAL_DELETE_SNIPPET = """\
 from balabot import bot_creation
 data = bot_creation._load()
 before = len(data['proposals'])
@@ -2073,7 +2407,7 @@ if len(data['proposals']) == before:
 else:
     bot_creation._save(data)
     print(json.dumps({'deleted': True}))
-'''
+"""
 
 
 @app.delete("/api/bot-proposals/{pid}")
@@ -2095,13 +2429,13 @@ def bot_proposals_delete(pid: str):
 #    lifecycle module runs INSIDE the container (that is where the profiles,
 #    runtime dirs and the fleet roster live), driven via _org_run. ────────────
 
-_LIFECYCLE_LIST_SNIPPET = '''\
+_LIFECYCLE_LIST_SNIPPET = """\
 from balabot import lifecycle
 data = lifecycle.list_orphans()
 print(json.dumps(data))
-'''
+"""
 
-_LIFECYCLE_ADOPT_SNIPPET = '''\
+_LIFECYCLE_ADOPT_SNIPPET = """\
 from balabot import lifecycle
 try:
     meta = lifecycle.adopt_orphan(payload['name'])
@@ -2111,9 +2445,9 @@ except lifecycle.CreationError as exc:
                       'status': getattr(exc, 'status', 409)}))
     raise SystemExit(0)
 print(json.dumps({'adopted': True, 'bot': meta}))
-'''
+"""
 
-_LIFECYCLE_PURGE_SNIPPET = '''\
+_LIFECYCLE_PURGE_SNIPPET = """\
 from balabot import lifecycle
 try:
     res = lifecycle.purge_orphan(payload['name'])
@@ -2124,15 +2458,15 @@ except lifecycle.CreationError as exc:
     raise SystemExit(0)
 print(json.dumps({'deleted': True, 'profile': res['profile'],
                   'removed': res['removed'], 'roster_row': res['roster_row']}))
-'''
+"""
 
-_LIFECYCLE_REAP_SNIPPET = '''\
+_LIFECYCLE_REAP_SNIPPET = """\
 from balabot import lifecycle
 res = lifecycle.reap_subagent_artifacts()
 print(json.dumps({'reaped': res['reaped'], 'count': res['count']}))
-'''
+"""
 
-_LIFECYCLE_DELETE_BOT_SNIPPET = '''\
+_LIFECYCLE_DELETE_BOT_SNIPPET = """\
 from balabot import lifecycle
 try:
     res = lifecycle.delete_registered_bot(payload['bot_id'])
@@ -2143,9 +2477,9 @@ except lifecycle.CreationError as exc:
     raise SystemExit(0)
 print(json.dumps({'deleted': True, 'bot_id': res['bot_id'],
                   'removed': res['removed'], 'org_removed': res['org_removed']}))
-'''
+"""
 
-_LIFECYCLE_UPDATE_BOT_SNIPPET = '''\
+_LIFECYCLE_UPDATE_BOT_SNIPPET = """\
 from balabot import lifecycle
 try:
     row = lifecycle.update_registered_bot(payload['bot_id'], fields=payload['fields'])
@@ -2155,7 +2489,7 @@ except lifecycle.CreationError as exc:
                       'status': getattr(exc, 'status', 400)}))
     raise SystemExit(0)
 print(json.dumps({'updated': True, 'bot': row}))
-'''
+"""
 
 
 @app.get("/api/orphans")
@@ -2174,8 +2508,9 @@ def orphans_list():
 def orphans_adopt(name: str):
     if not container_ok():
         return unavailable("balabot container is not running — cannot adopt")
-    res = _org_run(_wrap(_LIFECYCLE_ADOPT_SNIPPET, True), payload={"name": name},
-                   timeout=60.0)
+    res = _org_run(
+        _wrap(_LIFECYCLE_ADOPT_SNIPPET, True), payload={"name": name}, timeout=60.0
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -2187,8 +2522,9 @@ def orphans_adopt(name: str):
 def orphans_purge(name: str):
     if not container_ok():
         return unavailable("balabot container is not running — cannot purge")
-    res = _org_run(_wrap(_LIFECYCLE_PURGE_SNIPPET, True), payload={"name": name},
-                   timeout=60.0)
+    res = _org_run(
+        _wrap(_LIFECYCLE_PURGE_SNIPPET, True), payload={"name": name}, timeout=60.0
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -2215,8 +2551,11 @@ def bots_delete(bot_id: str):
     """Delete a persistent user-created bot. Refuses principal/governor."""
     if not container_ok():
         return unavailable("balabot container is not running — cannot delete bots")
-    res = _org_run(_wrap(_LIFECYCLE_DELETE_BOT_SNIPPET, True),
-                   payload={"bot_id": bot_id}, timeout=120.0)
+    res = _org_run(
+        _wrap(_LIFECYCLE_DELETE_BOT_SNIPPET, True),
+        payload={"bot_id": bot_id},
+        timeout=120.0,
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -2233,12 +2572,14 @@ async def bots_update(bot_id: str, request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="body must be JSON")
     if not isinstance(fields, dict) or not fields:
-        raise HTTPException(status_code=400,
-                            detail="at least one field is required")
+        raise HTTPException(status_code=400, detail="at least one field is required")
     if not container_ok():
         return unavailable("balabot container is not running — cannot edit bots")
-    res = _org_run(_wrap(_LIFECYCLE_UPDATE_BOT_SNIPPET, True),
-                   payload={"bot_id": bot_id, "fields": fields}, timeout=60.0)
+    res = _org_run(
+        _wrap(_LIFECYCLE_UPDATE_BOT_SNIPPET, True),
+        payload={"bot_id": bot_id, "fields": fields},
+        timeout=60.0,
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -2307,7 +2648,7 @@ def _broadcast_session_message(session_id: str, msg: dict) -> None:
             pass
 
 
-_SESSION_APPEND_SNIPPET = '''\
+_SESSION_APPEND_SNIPPET = """\
 from balabot.sessions import SessionStore, SessionError, UnknownSession
 out = {'session_id': payload['session_id'], 'recorded_messages': []}
 try:
@@ -2347,7 +2688,7 @@ except SessionError as exc:
     out['status'] = 503
     raise SystemExit(0)
 print(json.dumps(out))
-'''
+"""
 
 
 def _chat_append_session_state(payload: dict) -> dict:
@@ -2355,9 +2696,14 @@ def _chat_append_session_state(payload: dict) -> dict:
     return _org_run(_wrap(_SESSION_APPEND_SNIPPET, True), payload=payload)
 
 
-def _jev_prepare(profile: str, turn_text: str, session_id: str,
-                 messages: list, session_row: dict | None = None,
-                 message_id: str | None = None) -> dict:
+def _jev_prepare(
+    profile: str,
+    turn_text: str,
+    session_id: str,
+    messages: list,
+    session_row: dict | None = None,
+    message_id: str | None = None,
+) -> dict:
     """Everything the chat send path does with Jev + the session store,
     synchronously, BEFORE the upstream stream opens. Returns:
 
@@ -2368,12 +2714,18 @@ def _jev_prepare(profile: str, turn_text: str, session_id: str,
     stated, and NO exception escapes into the turn. The system prompt is never
     touched — the only output that reaches a message is a USER-message line.
     """
-    out: dict = {"carrier": None, "jev_event": None, "store": None,
-                 "session": session_row}
+    out: dict = {
+        "carrier": None,
+        "jev_event": None,
+        "store": None,
+        "session": session_row,
+    }
     jev = _jev_chat_client()
     if jev is None:
-        out["jev_event"] = {"degraded": True,
-                            "reason": _JEV_CHAT_REASON or "Jev client unavailable"}
+        out["jev_event"] = {
+            "degraded": True,
+            "reason": _JEV_CHAT_REASON or "Jev client unavailable",
+        }
         # Without Jev there is no gate, no selection, no routing: state it.
         # THE TRANSCRIPT IS NOT JEV'S: the user's message still belongs in the
         # durable store, so persistence runs here too and the turn proceeds
@@ -2393,12 +2745,15 @@ def _jev_prepare(profile: str, turn_text: str, session_id: str,
         out["jev_event"] = {"degraded": True, "reason": decision.reason}
     decisions: list[dict] = []
     if decision.worthy:
-        decisions.append({
-            "text": turn_text,
-            "provenance": ("jev-gate-failed-open" if decision.failed_open
-                           else "jev-gate"),
-            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        })
+        decisions.append(
+            {
+                "text": turn_text,
+                "provenance": (
+                    "jev-gate-failed-open" if decision.failed_open else "jev-gate"
+                ),
+                "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+        )
 
     # 2. SKILL SELECTION over the bot's real skills, rendered by
     #    jev_depth.prompt_line via select_and_render, riding a USER message.
@@ -2412,13 +2767,15 @@ def _jev_prepare(profile: str, turn_text: str, session_id: str,
                 catalog[name] = str(row.get("description") or "")
     except Exception as exc:  # noqa: BLE001 - degrade honestly, never raise
         catalog_error = f"skill catalog unavailable ({type(exc).__name__})"
-    injection = select_and_render(turn_text, catalog, jev=jev,
-                                  session_id=session_id)
+    injection = select_and_render(turn_text, catalog, jev=jev, session_id=session_id)
     if catalog_error and not injection.degraded:
-        injection = SkillInjection(selected=injection.selected,
-                                   line=injection.line,
-                                   requests_used=injection.requests_used,
-                                   degraded=True, reason=catalog_error)
+        injection = SkillInjection(
+            selected=injection.selected,
+            line=injection.line,
+            requests_used=injection.requests_used,
+            degraded=True,
+            reason=catalog_error,
+        )
     out["carrier"] = inject(injection, session_id=session_id)
 
     # 3. CONTEXT SIGNALS against the session's real purpose record (drift /
@@ -2427,17 +2784,25 @@ def _jev_prepare(profile: str, turn_text: str, session_id: str,
     signal = None
     if out["session"] is not None:
         purpose = str(out["session"].get("purpose") or "")
-        past = [str(m.get("content") or "") for m in messages[:-1]
-                if isinstance(m, dict)]
+        past = [
+            str(m.get("content") or "") for m in messages[:-1] if isinstance(m, dict)
+        ]
         try:
             from balabot.jev_continuity import context_signals  # noqa: E402
+
             signal = context_signals(
                 tokens_used=int(out["session"].get("next_seq") or 0) * 400,
-                token_limit=200_000, purpose_record=purpose,
-                current_turn=turn_text, past_turns=past, jev=jev)
+                token_limit=200_000,
+                purpose_record=purpose,
+                current_turn=turn_text,
+                past_turns=past,
+                jev=jev,
+            )
         except Exception as exc:  # noqa: BLE001
-            out["jev_event"] = {"degraded": True,
-                                "reason": f"context signals failed ({exc})"}
+            out["jev_event"] = {
+                "degraded": True,
+                "reason": f"context signals failed ({exc})",
+            }
         if signal is not None and signal.degraded and not out["jev_event"]:
             out["jev_event"] = {"degraded": True, "reason": signal.reason}
 
@@ -2446,17 +2811,28 @@ def _jev_prepare(profile: str, turn_text: str, session_id: str,
     #    resume state, and any gate-admitted decisions. Store failure degrades
     #    to a stated event; it never breaks the turn.
     topic = purpose if (signal is not None and signal.drifted and purpose) else None
-    _persist_turn_state(session_id, turn_text, out,
-                        topic=topic, decisions=decisions, bot_id=profile,
-                        message_id=message_id)
+    _persist_turn_state(
+        session_id,
+        turn_text,
+        out,
+        topic=topic,
+        decisions=decisions,
+        bot_id=profile,
+        message_id=message_id,
+    )
     return out
 
 
-def _persist_turn_state(session_id: str, turn_text: str, out: dict, *,
-                        topic: str | None = None,
-                        decisions: list | None = None,
-                        bot_id: str | None = None,
-                        message_id: str | None = None) -> dict:
+def _persist_turn_state(
+    session_id: str,
+    turn_text: str,
+    out: dict,
+    *,
+    topic: str | None = None,
+    decisions: list | None = None,
+    bot_id: str | None = None,
+    message_id: str | None = None,
+) -> dict:
     """Record this turn (user message, topic span, resume state, admitted
     decisions) in the durable session store - INDEPENDENTLY of Jev.
 
@@ -2484,16 +2860,20 @@ def _persist_turn_state(session_id: str, turn_text: str, out: dict, *,
     res = _chat_append_session_state(store_payload)
     if res.get("ok"):
         out["store"] = {"appended": True}
-        for rec in (res.get("recorded_messages") or []):
+        for rec in res.get("recorded_messages") or []:
             _broadcast_session_message(session_id, rec)
     else:
-        out["store"] = {"appended": False,
-                        "error": res.get("error", "container_unreachable"),
-                        "reason": res.get("reason", res.get("detail", ""))}
+        out["store"] = {
+            "appended": False,
+            "error": res.get("error", "container_unreachable"),
+            "reason": res.get("reason", res.get("detail", "")),
+        }
         if not out.get("jev_event"):
-            out["jev_event"] = {"degraded": True,
-                                "reason": "session store unreachable - "
-                                          "topic/resume/decisions not recorded"}
+            out["jev_event"] = {
+                "degraded": True,
+                "reason": "session store unreachable - "
+                "topic/resume/decisions not recorded",
+            }
     return out
 
 
@@ -2511,17 +2891,22 @@ def _prepare_chat_session(bot_id: str, turn_text: str) -> dict | None:
         return None
     rows = listing.get("sessions") or []
     now = time.time()
-    candidates = [{
-        "id": r.get("session_id", ""),
-        "bot_id": bot_id,
-        "summary": r.get("purpose", ""),
-        "text": "",
-        "last_active": now - 7 * 86400.0,
-    } for r in rows if r.get("session_id")]
+    candidates = [
+        {
+            "id": r.get("session_id", ""),
+            "bot_id": bot_id,
+            "summary": r.get("purpose", ""),
+            "text": "",
+            "last_active": now - 7 * 86400.0,
+        }
+        for r in rows
+        if r.get("session_id")
+    ]
 
     route = None
     if jev is not None and candidates:
         from balabot.jev_continuity import route_session  # noqa: E402
+
         route = route_session(turn_text, candidates, jev, bot_id=bot_id, now=now)
     return {"rows": rows, "route": route}
 
@@ -2531,8 +2916,9 @@ def _resume_carrier(session_id: str, bot_id: str) -> dict | None:
     as a USER-message line. The session's mandate (purpose + spans +
     decisions + resume state) re-enters the window from ground truth. The
     system prompt is untouched."""
-    detail = _session_store_blob(_SESSIONS_GET_SNIPPET,
-                                 {"session_id": session_id, "bot_id": bot_id})
+    detail = _session_store_blob(
+        _SESSIONS_GET_SNIPPET, {"session_id": session_id, "bot_id": bot_id}
+    )
     if detail is None:
         return None
     s = detail.get("session") or {}
@@ -2546,12 +2932,11 @@ def _resume_carrier(session_id: str, bot_id: str) -> dict | None:
         resume_map = s.get("resumeState") or {}
     spans = "; ".join(
         f"{sp.get('topic')}: msgs {sp.get('start_seq')}-{sp.get('end_seq')}"
-        for sp in spans_list)
-    decisions = "; ".join(
-        str(d.get("text") or "") for d in decisions_list[-3:])
+        for sp in spans_list
+    )
+    decisions = "; ".join(str(d.get("text") or "") for d in decisions_list[-3:])
     resume = json.dumps(resume_map or {}, sort_keys=True)[:400]
-    parts = ["<session_resume>",
-             f"Purpose: {purpose}"]
+    parts = ["<session_resume>", f"Purpose: {purpose}"]
     if spans:
         parts.append(f"Topic spans: {spans}")
     if decisions:
@@ -2559,17 +2944,26 @@ def _resume_carrier(session_id: str, bot_id: str) -> dict | None:
     if resume and resume != "{}":
         parts.append(f"Resume state: {resume}")
     parts.append("</session_resume>")
-    return {"carrier": "user_message", "content": "\n".join(parts),
-            "session_id": session_id}
+    return {
+        "carrier": "user_message",
+        "content": "\n".join(parts),
+        "session_id": session_id,
+    }
 
 
 def _carrier_dict(carrier) -> dict:
     """Accept either the InjectionCarrier dataclass (jev_prompt.inject's
     return type) or an already-plain dict; return the plain 3-key dict."""
-    if hasattr(carrier, "carrier") and hasattr(carrier, "content") \
-            and hasattr(carrier, "session_id"):
-        return {"carrier": carrier.carrier, "content": carrier.content,
-                "session_id": carrier.session_id}
+    if (
+        hasattr(carrier, "carrier")
+        and hasattr(carrier, "content")
+        and hasattr(carrier, "session_id")
+    ):
+        return {
+            "carrier": carrier.carrier,
+            "content": carrier.content,
+            "session_id": carrier.session_id,
+        }
     return carrier
 
 
@@ -2586,13 +2980,15 @@ def _carrier_frames(state: dict) -> list[str]:
         if not (isinstance(carrier, dict) and carrier.get("content")):
             continue
         if set(carrier) != {"carrier", "content", "session_id"}:
-            raise ValueError("carrier must have exactly the keys "
-                             "{carrier, content, session_id}")
+            raise ValueError(
+                "carrier must have exactly the keys {carrier, content, session_id}"
+            )
         if carrier["carrier"] != "user_message":
             raise ValueError(
                 f"unsupported carrier {carrier['carrier']!r}: mid-conversation "
                 "injection may only ride a user message (the system prompt "
-                "stays byte-stable for prefix caching)")
+                "stays byte-stable for prefix caching)"
+            )
         frames.append(f"event: jev_carrier\ndata: {json.dumps(carrier)}\n\n")
     event = state.get("jev_event")
     if isinstance(event, dict) and event.get("degraded"):
@@ -2612,9 +3008,14 @@ async def chat(request: Request):
         raise HTTPException(status_code=404, detail=f"unknown bot {profile}")
     messages = body.get("messages") or []
     session_id = str(body.get("session_id") or "").strip()
-    turn_text = next((str(m.get("content") or "") for m in reversed(messages)
-                      if isinstance(m, dict) and m.get("role") == "user"),
-                     "")
+    turn_text = next(
+        (
+            str(m.get("content") or "")
+            for m in reversed(messages)
+            if isinstance(m, dict) and m.get("role") == "user"
+        ),
+        "",
+    )
 
     IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
     attachments = body.get("attachments") or []
@@ -2639,7 +3040,9 @@ async def chat(request: Request):
                         b64_str = raw_c
                 elif att.get("path") and pathlib.Path(att["path"]).is_file():
                     try:
-                        b64_str = base64.b64encode(pathlib.Path(att["path"]).read_bytes()).decode("ascii")
+                        b64_str = base64.b64encode(
+                            pathlib.Path(att["path"]).read_bytes()
+                        ).decode("ascii")
                     except OSError:
                         pass
                 elif att.get("url") and "/api/attachments/" in att["url"]:
@@ -2649,16 +3052,20 @@ async def chat(request: Request):
                         cand = _attachments_dir() / f"{file_id}_{safe_name}"
                         if cand.is_file():
                             try:
-                                b64_str = base64.b64encode(cand.read_bytes()).decode("ascii")
+                                b64_str = base64.b64encode(cand.read_bytes()).decode(
+                                    "ascii"
+                                )
                             except OSError:
                                 pass
 
                 if b64_str:
                     data_url = f"data:{mime};base64,{b64_str}"
-                    image_parts.append({
-                        "type": "image_url",
-                        "image_url": {"url": data_url},
-                    })
+                    image_parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": data_url},
+                        }
+                    )
                 else:
                     att_lines.append(f"- {name} ({p})")
             else:
@@ -2670,13 +3077,18 @@ async def chat(request: Request):
                 if image_parts:
                     text_content = ""
                     if isinstance(orig_content, list):
-                        text_parts = [part.get("text", "") for part in orig_content
-                                      if isinstance(part, dict) and part.get("type") == "text"]
+                        text_parts = [
+                            part.get("text", "")
+                            for part in orig_content
+                            if isinstance(part, dict) and part.get("type") == "text"
+                        ]
                         text_content = " ".join(text_parts)
                     elif isinstance(orig_content, str):
                         text_content = orig_content
                     if att_lines:
-                        att_block = "\n\n[Attached files:\n" + "\n".join(att_lines) + "\n]"
+                        att_block = (
+                            "\n\n[Attached files:\n" + "\n".join(att_lines) + "\n]"
+                        )
                         text_content += att_block
                     parts = []
                     if text_content:
@@ -2685,7 +3097,9 @@ async def chat(request: Request):
                     m["content"] = parts
                 else:
                     if att_lines:
-                        att_block = "\n\n[Attached files:\n" + "\n".join(att_lines) + "\n]"
+                        att_block = (
+                            "\n\n[Attached files:\n" + "\n".join(att_lines) + "\n]"
+                        )
                         m["content"] = str(orig_content or "") + att_block
                 break
 
@@ -2693,6 +3107,7 @@ async def chat(request: Request):
     if turn_text:
         try:
             from balabot import growth
+
             signals = growth.scan(turn_text)
             if signals:
                 jev_cl = _jev_chat_client()
@@ -2719,24 +3134,45 @@ async def chat(request: Request):
     # into the turn, and never returns a silently empty success.
     jev_state: dict = {}
     try:
-
         if session_id and turn_text:
             routed = _prepare_chat_session(profile, turn_text)
             session_row = None
             if routed is not None:
                 route = routed.get("route")
                 session_row = next(
-                    (r for r in (routed.get("rows") or [])
-                     if r.get("session_id") == session_id), None)
-            turn_msg = next((m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "user"), None)
-            turn_msg_id = (turn_msg.get("message_id") or turn_msg.get("id")) if turn_msg else None
-            jev_state = _jev_prepare(profile, turn_text, session_id, messages,
-                                     session_row=session_row,
-                                     message_id=turn_msg_id)
+                    (
+                        r
+                        for r in (routed.get("rows") or [])
+                        if r.get("session_id") == session_id
+                    ),
+                    None,
+                )
+            turn_msg = next(
+                (
+                    m
+                    for m in reversed(messages)
+                    if isinstance(m, dict) and m.get("role") == "user"
+                ),
+                None,
+            )
+            turn_msg_id = (
+                (turn_msg.get("message_id") or turn_msg.get("id")) if turn_msg else None
+            )
+            jev_state = _jev_prepare(
+                profile,
+                turn_text,
+                session_id,
+                messages,
+                session_row=session_row,
+                message_id=turn_msg_id,
+            )
             if routed is not None:
                 route = routed.get("route")
-                if route is not None and route.outcome == "resume" \
-                        and route.candidate_id:
+                if (
+                    route is not None
+                    and route.outcome == "resume"
+                    and route.candidate_id
+                ):
                     # The RESUME route: the resumed session is re-anchored from
                     # the durable store and rides the user message.
                     resume = _resume_carrier(route.candidate_id, profile)
@@ -2747,19 +3183,31 @@ async def chat(request: Request):
             carrier_frames = []
     except Exception as exc:  # noqa: BLE001 - degrade honestly, never raise
         reason = f"jev preparation failed ({type(exc).__name__}: {exc})"
-        carrier_frames = ["event: jev\ndata: " +
-                          json.dumps({"degraded": True, "reason": reason}) +
-                          "\n\n"]
+        carrier_frames = [
+            "event: jev\ndata: "
+            + json.dumps({"degraded": True, "reason": reason})
+            + "\n\n"
+        ]
 
     q = _chat_queue()
     queued_frames: list[str] = []
     queued_messages: list[dict] = []
+    queued_ids: list[str] = []
     if q is not None and session_id:
         try:
-            queued_messages, queued_frames = q.drain_messages(session_id, to_bot=profile)
+            queued_messages, queued_frames = q.drain_messages(
+                session_id, to_bot=profile
+            )
+            queued_ids = [m["message_id"] for m in queued_messages]
             q.mark_busy(session_id)
         except Exception:
-            pass
+            # Un-claim anything the drain may have taken and idle the turn so
+            # a failed mailbox read never leaves the session mid-flight.
+            try:
+                q.release_claims(session_id)
+                q.mark_idle(session_id)
+            except Exception:
+                pass
 
     if queued_messages:
         for q_msg in queued_messages:
@@ -2767,10 +3215,10 @@ async def chat(request: Request):
 
     url = f"{UPSTREAM}/p/{profile}/v1/chat/completions"
     payload = {"model": profile, "messages": messages, "stream": True}
-    headers = {"Authorization": f"Bearer {API_KEY}",
-               "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
     async def stream():
+        upstream_consumed = False
         try:
             # Jev state frames FIRST, so the carrier line precedes the model's
             # stream: they are visible, stated events in the transcript.
@@ -2791,18 +3239,29 @@ async def chat(request: Request):
             # visible `event: handoff` row in the transcript instead of the UI
             # renderer being dead code.
             from balabot.handoffs import drain_handoff_frames
+
             for frame in drain_handoff_frames(profile):
                 yield frame
             from balabot.intervention import drain_intervention_frames
+
             for frame in drain_intervention_frames(profile):
                 yield frame
-            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=15.0)) as client:
-                async with client.stream("POST", url, json=payload, headers=headers) as r:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(600.0, connect=15.0)
+            ) as client:
+                async with client.stream(
+                    "POST", url, json=payload, headers=headers
+                ) as r:
                     if r.status_code != 200:
                         detail = (await r.aread()).decode("utf-8", "replace")[:300]
-                        yield (f"event: error\ndata: "
-                               f"{json.dumps({'message': f'backend {r.status_code}: {detail}'})}\n\n")
+                        yield (
+                            f"event: error\ndata: "
+                            f"{json.dumps({'message': f'backend {r.status_code}: {detail}'})}\n\n"
+                        )
                         return
+                    # The model return 200 — it consumed the payload, so the
+                    # claimed steering messages are genuinely delivered.
+                    upstream_consumed = True
                     accumulated_content = []
                     async for chunk in r.aiter_bytes():
                         # pass the upstream bytes through untouched
@@ -2811,47 +3270,72 @@ async def chat(request: Request):
                             chunk_str = chunk.decode("utf-8", "replace")
                             for line in chunk_str.splitlines():
                                 line_s = line.strip()
-                                if line_s.startswith("data: ") and not line_s.startswith("data: [DONE]"):
+                                if line_s.startswith(
+                                    "data: "
+                                ) and not line_s.startswith("data: [DONE]"):
                                     data_json = json.loads(line_s[6:])
                                     choices = data_json.get("choices") or []
                                     if choices and isinstance(choices[0], dict):
-                                        if "delta" in choices[0] and isinstance(choices[0]["delta"], dict):
+                                        if "delta" in choices[0] and isinstance(
+                                            choices[0]["delta"], dict
+                                        ):
                                             delta_c = choices[0]["delta"].get("content")
                                             if delta_c:
                                                 accumulated_content.append(delta_c)
-                                        elif "message" in choices[0] and isinstance(choices[0]["message"], dict):
+                                        elif "message" in choices[0] and isinstance(
+                                            choices[0]["message"], dict
+                                        ):
                                             msg_c = choices[0]["message"].get("content")
                                             if msg_c:
                                                 accumulated_content.append(msg_c)
-                                    elif "content" in data_json and isinstance(data_json["content"], str):
+                                    elif "content" in data_json and isinstance(
+                                        data_json["content"], str
+                                    ):
                                         accumulated_content.append(data_json["content"])
                         except Exception:
                             pass
                     assistant_text = "".join(accumulated_content)
                     if assistant_text and session_id:
                         try:
-                            res_ast = _chat_append_session_state({
-                                "session_id": session_id,
-                                "bot_id": profile,
-                                "messages": [{"role": "assistant", "content": assistant_text}]
-                            })
-                            for rec in (res_ast.get("recorded_messages") or []):
+                            res_ast = _chat_append_session_state(
+                                {
+                                    "session_id": session_id,
+                                    "bot_id": profile,
+                                    "messages": [
+                                        {"role": "assistant", "content": assistant_text}
+                                    ],
+                                }
+                            )
+                            for rec in res_ast.get("recorded_messages") or []:
                                 _broadcast_session_message(session_id, rec)
                         except Exception:
                             pass
         except Exception as exc:  # noqa: BLE001
-            yield (f"event: error\ndata: "
-                   f"{json.dumps({'message': f'{type(exc).__name__}: {exc}'})}\n\n")
+            yield (
+                f"event: error\ndata: "
+                f"{json.dumps({'message': f'{type(exc).__name__}: {exc}'})}\n\n"
+            )
         finally:
             if q is not None and session_id:
                 try:
+                    # Delivery is only confirmed when the model actually
+                    # consumed the turn (upstream 200). If the turn was refused
+                    # or errored, release the claim so the steering messages
+                    # return to `queued` and are retried — never reported
+                    # delivered when the model never got them.
+                    if queued_ids and upstream_consumed:
+                        q.mark_delivered(session_id, queued_ids)
+                    elif queued_ids:
+                        q.release_claims(session_id)
                     q.mark_idle(session_id)
                 except Exception:
                     pass
 
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache",
-                                      "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── conversations: the durable server-side session store ─────────────────────
@@ -2865,14 +3349,14 @@ async def chat(request: Request):
 # answers `unavailable(...)` with a named reason — never a silent empty list,
 # and never a fabricated row. A missing session id is a 404, not a default.
 
-_SESSIONS_LIST_SNIPPET = '''\
+_SESSIONS_LIST_SNIPPET = """\
 from balabot.sessions import SessionStore
 with SessionStore() as store:
     rows = store.list_sessions(payload['bot_id'])
 print(json.dumps({'sessions': rows}))
-'''
+"""
 
-_SESSIONS_CREATE_SNIPPET = '''\
+_SESSIONS_CREATE_SNIPPET = """\
 from balabot.sessions import SessionStore, SessionError
 try:
     with SessionStore() as store:
@@ -2883,9 +3367,9 @@ except SessionError as exc:
                       'detail': str(exc), 'status': 409}))
     raise SystemExit(0)
 print(json.dumps({'created': True, 'session_id': payload['session_id']}))
-'''
+"""
 
-_SESSIONS_GET_SNIPPET = '''\
+_SESSIONS_GET_SNIPPET = """\
 from balabot.sessions import SessionStore, UnknownSession
 try:
     with SessionStore() as store:
@@ -2904,9 +3388,9 @@ print(json.dumps({'session': {**row, 'topic_spans': anchor['topic_spans'],
                               'resume_state': anchor['resume_state'],
                               'recent_window': anchor['recent_window'],
                               'messages': msgs}}))
-'''
+"""
 
-_SESSIONS_DELETE_SNIPPET = '''\
+_SESSIONS_DELETE_SNIPPET = """\
 import json, os, sqlite3
 from balabot.sessions import DEFAULT_DB_PATH
 db = os.environ.get('BALABOT_CONTINUITY_DB', DEFAULT_DB_PATH)
@@ -2930,9 +3414,9 @@ if cur.rowcount == 0:
 print(json.dumps({'deleted': True, 'topic_spans_removed': spans,
                   'decisions_removed': decisions,
                   'messages_removed': messages}))
-'''
+"""
 
-_SESSIONS_MESSAGES_SNIPPET = '''\
+_SESSIONS_MESSAGES_SNIPPET = """\
 from balabot.sessions import SessionStore, UnknownSession
 try:
     with SessionStore() as store:
@@ -2944,9 +3428,9 @@ except UnknownSession as exc:
                       'detail': str(exc), 'status': 404}))
     raise SystemExit(0)
 print(json.dumps({'ok': True, 'session_id': payload['session_id'], 'messages': msgs}))
-'''
+"""
 
-_SESSION_RECORD_MESSAGE_SNIPPET = '''\
+_SESSION_RECORD_MESSAGE_SNIPPET = """\
 from balabot.sessions import SessionStore, UnknownSession, SessionError
 try:
     with SessionStore() as store:
@@ -2968,9 +3452,9 @@ except SessionError as exc:
                       'detail': str(exc), 'status': 400}))
     raise SystemExit(0)
 print(json.dumps({'ok': True, 'message': msg}))
-'''
+"""
 
-_SESSIONS_PATCH_SNIPPET = '''\
+_SESSIONS_PATCH_SNIPPET = """\
 import json, os, sqlite3
 from balabot.sessions import DEFAULT_DB_PATH
 db = os.environ.get('BALABOT_CONTINUITY_DB', DEFAULT_DB_PATH)
@@ -3004,7 +3488,7 @@ cols = ('session_id', 'purpose', 'next_seq', 'compaction_count',
         'last_compaction_at')
 print(json.dumps({'updated': True,
                   'session': dict(zip(cols, row))}))
-'''
+"""
 
 
 def _session_public(row: dict, bot: str) -> dict:
@@ -3030,8 +3514,9 @@ async def sessions_list(bot: str = ""):
         raise HTTPException(status_code=400, detail="bot is required")
     if not container_ok():
         return unavailable("balabot container is not running — no conversation store")
-    res = await _org_run_async(_wrap(_SESSIONS_LIST_SNIPPET, True),
-                               payload={"bot_id": bot})
+    res = await _org_run_async(
+        _wrap(_SESSIONS_LIST_SNIPPET, True), payload={"bot_id": bot}
+    )
     if not res.get("ok"):
         return unavailable(res.get("reason", "could not read the session store"))
     rows = [_session_public(r, bot) for r in (res.get("sessions") or [])]
@@ -3049,27 +3534,42 @@ async def sessions_create(request: Request):
     bot_id = (body.get("botId") or body.get("bot_id") or "").strip()
     title = (body.get("title") or "New conversation").strip()
     if not bot_id:
-        raise HTTPException(status_code=400,
-                            detail="botId is required — a session without a "
-                                   "bot is orphaned and unreachable")
+        raise HTTPException(
+            status_code=400,
+            detail="botId is required — a session without a "
+            "bot is orphaned and unreachable",
+        )
     if bot_id not in _all_bot_meta():
         raise HTTPException(status_code=404, detail=f"unknown bot {bot_id!r}")
     purpose = (body.get("purpose") or title).strip()
-    session_id = (body.get("id") or
-                  f"s_{int(time.time() * 1000):x}_"
-                  f"{secrets.token_hex(3)}").strip()
+    session_id = (
+        body.get("id") or f"s_{int(time.time() * 1000):x}_{secrets.token_hex(3)}"
+    ).strip()
     if not container_ok():
-        return unavailable("balabot container is not running — cannot create conversations")
-    res = await _org_run_async(_wrap(_SESSIONS_CREATE_SNIPPET, True), payload={
-        "session_id": session_id, "bot_id": bot_id, "purpose": purpose})
+        return unavailable(
+            "balabot container is not running — cannot create conversations"
+        )
+    res = await _org_run_async(
+        _wrap(_SESSIONS_CREATE_SNIPPET, True),
+        payload={"session_id": session_id, "bot_id": bot_id, "purpose": purpose},
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
         return unavailable(res.get("reason", "could not create the session"))
-    return {"created": True, "session": {
-        "id": session_id, "botId": bot_id, "title": title,
-        "purpose": purpose, "messages": [], "handoffs": [],
-        "topicSpans": [], "createdAt": int(time.time() * 1000)}}
+    return {
+        "created": True,
+        "session": {
+            "id": session_id,
+            "botId": bot_id,
+            "title": title,
+            "purpose": purpose,
+            "messages": [],
+            "handoffs": [],
+            "topicSpans": [],
+            "createdAt": int(time.time() * 1000),
+        },
+    }
 
 
 @app.get("/api/sessions/{session_id}")
@@ -3081,27 +3581,32 @@ async def sessions_get(session_id: str, bot: str = ""):
         raise HTTPException(status_code=400, detail="bot is required")
     if not container_ok():
         return unavailable("balabot container is not running — no conversation store")
-    res = await _org_run_async(_wrap(_SESSIONS_GET_SNIPPET, True), payload={
-        "session_id": session_id, "bot_id": bot})
+    res = await _org_run_async(
+        _wrap(_SESSIONS_GET_SNIPPET, True),
+        payload={"session_id": session_id, "bot_id": bot},
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
         return unavailable(res.get("reason", "could not read the session"))
     s = res["session"]
-    return {"available": True, "session": {
-        "id": s.get("session_id", session_id),
-        "botId": s.get("bot_id", bot),
-        "title": s.get("purpose") or "Untitled conversation",
-        "purpose": s.get("purpose", ""),
-        "topicSpans": s.get("topic_spans", []),
-        "decisions": s.get("decisions", []),
-        "resumeState": s.get("resume_state", {}),
-        "recentWindow": s.get("recent_window"),
-        "messages": s.get("messages", []),
-        "nextSeq": s.get("next_seq"),
-        "compactionCount": s.get("compaction_count", 0),
-        "lastCompactionAt": s.get("last_compaction_at"),
-    }}
+    return {
+        "available": True,
+        "session": {
+            "id": s.get("session_id", session_id),
+            "botId": s.get("bot_id", bot),
+            "title": s.get("purpose") or "Untitled conversation",
+            "purpose": s.get("purpose", ""),
+            "topicSpans": s.get("topic_spans", []),
+            "decisions": s.get("decisions", []),
+            "resumeState": s.get("resume_state", {}),
+            "recentWindow": s.get("recent_window"),
+            "messages": s.get("messages", []),
+            "nextSeq": s.get("next_seq"),
+            "compactionCount": s.get("compaction_count", 0),
+            "lastCompactionAt": s.get("last_compaction_at"),
+        },
+    }
 
 
 @app.delete("/api/sessions/{session_id}")
@@ -3109,18 +3614,24 @@ async def sessions_delete(session_id: str):
     """Delete a conversation and its topic spans + decisions (the whole
     record — leaving orphaned spans behind would be worse than none)."""
     if not container_ok():
-        return unavailable("balabot container is not running — cannot delete conversations")
+        return unavailable(
+            "balabot container is not running — cannot delete conversations"
+        )
     _session_subscribers.pop(session_id, None)
-    res = await _org_run_async(_wrap(_SESSIONS_DELETE_SNIPPET, True),
-                               payload={"session_id": session_id})
+    res = await _org_run_async(
+        _wrap(_SESSIONS_DELETE_SNIPPET, True), payload={"session_id": session_id}
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
         return unavailable(res.get("reason", "could not delete the session"))
-    return {"deleted": True, "id": session_id,
-            "topic_spans_removed": res.get("topic_spans_removed", 0),
-            "decisions_removed": res.get("decisions_removed", 0),
-            "messages_removed": res.get("messages_removed", 0)}
+    return {
+        "deleted": True,
+        "id": session_id,
+        "topic_spans_removed": res.get("topic_spans_removed", 0),
+        "decisions_removed": res.get("decisions_removed", 0),
+        "messages_removed": res.get("messages_removed", 0),
+    }
 
 
 @app.patch("/api/sessions/{session_id}")
@@ -3132,26 +3643,32 @@ async def sessions_update(session_id: str, request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="body must be JSON")
     if not isinstance(body, dict) or not (body.get("purpose") or body.get("title")):
-        raise HTTPException(status_code=400,
-                            detail="purpose (or title) is required")
+        raise HTTPException(status_code=400, detail="purpose (or title) is required")
     purpose = (body.get("purpose") or body.get("title") or "").strip()
     if not container_ok():
-        return unavailable("balabot container is not running — cannot update conversations")
-    res = await _org_run_async(_wrap(_SESSIONS_PATCH_SNIPPET, True), payload={
-        "session_id": session_id, "fields": {"purpose": purpose}})
+        return unavailable(
+            "balabot container is not running — cannot update conversations"
+        )
+    res = await _org_run_async(
+        _wrap(_SESSIONS_PATCH_SNIPPET, True),
+        payload={"session_id": session_id, "fields": {"purpose": purpose}},
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
         return unavailable(res.get("reason", "could not update the session"))
     s = res.get("session") or {}
-    return {"updated": True, "session": {
-        "id": s.get("session_id", session_id),
-        "purpose": s.get("purpose", purpose),
-        "title": s.get("purpose", purpose) or "Untitled conversation",
-        "nextSeq": s.get("next_seq"),
-        "compactionCount": s.get("compaction_count", 0),
-        "lastCompactionAt": s.get("last_compaction_at"),
-    }}
+    return {
+        "updated": True,
+        "session": {
+            "id": s.get("session_id", session_id),
+            "purpose": s.get("purpose", purpose),
+            "title": s.get("purpose", purpose) or "Untitled conversation",
+            "nextSeq": s.get("next_seq"),
+            "compactionCount": s.get("compaction_count", 0),
+            "lastCompactionAt": s.get("last_compaction_at"),
+        },
+    }
 
 
 @app.get("/api/sessions/{session_id}/messages")
@@ -3159,15 +3676,23 @@ async def sessions_messages_list(session_id: str, since_seq: int = 0, limit: int
     """Retrieve durable server-side transcript messages for a session."""
     if not container_ok():
         return unavailable("balabot container is not running — no conversation store")
-    res = await _org_run_async(_wrap(_SESSIONS_MESSAGES_SNIPPET, True),
-                               payload={"session_id": session_id,
-                                        "since_seq": since_seq or None,
-                                        "limit": limit or None})
+    res = await _org_run_async(
+        _wrap(_SESSIONS_MESSAGES_SNIPPET, True),
+        payload={
+            "session_id": session_id,
+            "since_seq": since_seq or None,
+            "limit": limit or None,
+        },
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
         return unavailable(res.get("reason", "could not read session messages"))
-    return {"available": True, "sessionId": session_id, "messages": res.get("messages", [])}
+    return {
+        "available": True,
+        "sessionId": session_id,
+        "messages": res.get("messages", []),
+    }
 
 
 @app.post("/api/sessions/{session_id}/messages")
@@ -3183,12 +3708,17 @@ async def sessions_messages_create(session_id: str, request: Request):
         raise HTTPException(status_code=400, detail="role and content are required")
     if not container_ok():
         return unavailable("balabot container is not running — cannot record messages")
-    res = await _org_run_async(_wrap(_SESSION_RECORD_MESSAGE_SNIPPET, True), payload={
-        "session_id": session_id, "role": role, "content": content,
-        "message_id": body.get("message_id") or body.get("id"),
-        "created_at": body.get("created_at") or body.get("createdAt"),
-        "bot_id": body.get("bot_id") or body.get("botId"),
-    })
+    res = await _org_run_async(
+        _wrap(_SESSION_RECORD_MESSAGE_SNIPPET, True),
+        payload={
+            "session_id": session_id,
+            "role": role,
+            "content": content,
+            "message_id": body.get("message_id") or body.get("id"),
+            "created_at": body.get("created_at") or body.get("createdAt"),
+            "bot_id": body.get("bot_id") or body.get("botId"),
+        },
+    )
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -3215,8 +3745,10 @@ async def sessions_events(session_id: str, request: Request, since_seq: int = 0)
         try:
             # 1. Catch-up replay of missed messages
             if since_seq is not None:
-                res = await _org_run_async(_wrap(_SESSIONS_MESSAGES_SNIPPET, True),
-                                           payload={"session_id": session_id, "since_seq": since_seq})
+                res = await _org_run_async(
+                    _wrap(_SESSIONS_MESSAGES_SNIPPET, True),
+                    payload={"session_id": session_id, "since_seq": since_seq},
+                )
                 if res.get("ok"):
                     for m in res.get("messages") or []:
                         yield f"id: {m['seq']}\nevent: message\ndata: {json.dumps(m)}\n\n"
@@ -3235,9 +3767,11 @@ async def sessions_events(session_id: str, request: Request, since_seq: int = 0)
             if not _session_subscribers[session_id]:
                 _session_subscribers.pop(session_id, None)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache",
-                                      "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── SPA ──────────────────────────────────────────────────────────────────────
@@ -3254,12 +3788,17 @@ def spa(full_path: str):
     index_file = DIST / "index.html"
     if index_file.is_file():
         return FileResponse(index_file)
-    raise HTTPException(status_code=404, detail="SPA index.html not found; run npm run build in ui/")
+    raise HTTPException(
+        status_code=404, detail="SPA index.html not found; run npm run build in ui/"
+    )
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app,
-                host=os.environ.get("BALABOT_UI_HOST", "127.0.0.1"),
-                port=int(os.environ.get("BALABOT_UI_PORT", "9119")),
-                log_level="warning")
+
+    uvicorn.run(
+        app,
+        host=os.environ.get("BALABOT_UI_HOST", "127.0.0.1"),
+        port=int(os.environ.get("BALABOT_UI_PORT", "9119")),
+        log_level="warning",
+    )
