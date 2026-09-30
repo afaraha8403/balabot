@@ -25,6 +25,10 @@ if (typeof window !== 'undefined') {
     window.scrollTo = vi.fn();
   }
 
+  if (typeof Element !== 'undefined' && !Element.prototype.scrollTo) {
+    Element.prototype.scrollTo = vi.fn();
+  }
+
   if (!window.ResizeObserver) {
     window.ResizeObserver = class ResizeObserver {
       observe() {}
