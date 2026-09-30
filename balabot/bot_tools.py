@@ -38,6 +38,7 @@ import httpcore
 from httpcore._backends.sync import SyncBackend
 from httpcore._backends.base import NetworkStream
 
+from balabot import approvals
 from balabot import orgs
 from balabot.handoffs import HandoffError, enqueue_handoff
 
@@ -97,8 +98,16 @@ class _PinnedSyncBackend(SyncBackend):
             addr_infos = socket.getaddrinfo(host, port)
             for *_, sockaddr in addr_infos:
                 ip = ipaddress.ip_address(sockaddr[0])
-                if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
-                    raise SSRFBlockedError(f"SSRF blocked: destination {host} resolves to prohibited address {ip}")
+                if (
+                    ip.is_loopback
+                    or ip.is_private
+                    or ip.is_link_local
+                    or ip.is_reserved
+                    or ip.is_unspecified
+                ):
+                    raise SSRFBlockedError(
+                        f"SSRF blocked: destination {host} resolves to prohibited address {ip}"
+                    )
         except socket.gaierror:
             pass
 
@@ -123,10 +132,14 @@ class _PinnedSyncBackend(SyncBackend):
                     or peer_ip_str != self._pinned_ip
                 ):
                     stream.close()
-                    raise SSRFBlockedError(f"SSRF blocked: connection peer {peer_ip_str} is prohibited")
+                    raise SSRFBlockedError(
+                        f"SSRF blocked: connection peer {peer_ip_str} is prohibited"
+                    )
             except ValueError:
                 stream.close()
-                raise SSRFBlockedError(f"SSRF blocked: invalid peer address {peer_ip_str}")
+                raise SSRFBlockedError(
+                    f"SSRF blocked: invalid peer address {peer_ip_str}"
+                )
         return stream
 
 
@@ -139,6 +152,7 @@ def _make_pinned_transport(pinned_ip: str) -> httpx.HTTPTransport:
         http2=False,
     )
     return transport
+
 
 PENDING_KINDS = {"secret_request", "secret_access_request"}
 
@@ -223,8 +237,9 @@ def enqueue_org_request(profile: str, event: dict) -> dict:
         raise ValueError(f"org request queue unavailable: {exc}") from exc
 
 
-def request_secret(name: str, description: str | None = None, *,
-                   bot_id: str | None = None, **kwargs) -> dict:
+def request_secret(
+    name: str, description: str | None = None, *, bot_id: str | None = None, **kwargs
+) -> dict:
     """Record a PENDING secret request so the UI can surface the in-chat form.
 
     The bot NEVER supplies, stores or receives a value here — the user does
@@ -238,15 +253,17 @@ def request_secret(name: str, description: str | None = None, *,
             f"kwarg(s) {sorted(kwargs)!r}: values are supplied by the user "
             "through the in-chat form, never through the agent"
         )
-    row = _append_pending({
-        "id": f"pr_{uuid.uuid4().hex[:12]}",
-        "kind": "secret_request",
-        "bot_id": bot_id,
-        "name": name,
-        "description": description or "",
-        "created_at": _now(),
-        "status": "awaiting_user",
-    })
+    row = _append_pending(
+        {
+            "id": f"pr_{uuid.uuid4().hex[:12]}",
+            "kind": "secret_request",
+            "bot_id": bot_id,
+            "name": name,
+            "description": description or "",
+            "created_at": _now(),
+            "status": "awaiting_user",
+        }
+    )
     # THE PRODUCER HALF of the secret_request SSE path: enqueue into the
     # org-request queue ui/server.py drains as `event: secret_request` frames
     # on this bot's next /api/chat stream. Without this the frames can never
@@ -255,12 +272,15 @@ def request_secret(name: str, description: str | None = None, *,
     # itself — the pending row is the source of truth.
     profile = bot_id or "principal"
     try:
-        enqueue_org_request(profile, {
-            "kind": "secret_request",
-            "bot": profile,
-            "name": name,
-            "description": description or "",
-        })
+        enqueue_org_request(
+            profile,
+            {
+                "kind": "secret_request",
+                "bot": profile,
+                "name": name,
+                "description": description or "",
+            },
+        )
     except Exception:
         pass
     return {
@@ -286,13 +306,15 @@ def list_org_secrets(bot_id: str) -> list[dict]:
     }
     rows = []
     for s in reg["secrets"]:
-        rows.append({
-            "name": s["name"],
-            "description": s.get("description", ""),
-            "granted": (s["name"], s["org"]) in granted_keys,
-            "origin_org": s["org"],
-            "fingerprint": s.get("fingerprint", "…"),
-        })
+        rows.append(
+            {
+                "name": s["name"],
+                "description": s.get("description", ""),
+                "granted": (s["name"], s["org"]) in granted_keys,
+                "origin_org": s["org"],
+                "fingerprint": s.get("fingerprint", "…"),
+            }
+        )
     rows.sort(key=lambda r: (r["origin_org"], r["name"]))
     return rows
 
@@ -302,25 +324,30 @@ def request_secret_access(bot_id: str, name: str, reason: str) -> dict:
     _require_str(bot_id, "bot_id")
     _require_str(name, "name")
     _require_str(reason, "reason")
-    row = _append_pending({
-        "id": f"pr_{uuid.uuid4().hex[:12]}",
-        "kind": "secret_access_request",
-        "bot_id": bot_id,
-        "name": name,
-        "reason": reason,
-        "created_at": _now(),
-        "status": "awaiting_user",
-    })
+    row = _append_pending(
+        {
+            "id": f"pr_{uuid.uuid4().hex[:12]}",
+            "kind": "secret_access_request",
+            "bot_id": bot_id,
+            "name": name,
+            "reason": reason,
+            "created_at": _now(),
+            "status": "awaiting_user",
+        }
+    )
     # Producer half: same org-request queue as request_secret (see there) —
     # drained as `event: secret_access_request` SSE frames. Failure here never
     # fails the request; the pending row is the source of truth.
     try:
-        enqueue_org_request(bot_id, {
-            "kind": "secret_access_request",
-            "bot": bot_id,
-            "name": name,
-            "reason": reason,
-        })
+        enqueue_org_request(
+            bot_id,
+            {
+                "kind": "secret_access_request",
+                "bot": bot_id,
+                "name": name,
+                "reason": reason,
+            },
+        )
     except Exception:
         pass
     return {
@@ -345,7 +372,7 @@ def list_org_skills(bot_id: str) -> list[dict] | dict:
             return {
                 "skills": [],
                 "reason": f"skill registry not found at {skill_registry} — "
-                          "the skills layer (build step 6) is not set up yet",
+                "the skills layer (build step 6) is not set up yet",
             }
         return []
     rows = [
@@ -416,29 +443,34 @@ def message_agent(from_bot: str, to_bot: str, message: str, **kwargs) -> dict:
         raise ValueError(
             "message_agent accepts no extra kwarg(s) "
             f"{sorted(kwargs)!r} — bots cannot smuggle sender identity, "
-            "system fields, or roles through this tool")
+            "system fields, or roles through this tool"
+        )
     if from_bot.strip().lower() in _OWNER_IDENTITIES:
         raise ValueError(
             f"{from_bot!r} is a human identity — a bot can never message an "
-            "agent as the owner; the owner talks to bots directly")
+            "agent as the owner; the owner talks to bots directly"
+        )
     if from_bot.strip() == to_bot.strip():
         raise ValueError("a bot cannot message itself")
     rostered = _rostered_ids()
     if to_bot.strip() not in rostered:
         raise ValueError(
             f"{to_bot!r} is not in the fleet roster — only rostered bots "
-            "are messageable")
+            "are messageable"
+        )
     summary = message.strip().splitlines()[0][:120] if message.strip() else ""
     # The delivery itself: the target's inbox.
-    _append_pending({
-        "id": f"ma_{uuid.uuid4().hex[:12]}",
-        "kind": "agent_message",
-        "bot_id": to_bot.strip(),
-        "from_bot": from_bot.strip(),
-        "message": message,
-        "created_at": _now(),
-        "status": "delivered",
-    })
+    _append_pending(
+        {
+            "id": f"ma_{uuid.uuid4().hex[:12]}",
+            "kind": "agent_message",
+            "bot_id": to_bot.strip(),
+            "from_bot": from_bot.strip(),
+            "message": message,
+            "created_at": _now(),
+            "status": "delivered",
+        }
+    )
     # The visible handoff frame for the target's chat stream.
     try:
         frame = enqueue_handoff(from_bot.strip(), to_bot.strip(), summary)
@@ -455,9 +487,15 @@ def message_agent(from_bot: str, to_bot: str, message: str, **kwargs) -> dict:
     }
 
 
-def request_intervention(bot_id: str, reason: str, hint: str = "",
-                         url: str = "", timeout: float = 120.0,
-                         wait: bool = True, poll_interval: float = 0.25) -> dict:
+def request_intervention(
+    bot_id: str,
+    reason: str,
+    hint: str = "",
+    url: str = "",
+    timeout: float = 120.0,
+    wait: bool = True,
+    poll_interval: float = 0.25,
+) -> dict:
     """A bot asks for human intervention (captcha, login, 2FA) and pauses its turn."""
     _require_str(bot_id, "bot_id")
     _require_str(reason, "reason")
@@ -467,6 +505,7 @@ def request_intervention(bot_id: str, reason: str, hint: str = "",
         state as _iv_state,
         what_the_bot_was_told as _what_told,
     )
+
     rec = _req_iv(bot_id=bot_id, reason=reason, hint=hint, url=url, timeout=timeout)
     enqueue_intervention(rec)
     token = rec["resume_token"]
@@ -521,6 +560,7 @@ def record_growth_audit(
 ) -> dict:
     """Record a growth-loop change with rollback instructions into the audit ledger."""
     from balabot.growth import record_audit_entry
+
     return record_audit_entry(
         action=action,
         target=target,
@@ -541,6 +581,7 @@ def rollback_growth_audit(
 ) -> dict:
     """Reverse a previous growth-loop change recorded in the audit ledger."""
     from balabot.growth import rollback_audit_entry
+
     return rollback_audit_entry(change_id, name=name, reason=reason)
 
 
@@ -568,16 +609,14 @@ def propose_bot(
     _require_str(name, "name")
     _require_str(role, "role")
     if kwargs:
-        raise ValueError(
-            "propose_bot accepts no extra kwarg(s) "
-            f"{sorted(kwargs)!r}"
-        )
+        raise ValueError(f"propose_bot accepts no extra kwarg(s) {sorted(kwargs)!r}")
     if proposing_bot.strip().lower() in _OWNER_IDENTITIES:
         raise ValueError(
             f"{proposing_bot!r} is a human identity — a bot can never propose "
             "an agent as the owner; use the proposing bot's own id"
         )
     from balabot import bot_creation
+
     try:
         spooled = bot_creation.spool_proposal(
             name=name.strip(),
@@ -590,13 +629,16 @@ def propose_bot(
         raise ValueError(str(exc)) from exc
 
     try:
-        enqueue_org_request(proposing_bot.strip(), {
-            "kind": "bot_proposal",
-            "bot": proposing_bot.strip(),
-            "name": spooled["name"],
-            "role": spooled["role"],
-            "reason": spooled["reason"],
-        })
+        enqueue_org_request(
+            proposing_bot.strip(),
+            {
+                "kind": "bot_proposal",
+                "bot": proposing_bot.strip(),
+                "name": spooled["name"],
+                "role": spooled["role"],
+                "reason": spooled["reason"],
+            },
+        )
     except Exception:
         pass
 
@@ -683,9 +725,13 @@ def secret_request(
     method = (method or "GET").upper()
 
     parsed = urllib.parse.urlsplit(url)
-    origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else (parsed.scheme or "")
+    origin = (
+        f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else (parsed.scheme or "")
+    )
     if parsed.scheme not in ("http", "https"):
-        _record_secret_audit(bot_id, name, origin, method, "refused", "invalid URL scheme")
+        _record_secret_audit(
+            bot_id, name, origin, method, "refused", "invalid URL scheme"
+        )
         return {
             "ok": False,
             "error": f"invalid scheme {parsed.scheme!r}; only http/https allowed",
@@ -698,7 +744,14 @@ def secret_request(
     grants = orgs.grants_for(bot_id, kind="secret")
     grant = next((g for g in grants if g.get("resource", {}).get("name") == name), None)
     if grant is None:
-        _record_secret_audit(bot_id, name, origin, method, "refused", f"bot {bot_id!r} has no grant for secret {name!r}")
+        _record_secret_audit(
+            bot_id,
+            name,
+            origin,
+            method,
+            "refused",
+            f"bot {bot_id!r} has no grant for secret {name!r}",
+        )
         return {
             "ok": False,
             "error": f"bot {bot_id!r} has no grant for secret {name!r}",
@@ -709,12 +762,20 @@ def secret_request(
 
     # Per-secret origin allowlist enforcement
     reg = orgs.load()
-    sec_meta = next((s for s in reg.get("secrets", [])
-                     if s.get("name") == name and s.get("org") == resource_org), None)
+    sec_meta = next(
+        (
+            s
+            for s in reg.get("secrets", [])
+            if s.get("name") == name and s.get("org") == resource_org
+        ),
+        None,
+    )
     allowed_origins = (sec_meta or {}).get("allowed_origins")
     if allowed_origins:
         if origin not in allowed_origins and hostname not in allowed_origins:
-            _record_secret_audit(bot_id, name, origin, method, "refused", "origin not in allowed_origins")
+            _record_secret_audit(
+                bot_id, name, origin, method, "refused", "origin not in allowed_origins"
+            )
             return {
                 "ok": False,
                 "error": f"origin {origin!r} not in allowed origins for secret {name!r}",
@@ -723,7 +784,9 @@ def secret_request(
 
     # SSRF protection: reject loopback, link-local, private networks
     if hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-        _record_secret_audit(bot_id, name, origin, method, "refused", "SSRF blocked: loopback address")
+        _record_secret_audit(
+            bot_id, name, origin, method, "refused", "SSRF blocked: loopback address"
+        )
         return {
             "ok": False,
             "error": f"SSRF blocked: destination {hostname} is a loopback address",
@@ -733,8 +796,16 @@ def secret_request(
     target_ip = None
     try:
         ip = ipaddress.ip_address(hostname)
-        if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
-            _record_secret_audit(bot_id, name, origin, method, "refused", f"SSRF blocked: {ip}")
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            _record_secret_audit(
+                bot_id, name, origin, method, "refused", f"SSRF blocked: {ip}"
+            )
             return {
                 "ok": False,
                 "error": f"SSRF blocked: destination {hostname} is a prohibited address",
@@ -748,8 +819,21 @@ def secret_request(
             addr_infos = socket.getaddrinfo(hostname, port)
             for family, socktype, proto, canonname, sockaddr in addr_infos:
                 resolved_ip = ipaddress.ip_address(sockaddr[0])
-                if resolved_ip.is_loopback or resolved_ip.is_private or resolved_ip.is_link_local or resolved_ip.is_reserved or resolved_ip.is_unspecified:
-                    _record_secret_audit(bot_id, name, origin, method, "refused", f"SSRF blocked: {resolved_ip}")
+                if (
+                    resolved_ip.is_loopback
+                    or resolved_ip.is_private
+                    or resolved_ip.is_link_local
+                    or resolved_ip.is_reserved
+                    or resolved_ip.is_unspecified
+                ):
+                    _record_secret_audit(
+                        bot_id,
+                        name,
+                        origin,
+                        method,
+                        "refused",
+                        f"SSRF blocked: {resolved_ip}",
+                    )
                     return {
                         "ok": False,
                         "error": f"SSRF blocked: destination {hostname} resolves to prohibited address {resolved_ip}",
@@ -763,7 +847,14 @@ def secret_request(
     # Retrieve and decrypt secret
     secret_val = orgs.read_secret_value(resource_org, name)
     if secret_val is None:
-        _record_secret_audit(bot_id, name, origin, method, "refused", "secret decryption failed or missing")
+        _record_secret_audit(
+            bot_id,
+            name,
+            origin,
+            method,
+            "refused",
+            "secret decryption failed or missing",
+        )
         return {
             "ok": False,
             "error": f"secret {name!r} could not be retrieved or decrypted",
@@ -781,7 +872,14 @@ def secret_request(
     transport = _get_http_transport()
     if transport is None:
         if target_ip is None:
-            _record_secret_audit(bot_id, name, origin, method, "refused", f"SSRF blocked: unable to resolve destination {hostname}")
+            _record_secret_audit(
+                bot_id,
+                name,
+                origin,
+                method,
+                "refused",
+                f"SSRF blocked: unable to resolve destination {hostname}",
+            )
             return {
                 "ok": False,
                 "error": f"SSRF blocked: unable to resolve destination {hostname}",
@@ -790,11 +888,20 @@ def secret_request(
         transport = _make_pinned_transport(target_ip)
 
     try:
-        with httpx.Client(transport=transport, follow_redirects=False, timeout=30.0) as client:
+        with httpx.Client(
+            transport=transport, follow_redirects=False, timeout=30.0
+        ) as client:
             if isinstance(body, dict):
-                resp = client.request(method=method, url=url, headers=req_headers, json=body)
+                resp = client.request(
+                    method=method, url=url, headers=req_headers, json=body
+                )
             elif isinstance(body, str):
-                resp = client.request(method=method, url=url, headers=req_headers, content=body.encode("utf-8"))
+                resp = client.request(
+                    method=method,
+                    url=url,
+                    headers=req_headers,
+                    content=body.encode("utf-8"),
+                )
             else:
                 resp = client.request(method=method, url=url, headers=req_headers)
     except SSRFBlockedError as exc:
@@ -805,7 +912,14 @@ def secret_request(
             "status_code": 400,
         }
     except Exception as exc:
-        _record_secret_audit(bot_id, name, origin, method, "error", f"request failed: {type(exc).__name__}")
+        _record_secret_audit(
+            bot_id,
+            name,
+            origin,
+            method,
+            "error",
+            f"request failed: {type(exc).__name__}",
+        )
         return {
             "ok": False,
             "error": f"request failed: {type(exc).__name__}",
@@ -823,7 +937,9 @@ def secret_request(
             v = v.replace(secret_val, "[REDACTED_SECRET]")
         scrubbed_headers[k] = v
 
-    _record_secret_audit(bot_id, name, origin, method, "allowed", response_status=resp.status_code)
+    _record_secret_audit(
+        bot_id, name, origin, method, "allowed", response_status=resp.status_code
+    )
 
     return {
         "ok": resp.is_success,
@@ -840,6 +956,18 @@ def _json_out(obj) -> None:
     print(json.dumps(obj, indent=2, sort_keys=True))
 
 
+def _check_gate(tool: str, args: dict, scope: str | None) -> dict | None:
+    """Classify + gate one tool call through the approval ledger.
+
+    Every call is logged (the classifier is explicit and auditable). Returns
+    the refusal/expiry/replay body to print — which STOPS the dispatch — or
+    None when the call may proceed (observe, unenforced, or approved)."""
+    gate = approvals.check_mutation(tool, args, scope=scope)
+    if gate.get("decision") in ("refused", "replay", "expired"):
+        return gate
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     tool = argv[0] if argv else ""
@@ -851,12 +979,35 @@ def main(argv: list[str] | None = None) -> int:
         "request_secret_access": ["--bot", "--name", "--reason"],
         "list_org_skills": ["--bot"],
         "message_agent": ["--from", "--to", "--message"],
-        "request_intervention": ["--bot", "--reason", "--hint", "--url", "--timeout", "--no-wait"],
+        "request_intervention": [
+            "--bot",
+            "--reason",
+            "--hint",
+            "--url",
+            "--timeout",
+            "--no-wait",
+        ],
         "list_pending_requests": ["--bot"],
-        "record_growth_audit": ["--action", "--target", "--description", "--author", "--patch", "--bot"],
+        "record_growth_audit": [
+            "--action",
+            "--target",
+            "--description",
+            "--author",
+            "--patch",
+            "--bot",
+        ],
         "rollback_growth_audit": ["--change-id", "--reason", "--bot"],
         "propose_bot": ["--bot", "--name", "--role", "--reason", "--model"],
-        "secret_request": ["--bot", "--name", "--url", "--method", "--headers", "--body", "--auth-header", "--auth-scheme"],
+        "secret_request": [
+            "--bot",
+            "--name",
+            "--url",
+            "--method",
+            "--headers",
+            "--body",
+            "--auth-header",
+            "--auth-scheme",
+        ],
     }
     allowed = known_flags.get(tool)
     if allowed is not None:
@@ -864,9 +1015,12 @@ def main(argv: list[str] | None = None) -> int:
         if unknown:
             # Especially: no flag here may ever carry a secret VALUE — argv is
             # explicitly a no-secret zone per the spec.
-            print(f"error: unknown option(s) {unknown!r} for {tool}; "
-                  f"accepted: {allowed}. Note: no bot-tools CLI accepts a "
-                  "secret value.", file=sys.stderr)
+            print(
+                f"error: unknown option(s) {unknown!r} for {tool}; "
+                f"accepted: {allowed}. Note: no bot-tools CLI accepts a "
+                "secret value.",
+                file=sys.stderr,
+            )
             return 1
 
     def _opt(flag: str, default=None):
@@ -877,8 +1031,241 @@ def main(argv: list[str] | None = None) -> int:
             name = _opt("--name")
             if not name:
                 raise ValueError("request_secret needs --name <NAME>")
-            _json_out(request_secret(name, _opt("--description"),
-                                     bot_id=_opt("--bot")))
+            gate = _check_gate(
+                "request_secret",
+                {
+                    "name": name,
+                    "description": _opt("--description"),
+                    "bot_id": _opt("--bot"),
+                },
+                scope=_opt("--bot"),
+            )
+            if gate:
+                _json_out(gate)
+                return 0
+            _json_out(request_secret(name, _opt("--description"), bot_id=_opt("--bot")))
+            return 0
+        if tool == "list_org_secrets":
+            bot = _opt("--bot")
+            if not bot:
+                raise ValueError("list_org_secrets needs --bot <id>")
+            gate = _check_gate("list_org_secrets", {"bot_id": bot}, scope=bot)
+            if gate:
+                _json_out(gate)
+                return 0
+            _json_out(list_org_secrets(bot))
+            return 0
+        if tool == "request_secret_access":
+            bot, name = _opt("--bot"), _opt("--name")
+            reason = _opt("--reason")
+            if not (bot and name and reason):
+                raise ValueError("request_secret_access needs --bot, --name, --reason")
+            gate = _check_gate(
+                "request_secret_access",
+                {"bot_id": bot, "name": name, "reason": reason},
+                scope=bot,
+            )
+            if gate:
+                _json_out(gate)
+                return 0
+            _json_out(request_secret_access(bot, name, reason))
+            return 0
+        if tool == "list_org_skills":
+            bot = _opt("--bot")
+            if not bot:
+                raise ValueError("list_org_skills needs --bot <id>")
+            gate = _check_gate("list_org_skills", {"bot_id": bot}, scope=bot)
+            if gate:
+                _json_out(gate)
+                return 0
+            _json_out(list_org_skills(bot))
+            return 0
+        if tool == "message_agent":
+            src, dst, msg = _opt("--from"), _opt("--to"), _opt("--message")
+            if not (src and dst and msg):
+                raise ValueError("message_agent needs --from, --to, --message")
+            gate = _check_gate(
+                "message_agent", {"from": src, "to": dst, "message": msg}, scope=src
+            )
+            if gate:
+                _json_out(gate)
+                return 0
+            _json_out(message_agent(src, dst, msg))
+            return 0
+        if tool == "request_intervention":
+            bot, reason = _opt("--bot"), _opt("--reason")
+            if not (bot and reason):
+                raise ValueError("request_intervention needs --bot, --reason")
+            gate = _check_gate(
+                "request_intervention",
+                {
+                    "bot_id": bot,
+                    "reason": reason,
+                    "hint": _opt("--hint", ""),
+                    "url": _opt("--url", ""),
+                },
+                scope=bot,
+            )
+            if gate:
+                _json_out(gate)
+                return 0
+            timeout_str = _opt("--timeout", "120.0")
+            try:
+                timeout = float(timeout_str)
+            except ValueError:
+                timeout = 120.0
+            wait = "--no-wait" not in args
+            _json_out(
+                request_intervention(
+                    bot,
+                    reason,
+                    hint=_opt("--hint", ""),
+                    url=_opt("--url", ""),
+                    timeout=timeout,
+                    wait=wait,
+                )
+            )
+            return 0
+        if tool == "list_pending_requests":
+            gate = _check_gate(
+                "list_pending_requests", {"bot_id": _opt("--bot")}, scope=_opt("--bot")
+            )
+            if gate:
+                _json_out(gate)
+                return 0
+            _json_out(list_pending_requests(_opt("--bot")))
+            return 0
+        if tool == "record_growth_audit":
+            action, target, desc = (
+                _opt("--action"),
+                _opt("--target"),
+                _opt("--description"),
+            )
+            if not (action and target and desc):
+                raise ValueError(
+                    "record_growth_audit needs --action, --target, --description"
+                )
+            gate = _check_gate(
+                "record_growth_audit",
+                {
+                    "action": action,
+                    "target": target,
+                    "description": desc,
+                    "author": _opt("--author", "principal"),
+                    "rollback_patch": _opt("--patch"),
+                    "name": _opt("--bot", "principal"),
+                },
+                scope=_opt("--bot", "principal"),
+            )
+            if gate:
+                _json_out(gate)
+                return 0
+            _json_out(
+                record_growth_audit(
+                    action,
+                    target,
+                    desc,
+                    author=_opt("--author", "principal"),
+                    rollback_patch=_opt("--patch"),
+                    name=_opt("--bot", "principal"),
+                )
+            )
+            return 0
+        if tool == "rollback_growth_audit":
+            cid = _opt("--change-id")
+            if not cid:
+                raise ValueError("rollback_growth_audit needs --change-id <ID>")
+            gate = _check_gate(
+                "rollback_growth_audit",
+                {
+                    "change_id": cid,
+                    "reason": _opt("--reason", ""),
+                    "name": _opt("--bot", "principal"),
+                },
+                scope=_opt("--bot", "principal"),
+            )
+            if gate:
+                _json_out(gate)
+                return 0
+            _json_out(
+                rollback_growth_audit(
+                    cid,
+                    reason=_opt("--reason", ""),
+                    name=_opt("--bot", "principal"),
+                )
+            )
+            return 0
+        if tool == "propose_bot":
+            bot, name, role = _opt("--bot"), _opt("--name"), _opt("--role")
+            if not (bot and name and role):
+                raise ValueError("propose_bot needs --bot, --name, --role")
+            gate = _check_gate(
+                "propose_bot",
+                {
+                    "bot_id": bot,
+                    "name": name,
+                    "role": role,
+                    "reason": _opt("--reason", ""),
+                    "model": _opt("--model"),
+                    "proposed_by": bot,
+                },
+                scope=bot,
+            )
+            if gate:
+                _json_out(gate)
+                return 0
+            _json_out(
+                propose_bot(
+                    bot,
+                    name,
+                    role,
+                    reason=_opt("--reason", ""),
+                    model=_opt("--model"),
+                )
+            )
+            return 0
+        if tool == "secret_request":
+            bot, name, url = _opt("--bot"), _opt("--name"), _opt("--url")
+            if not (bot and name and url):
+                raise ValueError("secret_request needs --bot, --name, --url")
+            headers_raw = _opt("--headers")
+            headers = json.loads(headers_raw) if headers_raw else None
+            body_raw = _opt("--body")
+            if body_raw:
+                try:
+                    body = json.loads(body_raw)
+                except Exception:
+                    body = body_raw
+            else:
+                body = None
+            gate = _check_gate(
+                "secret_request",
+                {
+                    "name": name,
+                    "url": url,
+                    "method": _opt("--method", "GET"),
+                    "headers": headers,
+                    "body": body,
+                    "auth_header": _opt("--auth-header", "Authorization"),
+                    "auth_scheme": _opt("--auth-scheme", "Bearer"),
+                },
+                scope=bot,
+            )
+            if gate:
+                _json_out(gate)
+                return 0
+            _json_out(
+                secret_request(
+                    bot,
+                    name,
+                    url,
+                    method=_opt("--method", "GET"),
+                    headers=headers,
+                    body=body,
+                    auth_header=_opt("--auth-header", "Authorization"),
+                    auth_scheme=_opt("--auth-scheme", "Bearer"),
+                )
+            )
             return 0
         if tool == "list_org_secrets":
             bot = _opt("--bot")
@@ -915,47 +1302,66 @@ def main(argv: list[str] | None = None) -> int:
             except ValueError:
                 timeout = 120.0
             wait = "--no-wait" not in args
-            _json_out(request_intervention(
-                bot, reason,
-                hint=_opt("--hint", ""),
-                url=_opt("--url", ""),
-                timeout=timeout,
-                wait=wait,
-            ))
+            _json_out(
+                request_intervention(
+                    bot,
+                    reason,
+                    hint=_opt("--hint", ""),
+                    url=_opt("--url", ""),
+                    timeout=timeout,
+                    wait=wait,
+                )
+            )
             return 0
         if tool == "list_pending_requests":
             _json_out(list_pending_requests(_opt("--bot")))
             return 0
         if tool == "record_growth_audit":
-            action, target, desc = _opt("--action"), _opt("--target"), _opt("--description")
+            action, target, desc = (
+                _opt("--action"),
+                _opt("--target"),
+                _opt("--description"),
+            )
             if not (action and target and desc):
-                raise ValueError("record_growth_audit needs --action, --target, --description")
-            _json_out(record_growth_audit(
-                action, target, desc,
-                author=_opt("--author", "principal"),
-                rollback_patch=_opt("--patch"),
-                name=_opt("--bot", "principal"),
-            ))
+                raise ValueError(
+                    "record_growth_audit needs --action, --target, --description"
+                )
+            _json_out(
+                record_growth_audit(
+                    action,
+                    target,
+                    desc,
+                    author=_opt("--author", "principal"),
+                    rollback_patch=_opt("--patch"),
+                    name=_opt("--bot", "principal"),
+                )
+            )
             return 0
         if tool == "rollback_growth_audit":
             cid = _opt("--change-id")
             if not cid:
                 raise ValueError("rollback_growth_audit needs --change-id <ID>")
-            _json_out(rollback_growth_audit(
-                cid,
-                reason=_opt("--reason", ""),
-                name=_opt("--bot", "principal"),
-            ))
+            _json_out(
+                rollback_growth_audit(
+                    cid,
+                    reason=_opt("--reason", ""),
+                    name=_opt("--bot", "principal"),
+                )
+            )
             return 0
         if tool == "propose_bot":
             bot, name, role = _opt("--bot"), _opt("--name"), _opt("--role")
             if not (bot and name and role):
                 raise ValueError("propose_bot needs --bot, --name, --role")
-            _json_out(propose_bot(
-                bot, name, role,
-                reason=_opt("--reason", ""),
-                model=_opt("--model"),
-            ))
+            _json_out(
+                propose_bot(
+                    bot,
+                    name,
+                    role,
+                    reason=_opt("--reason", ""),
+                    model=_opt("--model"),
+                )
+            )
             return 0
         if tool == "secret_request":
             bot, name, url = _opt("--bot"), _opt("--name"), _opt("--url")
@@ -971,31 +1377,37 @@ def main(argv: list[str] | None = None) -> int:
                     body = body_raw
             else:
                 body = None
-            _json_out(secret_request(
-                bot, name, url,
-                method=_opt("--method", "GET"),
-                headers=headers,
-                body=body,
-                auth_header=_opt("--auth-header", "Authorization"),
-                auth_scheme=_opt("--auth-scheme", "Bearer"),
-            ))
+            _json_out(
+                secret_request(
+                    bot,
+                    name,
+                    url,
+                    method=_opt("--method", "GET"),
+                    headers=headers,
+                    body=body,
+                    auth_header=_opt("--auth-header", "Authorization"),
+                    auth_scheme=_opt("--auth-scheme", "Bearer"),
+                )
+            )
             return 0
     except (ValueError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    print("usage: python -m balabot.bot_tools "
-          "request_secret --name N [--description D] [--bot B] | "
-          "list_org_secrets --bot B | "
-          "request_secret_access --bot B --name N --reason R | "
-          "list_org_skills --bot B | "
-          "message_agent --from B --to B --message M | "
-          "request_intervention --bot B --reason R [--hint H] [--url U] [--timeout T] [--no-wait] | "
-          "list_pending_requests [--bot B] | "
-          "record_growth_audit --action A --target T --description D [--author AU] [--patch P] [--bot B] | "
-          "rollback_growth_audit --change-id ID [--reason R] [--bot B] | "
-          "propose_bot --bot B --name N --role R [--reason REASON] [--model M] | "
-          "secret_request --bot B --name N --url U [--method M] [--headers H] [--body BD] [--auth-header AH] [--auth-scheme AS]",
-          file=sys.stderr)
+    print(
+        "usage: python -m balabot.bot_tools "
+        "request_secret --name N [--description D] [--bot B] | "
+        "list_org_secrets --bot B | "
+        "request_secret_access --bot B --name N --reason R | "
+        "list_org_skills --bot B | "
+        "message_agent --from B --to B --message M | "
+        "request_intervention --bot B --reason R [--hint H] [--url U] [--timeout T] [--no-wait] | "
+        "list_pending_requests [--bot B] | "
+        "record_growth_audit --action A --target T --description D [--author AU] [--patch P] [--bot B] | "
+        "rollback_growth_audit --change-id ID [--reason R] [--bot B] | "
+        "propose_bot --bot B --name N --role R [--reason REASON] [--model M] | "
+        "secret_request --bot B --name N --url U [--method M] [--headers H] [--body BD] [--auth-header AH] [--auth-scheme AS]",
+        file=sys.stderr,
+    )
     return 2
 
 
