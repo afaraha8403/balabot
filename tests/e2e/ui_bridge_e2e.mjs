@@ -1485,6 +1485,117 @@ async function polarisComputerCoordinateMapping(browser) {
   return true;
 }
 
+// ── FIX RUN F1 — duplicate assistant turn on a single user message ───────────
+// Regression: after ONE user message, the number of rendered assistant turns
+// must equal the number of assistant rows the server holds for that session
+// (reported bug: 2 rendered vs 1 server). This is the fixed assertion for
+// docs/reviews/FIX-DUPLICATE-TURN.md.
+
+/**
+ * F1: exactly one user message -> rendered assistant turns == server rows.
+ * Fails if: the client renders a second copy of the assistant turn (a stale
+ * local no-identity copy + the server's authoritative row coexisting after
+ * the local content was transformed), which this suite proves was 2 != 1.
+ */
+async function f1SingleTurnRendersOnce(browser) {
+  const { ctx, page } = await openPage(browser);
+  await bootApp(page);
+  if (!(await findComposer(page))) { await ctx.close(); return record('F1', false, 'no composer'); }
+
+  // Fresh session, seeded client-side (same pattern as W2-10): the server
+  // creates it on first contact, so the server transcript for this session is
+  // exactly this one turn — nothing inherited from previous runs.
+  const stamp = Date.now().toString().slice(-6);
+  const sid = `s_f1_${stamp}_${Math.random().toString(36).slice(2, 6)}`;
+  await page.evaluate((id) => {
+    localStorage.clear();
+    localStorage.setItem('balabot.sessions.v1', JSON.stringify([{
+      id, botId: 'principal', title: 'f1', purpose: '', handoffs: [],
+      createdAt: 1, messages: [],
+    }]));
+    localStorage.setItem('balabot.lastBot.v1', 'principal');
+  }, sid);
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 40000 });
+  await bootApp(page);
+  if (!(await findComposer(page))) { await ctx.close(); return record('F1', false, 'no composer after reseed'); }
+
+  const msg = `I want to hire a marketing and SEO expert F1-${stamp}`;
+  await sendViaComposer(page, msg);
+  const seen = await waitForText(page, msg, 60000);
+
+  // Wait for the turn to settle: the live streaming bubble must have been seen
+  // (so we never mistake the pre-first-token idle window for completion), then
+  // it must be gone and the assistant bubble count stable across two polls (the
+  // server row arrives over SSE after the stream ends, possibly a beat later).
+  const deadline = Date.now() + 120000;
+  let rendered = -1;
+  let stable = 0;
+  let streamingSeen = false;
+  while (Date.now() < deadline) {
+    const st = await page.evaluate(() => {
+      const live = Boolean(document.querySelector('[data-message-id="progress:live"]'));
+      const bubbles = Array.from(document.querySelectorAll('[data-testid="message-bot-bubble"]'));
+      // The onboarding placeholder is local-only and never a server row; exclude
+      // it so rendered counts compare 1:1 with server transcript rows.
+      const assistants = bubbles.filter(b => !(b.textContent || '').startsWith('Hey — good to meet you')).length;
+      return { live, assistants };
+    }).catch(() => ({ live: true, assistants: -1 }));
+    if (st.live) {
+      streamingSeen = true;
+      stable = 0;
+    } else if (streamingSeen && st.assistants > 0) {
+      if (st.assistants === rendered) {
+        stable += 1;
+        if (stable >= 2) { rendered = st.assistants; break; }
+      } else {
+        rendered = st.assistants;
+        stable = 0;
+      }
+    }
+    await sleep(1200);
+  }
+
+  // Ground truth: the server's durable transcript for this session.
+  const srv = await apiCall(page, 'GET', `/api/sessions/${encodeURIComponent(sid)}/messages`).catch(() => ({ ok: false }));
+  const srvMessages = (srv.ok && Array.isArray(srv.body?.messages)) ? srv.body.messages : [];
+  const serverAssistant = srvMessages.filter(m => m.role === 'assistant').length;
+  const serverUser = srvMessages.filter(m => m.role === 'user').length;
+
+  // Client-side cross-check: what did the merged transcript actually hold?
+  const client = await page.evaluate((id) => {
+    try {
+      const raw = localStorage.getItem('balabot.sessions.v1');
+      const s = (JSON.parse(raw) || []).find(x => x.id === id);
+      return {
+        assistant: s ? s.messages.filter(m => m.role === 'assistant').length : -1,
+        msgs: s ? s.messages.map(m => ({ r: m.role, seq: m.seq, id: m.id ? m.id.slice(0, 8) : undefined, len: (m.content || '').length })) : [],
+      };
+    } catch { return { assistant: -1, msgs: [] }; }
+  }, sid);
+
+  // Instrumented merge bookkeeping: which call appended the assistant row that
+  // produced the duplicate (evidence for the review doc).
+  const diag = await page.evaluate(() => {
+    const d = window.__mergeDiag || [];
+    return d.map(e => ({
+      at: e.at,
+      existingAssistant: e.existingAssistant,
+      incoming: e.incoming,
+      appends: e.appends,
+      resultAssistant: e.resultAssistant,
+    }));
+  }).catch(() => []);
+
+  await ctx.close();
+  const ok = seen && rendered === serverAssistant && serverAssistant === 1;
+  record('F1 single user message renders exactly as many assistant turns as server rows',
+    ok,
+    `rendered=${rendered} serverAssistant=${serverAssistant} serverUser=${serverUser} localClient=${client.assistant} ` +
+    `seen=${seen} clientMsgs=${JSON.stringify(client.msgs)} diagAppends=${JSON.stringify(diag.filter(e => e.appends.length).map(e => ({ in: e.incoming, appends: e.appends })))} ` +
+    `(fails if: client keeps a transformed local copy + the server row = 2 != 1)`);
+  return true;
+}
+
 // ── registry + main ─────────────────────────────────────────────────────────
 
 const RUNNABLE = [
@@ -1536,6 +1647,7 @@ const RUNNABLE = [
   ['polaris-composer-pickers-ime',        'Polaris composer pickers (@, /) and IME Enter guard',                () => polarisComposerPickersIme(browser)],
   ['polaris-settings-overlays',           'Polaris SettingsOverlay renders 7 tabs and handles Escape',          () => polarisSettingsOverlays(browser)],
   ['polaris-computer-coordinate-mapping', 'Polaris mapTeachPointer scales across aspect ratios',                () => polarisComputerCoordinateMapping(browser)],
+  ['f1',  'F1 one message -> rendered assistant turns == server rows',                                       () => f1SingleTurnRendersOnce(browser)],
 ];
 
 const PENDING = [
