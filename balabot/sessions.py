@@ -299,6 +299,19 @@ class SessionStore:
             raise SessionError("content must be a string")
         mid = message_id or f"m_{int(time.time() * 1000):x}_{secrets.token_hex(4)}"
         at = created_at or datetime.now(timezone.utc).isoformat()
+        row = self._conn.execute(
+            "SELECT message_id, session_id, role, content, created_at, seq FROM messages WHERE message_id = ?",
+            (mid,),
+        ).fetchone()
+        if row is not None:
+            return {
+                "message_id": row[0],
+                "session_id": row[1],
+                "role": row[2],
+                "content": row[3],
+                "created_at": row[4],
+                "seq": row[5],
+            }
         seq = self._next_seq(session_id)
         self._conn.execute(
             "INSERT INTO messages (message_id, session_id, role, content, created_at, seq) "
@@ -317,15 +330,23 @@ class SessionStore:
         }
 
     def messages(
-        self, session_id: str, *, limit: int | None = None
+        self,
+        session_id: str,
+        *,
+        since_seq: int | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Ordered conversation messages for a session: [{message_id, session_id, role, content, created_at, seq}, ...]."""
         self._require(session_id)
         query = (
             "SELECT message_id, session_id, role, content, created_at, seq FROM messages "
-            "WHERE session_id = ? ORDER BY seq ASC"
+            "WHERE session_id = ?"
         )
         params: list[Any] = [session_id]
+        if since_seq is not None and since_seq > 0:
+            query += " AND seq > ?"
+            params.append(since_seq)
+        query += " ORDER BY seq ASC"
         if limit is not None and limit > 0:
             query += " LIMIT ?"
             params.append(limit)
@@ -381,9 +402,11 @@ class SessionStore:
     def list_sessions(self, bot_id: str) -> list[dict[str, Any]]:
         """All sessions for a bot, newest activity first."""
         rows = self._conn.execute(
-            "SELECT session_id, purpose, next_seq, compaction_count, "
-            "last_compaction_at FROM sessions WHERE bot_id = ? "
-            "ORDER BY session_id",
+            "SELECT s.session_id, s.purpose, s.next_seq, s.compaction_count, "
+            "s.last_compaction_at, "
+            "(SELECT created_at FROM messages WHERE session_id = s.session_id ORDER BY seq DESC LIMIT 1) "
+            "FROM sessions s WHERE s.bot_id = ? "
+            "ORDER BY (SELECT created_at FROM messages WHERE session_id = s.session_id ORDER BY seq DESC LIMIT 1) DESC NULLS LAST, s.rowid DESC",
             (bot_id,),
         ).fetchall()
         return [
@@ -393,8 +416,9 @@ class SessionStore:
                 "next_seq": nseq,
                 "compaction_count": n,
                 "last_compaction_at": at,
+                "last_activity": last_act,
             }
-            for (sid, purpose, nseq, n, at) in rows
+            for (sid, purpose, nseq, n, at, last_act) in rows
         ]
 
     # ------------------------------------------------------------------

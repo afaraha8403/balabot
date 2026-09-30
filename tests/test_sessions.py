@@ -237,6 +237,42 @@ def test_messages_persist_across_reopen(tmp_path):
     reopened.close()
 
 
+def test_messages_since_seq_filtering(db):
+    """Messages can be filtered with since_seq cursor for catch-up replay."""
+    db.create_session("s_seq", "principal", "test sequence cursor")
+    m1 = db.record_message("s_seq", "user", "msg1")
+    m2 = db.record_message("s_seq", "assistant", "msg2")
+    m3 = db.record_message("s_seq", "user", "msg3")
+    assert [m1["seq"], m2["seq"], m3["seq"]] == [1, 2, 3]
+
+    after_1 = db.messages("s_seq", since_seq=1)
+    assert len(after_1) == 2
+    assert [m["seq"] for m in after_1] == [2, 3]
+
+    after_2 = db.messages("s_seq", since_seq=2)
+    assert len(after_2) == 1
+    assert [m["seq"] for m in after_2] == [3]
+
+    after_3 = db.messages("s_seq", since_seq=3)
+    assert len(after_3) == 0
+
+
+def test_record_message_idempotent_deduplication(db):
+    """Recording a message with an existing message_id returns the existing record without duplicating."""
+    db.create_session("s_dedup", "principal", "test dedup")
+    m1 = db.record_message("s_dedup", "user", "first attempt", message_id="msg_fixed_id")
+    assert m1["seq"] == 1
+    assert m1["content"] == "first attempt"
+
+    # Replay same message_id
+    m2 = db.record_message("s_dedup", "user", "first attempt", message_id="msg_fixed_id")
+    assert m2["message_id"] == "msg_fixed_id"
+    assert m2["seq"] == 1
+
+    msgs = db.messages("s_dedup")
+    assert len(msgs) == 1
+
+
 def test_messages_fail_loud_on_unknown_session(db):
     """P1-2: Attempting to record messages for a nonexistent session raises UnknownSession."""
     with pytest.raises(UnknownSession):
