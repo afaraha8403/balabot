@@ -45,6 +45,7 @@
 - Implement and wire attachments intake: `POST /api/attachments` upload, `GET /api/attachments/{id}/{name}`, Composer UI upload handling, and `/api/chat` context delivery.
 
 ### Fixes
+- Establish server as authoritative source of truth for conversation transcripts (Defect-Fix Pass B / W2): persist message transcripts with monotonic per-session sequence numbers and idempotent deduplication in `SessionStore` (`balabot/sessions.py`); expose `GET /api/sessions/{id}/messages` with `since_seq` cursor filtering and `/api/sessions/{id}/events` SSE multi-client live fanout with catch-up burst replay; rehydrate client state from server on mount and active session switch; converge interleaved sends to monotonic sequence order across browser contexts (`W2-1`, `W2-3`, `W2-10`, `W2-13`, `W2-15`, `W9-9`).
 - Render honest "steered" badge on queued messages applied at tool boundaries during active tool execution (W1-10).
 - Mark in-flight steer messages as delivered once the active turn completes (W1-1).
 - Display queued chip immediately on mid-turn message submission and pace anchor streams to keep turns genuinely in-flight during steering (W1-15).
