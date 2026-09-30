@@ -29,7 +29,7 @@ import {
   ClipboardDocumentCheckIcon,
   ClockIcon,
   Cog6ToothIcon,
-  CommandLineIcon,
+  ComputerDesktopIcon,
   CurrencyDollarIcon,
   DocumentDuplicateIcon,
   DocumentIcon,
@@ -95,7 +95,7 @@ export const IconCreateBot = wrap(PlusCircleIcon);
 /** The skill library — a separate concept from a bot's own memory. */
 export const IconSkills = wrap(WrenchScrewdriverIcon);
 /** The agent computer (live screen), NOT search. */
-export const IconAgentComputer = wrap(CommandLineIcon);
+export const IconAgentComputer = wrap(ComputerDesktopIcon);
 /** A bot's own memory & knowledge panel. */
 export const IconBotKnowledge = wrap(SparklesIcon);
 
