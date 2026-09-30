@@ -185,6 +185,7 @@ PASS | W1-2  drained msg not delivered w/o model   queued=True settled=queued de
 ## Commits
 
 ```
+000af24 docs(review): W1 steering-mailbox live acceptance + silent-restore harness fix
 028b2a5 test(e2e): send a valid Content-Length in the aborted-chat turn (W1-2)
 b893673 feat(queue): durable steering mailbox with honest, observable delivery state (W1-9/W1-2/W1-11)
 ```
