@@ -125,7 +125,7 @@ export function HoldEverythingControl({
       <button
         type="button"
         data-testid="hold-everything-control"
-        aria-label="Hold everything"
+        aria-label="Pause bot"
         aria-haspopup="menu"
         aria-expanded={isOpen}
         onClick={() => setIsOpen(prev => !prev)}
@@ -175,7 +175,7 @@ export function HoldEverythingControl({
           <line x1="12" y1="17" x2="12.01" y2="17" />
         </svg>
         <span>
-          {isPending ? 'Hold everything (Paused)' : 'Hold everything'}
+          {isPending ? 'Pausing…' : 'Pause bot'}
         </span>
       </button>
 
@@ -183,7 +183,7 @@ export function HoldEverythingControl({
       {isOpen ? (
         <div
           role="menu"
-          aria-label="Hold everything options"
+          aria-label="Pause bot options"
           style={{
             position: 'absolute',
             top: 'calc(100% + var(--spacing-1, 4px))',
@@ -367,7 +367,7 @@ export function HoldEverythingControl({
                   if (!busy && isStreaming) e.currentTarget.style.backgroundColor = 'rgba(233, 196, 106, 0.15)';
                 }}
               >
-                {busy ? 'Pausing…' : 'Pause turn (Hold everything)'}
+                {busy ? 'Pausing…' : 'Pause turn'}
               </button>
             ) : (
               <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
@@ -390,7 +390,7 @@ export function HoldEverythingControl({
                       fontFamily: 'inherit',
                     }}
                   >
-                    Approve & Continue
+                    Resume bot
                   </button>
                   <button
                     type="button"
