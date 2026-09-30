@@ -81,22 +81,19 @@ export function saveUnreadBots(ids: string[]) {
 
 
 /**
- * Sort conversation messages monotonically: server-sequenced messages
- * (seq) always precede unsequenced local messages, ordered strictly by seq.
- * Unsequenced messages are ordered by local timestamp (at).
+ * Sort conversation messages by server-authoritative timestamp (`at`).
+ * Every client adopts the server `created_at` the moment the fanout/merge
+ * matches its optimistic copy, so both clients compute the same order at
+ * every instant — even while one of the two messages has not yet adopted
+ * its server `seq`. Ordering never depends on whether a sequence number is
+ * present. `seq` only breaks ties between messages that share an instant
+ * (unsequenced locals sort after sequenced at the same timestamp).
  */
 export function sortMessages(messages: ChatMessage[]): ChatMessage[] {
   return [...messages].sort((a, b) => {
-    if (a.seq !== undefined && b.seq !== undefined) {
-      return a.seq - b.seq;
-    }
-    if (a.seq !== undefined && b.seq === undefined) {
-      return -1;
-    }
-    if (a.seq === undefined && b.seq !== undefined) {
-      return 1;
-    }
-    return (a.at || 0) - (b.at || 0);
+    const atDiff = (a.at || 0) - (b.at || 0);
+    if (atDiff !== 0) return atDiff;
+    return ((a.seq ?? Number.MAX_SAFE_INTEGER) - (b.seq ?? Number.MAX_SAFE_INTEGER));
   });
 }
 
@@ -125,10 +122,15 @@ export function mergeServerMessages(
            (m.role === sm.role && m.content === sm.content && (!m.seq || m.seq === sm.seq)),
     );
     if (idx >= 0) {
+      // The server echo of a locally-originated message: adopt the server
+      // sequence AND its created_at so this copy carries the same timestamp
+      // everywhere. Never append a second copy; in-place update only.
+      const adoptedAt = sm.created_at ? (Date.parse(sm.created_at) || 0) : 0;
       result[idx] = {
         ...result[idx],
         id: sm.message_id || result[idx].id,
         seq: sm.seq,
+        at: adoptedAt || result[idx].at,
       };
     } else {
       result.push({
