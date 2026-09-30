@@ -366,13 +366,15 @@ def _abort_chat_turn(body: dict) -> str:
     transcript of what the client saw before it walked away."""
     import http.client
 
-    conn = http.client.HTTPConnection("127.0.0.1", 9119, timeout=60)
+    conn = http.client.HTTPConnection("127.0.0.1", 9119, timeout=120)
     try:
+        raw = json.dumps(body).encode()
         conn.putrequest("POST", "/api/chat")
         conn.putheader("Authorization", _auth_header())
         conn.putheader("Content-Type", "application/json")
+        conn.putheader("Content-Length", str(len(raw)))
         conn.putheader("Accept", "text/event-stream")
-        conn.endheaders(json.dumps(body).encode())
+        conn.endheaders(raw)
         resp = conn.getresponse()
         head = b""
         try:
