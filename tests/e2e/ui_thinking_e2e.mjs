@@ -45,17 +45,39 @@ const seed = (showThinking) => `
   localStorage.setItem('balabot.lastBot.v1', 'principal');
   ${showThinking ? `localStorage.setItem('balabot.showThinking.v1', 'true');` : `localStorage.removeItem('balabot.showThinking.v1');`}
 `;
+/** Session-list-only re-seed: the running app persists the server's whole session
+ *  register into the same store, so on reload the newest live session — not the
+ *  fixture — becomes active. Re-seeding just the list keeps the fixture mounted
+ *  while leaving the user's showThinking choice (set by the toggle) untouched. */
+const seedSessions = () => `
+  localStorage.setItem('balabot.sessions.v1', JSON.stringify([{
+    id: 's_seed', botId: 'principal', title: 'Seed', createdAt: 1, handoffs: [],
+    messages: [
+      {role: 'user', content: 'Seed question', at: 1},
+      {role: 'assistant', content: 'CANARY_ANSWER_123', at: 2, thinking: ${JSON.stringify(CANARY)}}
+    ]
+  }]));
+  localStorage.setItem('balabot.lastBot.v1', 'principal');
+`;
 
 const bodyText = (page) => page.evaluate(() => document.body.innerText || '');
-/** Collapsible disclosures actually present in the DOM (element-level, not text). */
+/** Thinking disclosures actually in the DOM. Scoped to collapsibles whose trigger
+ *  reads "Thinking"/"Thinking…" — the bots sidebar also renders Astryx Collapsible
+ *  sections (OPS, GOVERNANCE, Hidden Bots) which are chrome, not reasoning. */
 const disclosures = (page) => page.evaluate(() =>
-  document.querySelectorAll('.astryx-collapsible').length);
-/** Wait until the rendered body contains `needle` (the seeded answer proves the
- *  session is mounted — without this, "nothing is rendered yet" reads as "hidden"). */
+  [...document.querySelectorAll('.astryx-collapsible')].filter(el =>
+    /^Thinking(…|\.\.\.)?$/.test(((el.querySelector('button, [role="button"]') || {}).innerText || '').trim())
+  ).length);
+/** Wait until the rendered transcript contains `needle` (the seeded answer proves
+ *  the session is mounted — without this, "nothing is rendered yet" reads as
+ *  "hidden"). Scoped to the transcript: the bots sidebar echoes the same text. */
 const waitForText = async (page, needle, timeoutMs = 20000) => {
   const start = Date.now();
   for (;;) {
-    const t = await bodyText(page);
+    const t = await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="transcript"]');
+      return (el ? el.innerText : document.body.innerText) || '';
+    });
     if (t.includes(needle)) return true;
     if (Date.now() - start > timeoutMs) return false;
     await sleep(500);
@@ -105,7 +127,11 @@ const collapsedOpen = (page) => page.evaluate(() => {
   return btn.getAttribute('aria-expanded');
 });
 const sendPrompt = async (page, text) => {
-  await page.evaluate(() => { const el = document.querySelector('[aria-label="Message input"]'); el.click(); el.focus(); });
+  await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="composer-fieldset"] textarea')
+      || document.querySelector('textarea[role="combobox"]') || document.querySelector('textarea');
+    el.click(); el.focus();
+  });
   await page.keyboard.type(text, { delay: 20 });
   await sleep(250);
   await page.evaluate(() => {
@@ -163,6 +189,7 @@ try {
   await sleep(500);
   const stored = await page.evaluate(() => localStorage.getItem('balabot.showThinking.v1'));
   record('t05 toggle choice persisted to storage', stored === 'true', `stored=${stored}`);
+  await page.evaluate(seedSessions());
   await page.reload({ waitUntil: 'domcontentloaded' });
   await waitForText(page, 'CANARY_ANSWER_123');
   await openBotSettings(page);
