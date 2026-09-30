@@ -427,8 +427,16 @@ async function w1s15(browser) {
   const { ctx, page } = await openPage(browser);
   await bootApp(page);
   if (!(await findComposer(page))) { await ctx.close(); return record('W1-15', false, 'no composer'); }
-  await sendViaComposer(page, 'slow anchor turn for queue chip');
-  await sleep(4000); // turn running
+  await sendViaComposer(page, 'anchor turn for queue chip');
+  // Event-based sync: the stop affordance exists only while a turn is in flight, so wait for the
+  // real signal instead of guessing with a fixed sleep (the turn's duration varies, and a message
+  // sent after it ends is correctly NOT queued — which read as a flake).
+  try {
+    await page.waitForSelector('.polaris-composer-btn-stop', { timeout: 20000 });
+  } catch {
+    await ctx.close();
+    return record('W1-15 queued chip appears within one SSE tick mid-turn', false, 'anchor turn never entered the in-flight state');
+  }
   const t0 = Date.now();
   await sendViaComposer(page, 'chip E2E-CHIP-15');
   let appeared = false;

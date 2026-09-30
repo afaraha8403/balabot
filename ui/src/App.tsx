@@ -888,7 +888,25 @@ export default function App() {
         ...s,
         messages: [...s.messages, userMsg],
       }));
-      void enqueueMessage(session.id, text, userMsgId, activeBot.id).catch(() => {});
+      void enqueueMessage(session.id, text, userMsgId, activeBot.id)
+        .then(res => {
+          if (!res?.ok) {
+            patchSession(session.id, s => ({
+              ...s,
+              messages: s.messages.map(m =>
+                m.id === userMsgId ? {...m, deliveryStatus: undefined} : m,
+              ),
+            }));
+          }
+        })
+        .catch(() => {
+          patchSession(session.id, s => ({
+            ...s,
+            messages: s.messages.map(m =>
+              m.id === userMsgId ? {...m, deliveryStatus: undefined} : m,
+            ),
+          }));
+        });
       return;
     }
 
