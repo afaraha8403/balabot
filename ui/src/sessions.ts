@@ -99,9 +99,15 @@ export function sortMessages(messages: ChatMessage[]): ChatMessage[] {
 
 /**
  * Merge incoming server-authoritative transcript messages with existing
- * client state. Deduplicates by message_id, sequence number, or content/role match.
- * Preserves optimistic UI properties (toolCalls, thinking, reactions) while updating
- * server sequence and ID.
+ * client state. Deduplicates by message_id, sequence number, or content/role match,
+ * and reconciles a server row that is the authoritative echo of a LOCAL-only turn
+ * (one still carrying no server identity because its content was transformed
+ * client-side after the fact — e.g. `parseDraftsFromContent`) instead of appending
+ * a second copy. The server row for a turn is never shadowed, and the client never
+ * keeps two copies of one turn. In the reverse order (the server row already landed
+ * before the client finished building its copy), the local copy is folded into the
+ * server-sequenced message. Preserves optimistic UI properties (toolCalls,
+ * thinking, drafts, reactions) while adopting server sequence and ID.
  */
 export function mergeServerMessages(
   existing: ChatMessage[],
@@ -132,17 +138,67 @@ export function mergeServerMessages(
         seq: sm.seq,
         at: adoptedAt || result[idx].at,
       };
-    } else {
-      result.push({
-        id: sm.message_id,
-        role: sm.role as 'user' | 'assistant' | 'system',
-        content: sm.content,
-        at: sm.created_at ? Date.parse(sm.created_at) || Date.now() : Date.now(),
-        seq: sm.seq,
-      });
+      continue;
     }
+
+    const hasServerIdentity = sm.seq !== undefined || !!sm.message_id;
+    const localEcho = hasServerIdentity ? findLocalEcho(result, sm) : -1;
+    if (localEcho >= 0) {
+      // The server row is the same turn as a local copy whose content was
+      // transformed in the client (so byte-equality can never match). Adopt the
+      // server's stable identity onto the local copy instead of appending it.
+      const adoptedAt = sm.created_at ? (Date.parse(sm.created_at) || 0) : 0;
+      result[localEcho] = {
+        ...result[localEcho],
+        id: sm.message_id || result[localEcho].id,
+        seq: sm.seq,
+        at: adoptedAt || result[localEcho].at,
+      };
+      continue;
+    }
+
+    if (!hasServerIdentity && result.length > 0) {
+      const tail = result.length - 1;
+      const last = result[tail];
+      if (last?.role === sm.role && last.seq !== undefined) {
+        // The server row for this turn already landed before the stream finished;
+        // fold the local-only fields (transformed content, drafts, thinking) onto
+        // the authoritative copy instead of appending a duplicate turn.
+        result[tail] = {...last, ...sm, id: last.id, seq: last.seq, at: last.at};
+        continue;
+      }
+    }
+
+    result.push({
+      id: sm.message_id,
+      role: sm.role as 'user' | 'assistant' | 'system',
+      content: sm.content,
+      at: sm.created_at ? Date.parse(sm.created_at) || Date.now() : Date.now(),
+      seq: sm.seq,
+    });
   }
   return sortMessages(result);
+}
+
+/**
+ * Find the local-only copy of the same turn as `sm`. Matches an authoritative
+ * server row that arrived while the client's finished-stream copy still carries no
+ * server identity (no seq/id). The candidate must be the tail of the transcript —
+ * the same-role message after the last server-sequenced message — so a stale local
+ * from an earlier turn is never adopted onto a later authoritative row.
+ */
+function findLocalEcho(result: ChatMessage[], sm: ServerMessage): number {
+  for (let i = result.length - 1; i >= 0; i--) {
+    const m = result[i];
+    if (m.role !== sm.role || m.seq !== undefined) continue;
+    // A later server-sequenced message means this local is not the turn tail.
+    let shadowed = false;
+    for (let j = i + 1; j < result.length; j++) {
+      if (result[j].seq !== undefined) { shadowed = true; break; }
+    }
+    if (!shadowed) return i;
+  }
+  return -1;
 }
 
 /**

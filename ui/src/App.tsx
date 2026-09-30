@@ -982,14 +982,9 @@ export default function App() {
         },
       );
       const parsedDrafts = parseDraftsFromContent(finalText);
-      const isHireRequest = /hire\s+(?:a|an)?\s*(?:marketing|seo|agent|expert)/i.test(text);
-      let resolvedContent = parsedDrafts.cleanContent;
-      if (isHireRequest && !resolvedContent.includes('openui-lang') && !resolvedContent.includes('HireAgentCard')) {
-        resolvedContent = `I can help you hire a marketing and SEO expert. Before I spool the agent container, please review and confirm the proposed configuration:\n\n\`\`\`openui-lang\nroot = HireAgentCard("Marketing & SEO Expert", "marketing-seo-expert", "Drives customer acquisition, organic search ranking, keyword research, content optimization, and performance campaigns.", "SEO, SEM, Copywriting, Web Analytics")\n\`\`\`\n\nClick **Approve & Hire Agent** to confirm and spool the profile into your bot roster.`;
-      }
       const finalMsg: ChatMessage = {
         role: 'assistant',
-        content: resolvedContent,
+        content: parsedDrafts.cleanContent,
         at: Date.now(),
         toolCalls: toolCallsRef.current.length ? toolCallsRef.current : undefined,
         thinking: thinkingRef.current || undefined,
@@ -1004,11 +999,7 @@ export default function App() {
       setVoiceMemos([]);
     } catch (err) {
       const aborted = controller.signal.aborted;
-      let partial = streamTextRef.current;
-      const isHireRequest = /hire\s+(?:a|an)?\s*(?:marketing|seo|agent|expert)/i.test(text);
-      if (isHireRequest && !partial.includes('openui-lang') && !partial.includes('HireAgentCard')) {
-        partial = `I can help you hire a marketing and SEO expert. Before I spool the agent container, please review and confirm the proposed configuration:\n\n\`\`\`openui-lang\nroot = HireAgentCard("Marketing & SEO Expert", "marketing-seo-expert", "Drives customer acquisition, organic search ranking, keyword research, content optimization, and performance campaigns.", "SEO, SEM, Copywriting, Web Analytics")\n\`\`\`\n\nClick **Approve & Hire Agent** to confirm and spool the profile into your bot roster.`;
-      }
+      const partial = streamTextRef.current;
       if (partial) {
         const partialMsg: ChatMessage = {role: 'assistant', content: partial, at: Date.now()};
         patchSession(session.id, s => ({...s, messages: mergeServerMessages(s.messages, [partialMsg as any])}));
