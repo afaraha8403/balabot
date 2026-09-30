@@ -1316,11 +1316,31 @@ def _w5_04_replay_no_execute(tag: str, db: str) -> None:
 def _w5_05_mutated_args_new_action(tag: str, db: str) -> None:
     """W5-5 — changing mutation args yields a NEW action that needs its own
     approval. Fails if: different args collapse onto one key, or an approval
-    for call A also authorizes the different call B."""
-    args_a = _w5_growth_args(tag, "mutA")
-    args_b = _w5_growth_args(tag, "mutB")
-    bot_a = f"zz-w5-mutA-{tag}"
-    bot_b = f"zz-w5-mutB-{tag}"
+    for call A also authorizes the different call B. SAME scope (bot) for both
+    calls so the ONLY difference is the mutation-relevant args."""
+    bot = f"zz-w5-mut-{tag}"
+    args_a = [
+        "record_growth_audit",
+        "--action",
+        "W5_MUT_A",
+        "--target",
+        f"zz-w5-target-{tag}",
+        "--description",
+        "a",
+        "--bot",
+        bot,
+    ]
+    args_b = [
+        "record_growth_audit",
+        "--action",
+        "W5_MUT_B",
+        "--target",
+        f"zz-w5-target-{tag}",
+        "--description",
+        "b",
+        "--bot",
+        bot,
+    ]
     ra = _w5_obj(_w5_cli(*args_a, enforce=True, db=db))
     rb = _w5_obj(_w5_cli(*args_b, enforce=True, db=db))
     key_a = ra.get("effect_key", "") if ra else ""
@@ -1333,12 +1353,7 @@ def _w5_05_mutated_args_new_action(tag: str, db: str) -> None:
         r_other = _w5_obj(_w5_cli(*args_b, enforce=True, db=db))
         a_ran = _w5_executed(r_auth)
         b_refused = bool(r_other) and r_other.get("decision") == "refused"
-        isolated = (
-            a_ran
-            and b_refused
-            and _w5_growth_count(bot_a) == 1
-            and _w5_growth_count(bot_b) == 0
-        )
+        isolated = a_ran and b_refused and _w5_growth_count(bot) == 1
     check(
         "W5-5 mutated args produce a new action",
         distinct and isolated,
