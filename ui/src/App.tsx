@@ -100,8 +100,11 @@ import {
   approveBotProposal,
   createApprovedBot,
   getActiveIntervention,
+  getServerMessages,
+  subscribeSessionEvents,
   type Bot,
   type ChatMessage,
+  type ServerMessage,
   type Handoff,
   type JevCarrier,
   type Session,
@@ -149,6 +152,8 @@ import {
   loadUnreadBots,
   saveUnreadBots,
   syncSessionsFromServer,
+  mergeServerMessages,
+  sortMessages,
 } from './sessions';
 
 /** Opening suggestions shown on the empty state. */
@@ -230,7 +235,10 @@ export default function App() {
   const [activeBotId, setActiveBotId] = useState<string | null>(null);
   const [rosterQuery, setRosterQuery] = useState('');
   const [sessions, setSessions] = useState<Session[]>(() => loadSessions());
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => {
+    const initial = loadSessions();
+    return initial[0]?.id ?? null;
+  });
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamText, setStreamText] = useState('');
   const [healthOk, setHealthOk] = useState<boolean | null>(null);
@@ -787,6 +795,44 @@ export default function App() {
     };
   }, [activeBotId, reloadBots]);
 
+  // Hydrate active session messages from server and subscribe to multi-client SSE fanout
+  useEffect(() => {
+    if (!activeSession?.id) return;
+    const sessId = activeSession.id;
+    let live = true;
+
+    // 1. Initial fetch from server
+    void getServerMessages(sessId)
+      .then(res => {
+        if (!live || !res?.messages) return;
+        setSessions(prev =>
+          prev.map(s => {
+            if (s.id !== sessId) return s;
+            const merged = mergeServerMessages(s.messages, res.messages);
+            return {...s, messages: merged};
+          }),
+        );
+      })
+      .catch(() => {});
+
+    // 2. Subscribe to live SSE events (fanout & catch-up replay)
+    const unsub = subscribeSessionEvents(sessId, (serverMsg: ServerMessage) => {
+      if (!live) return;
+      setSessions(prev =>
+        prev.map(s => {
+          if (s.id !== sessId) return s;
+          const merged = mergeServerMessages(s.messages, [serverMsg]);
+          return {...s, messages: merged};
+        }),
+      );
+    });
+
+    return () => {
+      live = false;
+      unsub();
+    };
+  }, [activeSession?.id]);
+
   const patchSession = (id: string, fn: (s: Session) => Session) => {
     setSessions(prev => prev.map(s => (s.id === id ? fn(s) : s)));
   };
@@ -828,7 +874,9 @@ export default function App() {
 
     if (isStreaming) {
       const hasActiveTools = toolCallsRef.current.length > 0;
+      const userMsgId = `m_${Date.now().toString(16)}_${Math.random().toString(36).slice(2, 6)}`;
       const userMsg: ChatMessage = {
+        id: userMsgId,
         role: 'user',
         content: text,
         at: Date.now(),
@@ -840,11 +888,13 @@ export default function App() {
         ...s,
         messages: [...s.messages, userMsg],
       }));
-      void enqueueMessage(session.id, text).catch(() => {});
+      void enqueueMessage(session.id, text, userMsgId, activeBot.id).catch(() => {});
       return;
     }
 
+    const userMsgId = `m_${Date.now().toString(16)}_${Math.random().toString(36).slice(2, 6)}`;
     const userMsg: ChatMessage = {
+      id: userMsgId,
       role: 'user',
       content: text,
       at: Date.now(),
@@ -868,7 +918,7 @@ export default function App() {
     try {
       finalText = await streamChat(
         activeBot.id,
-        history.map(m => ({role: m.role, content: m.content})),
+        history.map(m => ({role: m.role, content: m.content, message_id: m.id})),
         tok => setStreamText(tok),
         controller.signal,
         (h: Handoff) => patchSession(session.id, s => ({...s, handoffs: [...s.handoffs, h]})),
@@ -930,7 +980,7 @@ export default function App() {
         drafts: parsedDrafts.drafts.length ? parsedDrafts.drafts : undefined,
         voiceMemos: voiceMemos.length ? voiceMemos : undefined,
       };
-      patchSession(session.id, s => ({...s, messages: [...s.messages, finalMsg]}));
+      patchSession(session.id, s => ({...s, messages: mergeServerMessages(s.messages, [finalMsg as any])}));
       setInterventions([]);
       setDraftCards([]);
       setVoiceMemos([]);
@@ -943,7 +993,7 @@ export default function App() {
       }
       if (partial) {
         const partialMsg: ChatMessage = {role: 'assistant', content: partial, at: Date.now()};
-        patchSession(session.id, s => ({...s, messages: [...s.messages, partialMsg]}));
+        patchSession(session.id, s => ({...s, messages: mergeServerMessages(s.messages, [partialMsg as any])}));
       }
       if (!aborted) {
         setBanner(`Chat failed: ${(err as Error).message}`);
