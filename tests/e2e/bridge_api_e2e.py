@@ -1267,21 +1267,28 @@ def _w5_01_unapproved_refused(tag: str, db: str) -> None:
 
 def _w5_03_deterministic_canonical(tag: str, db: str) -> None:
     """W5-3 — effect key is deterministic and canonical across processes.
-    Fails if: the same call hashes differently across runs, or arg
-    ordering/whitespace/case changes the key (not canonical)."""
+    Fails if: the same call hashes differently across runs, arg
+    ordering/whitespace/case changes the key (not canonical), OR different
+    arguments collapse onto one key (args ignored — every action would share
+    one approval)."""
     scope = "zz-w5-3"
     args_a = '{"name":"X","description":"d  ","method":"post"}'
     args_b = '{"method":"POST","description":"d","name":"X"}'
+    args_c = '{"name":"X","description":"d","method":"get"}'  # read vs write method
     k1 = _w5_key("secret_request", scope, args_a, db=db)
     k2 = _w5_key("secret_request", scope, args_b, db=db)
     k3 = _w5_key("secret_request", scope + "-other", args_b, db=db)
+    k4 = _w5_key("secret_request", scope, args_c, db=db)
     canonical = bool(k1) and k1 == k2 and k3 != ""
+    args_sensitive = bool(k4) and k4 != k1
     check(
         "W5-3 effect key deterministic + canonical",
-        canonical and k3 != k1,
-        f"key(reordered+cased)='{k1}' == '{k2}', different scope differs={k3 != k1}",
+        canonical and args_sensitive and k3 != k1,
+        f"key(reordered+cased)='{k1}' == '{k2}', different scope differs={k3 != k1}, "
+        f"different args differ={args_sensitive}",
         fails_if="same call produces different keys across processes/runs, or "
-        "arg ordering/whitespace/case changes the key (not canonical)",
+        "arg ordering/whitespace/case changes the key (not canonical), or "
+        "different args share one key (approvals collapse)",
     )
 
 
