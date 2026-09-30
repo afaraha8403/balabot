@@ -166,8 +166,15 @@ while IFS="$(printf '\t')" read -r agent display socket; do
     # window — without this the display is a black void. Solid brand colour
     # rather than a wallpaper asset: no image to ship, one apt package, and
     # nothing to break at capture time. (#3b82f6 is the product accent/ring
-    # token — ui/src/tokens.css.) Tolerated failure, not silent: a defect here
-    # must keep the slot UP (the desktop still runs), but the log must say so.
+    # token — ui/src/tokens.css.)
+    #
+    # The paint must land AFTER openbox finishes its own startup: openbox maps
+    # the root during init and clears whatever background was set the instant
+    # before, so painting immediately after `openbox &` loses the race and the
+    # desktop ends up black anyway. One second after launch is comfortably past
+    # openbox's init window (proved live: painted during openbox's first second
+    # vanished, the same paint after it stuck).
+    sleep 1
     DISPLAY="$display" xsetroot -solid "#3b82f6" \
         >"/tmp/xsetroot-$agent.log" 2>&1 || \
         echo "[agent-computer] $agent: xsetroot could not paint the desktop — see /tmp/xsetroot-$agent.log"
