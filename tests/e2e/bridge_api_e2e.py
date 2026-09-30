@@ -303,21 +303,36 @@ def _stop_server(pid: int | None) -> str:
     return f"stopped {pid}"
 
 
-def _start_server(env: dict) -> bool:
-    """Launch ui/server.py detached from the repo root; True once :9119 is healthy."""
-    W1_SCRATCH.mkdir(parents=True, exist_ok=True)
+def _start_server(env: dict, *, silent: bool = False) -> bool:
+    """Launch ui/server.py detached from the repo root; True once :9119 is healthy.
+    `silent=True` discards server output (used for the final restore so the
+    server does not keep a handle on the scratch log)."""
+    if not silent:
+        W1_SCRATCH.mkdir(parents=True, exist_ok=True)
     try:
-        with open(W1_SERVER_LOG, "a", encoding="utf-8") as log:
+        if silent:
             subprocess.Popen(
                 [sys.executable, "ui/server.py"],
                 cwd=str(REPO),
                 env=env,
-                stdout=log,
-                stderr=subprocess.STDOUT,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
                 close_fds=True,
             )
+        else:
+            with open(W1_SERVER_LOG, "a", encoding="utf-8") as log:
+                subprocess.Popen(
+                    [sys.executable, "ui/server.py"],
+                    cwd=str(REPO),
+                    env=env,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
+                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+                    close_fds=True,
+                )
     except Exception:
         return False
     deadline = time.time() + 90
@@ -346,11 +361,12 @@ def _restart_w1_server(env: dict) -> bool:
 def _restore_server() -> None:
     """Kill the scratch-env server and relaunch with the original env so the
     rest of the harness rows (and the operator's deployment) see the original
-    configuration — including the default queue store, not the scratch one."""
+    configuration — including the default queue store, not the scratch one.
+    Runs silent so the restored server never holds the scratch log open."""
     _stop_server(_port_pid())
     env = os.environ.copy()
     env.pop("BALABOT_QUEUE_DB", None)
-    _start_server(env)
+    _start_server(env, silent=True)
 
 
 def _mk_w1_session(bot: str, sid: str) -> bool:
