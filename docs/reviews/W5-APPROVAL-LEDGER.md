@@ -80,7 +80,7 @@ refused/replay call never touches it.
 [  ok ] W5-4  turn replay does not double-execute          approved=True ran_tool=True retry=replay/409 ledger=executed growth_entries=1
 [  ok ] W5-5  mutated args produce a new action            keys differ=True (…) running A + refusing B=True
 [  ok ] W5-8  classification explicit + logged             observe ran=True observe_logged=True mutate_logged=True
-[  ok ] W5-11 approval expiry                              approved=True result=expired ledger=expired
+[  ok ] W5-11 approval expiry                              approved=True ttl_ticked=True result=expired ledger=expired
 [  ok ] W5-13 concurrent approvals of the same key         verdicts=['authorized','replay','replay','replay'] growth_entries=1
 [  ok ] W5-14 read-only tools never gated                  list_org_secrets under enforce=1 -> list
 33 passed, 0 failed, 15 pending   (pending = feature not built — never folded into passes)
@@ -158,7 +158,12 @@ cannot pass simply because reordered args collapse. Restored → GREEN:
    are recorded via the CLI (`python3 -m balabot.approvals approve …`) / module API. The W5-11
    "approval cards not implemented" stub was replaced by a TTL-expiry check (the ledger half); wiring
    an owner-facing approval endpoint remains future work.
-4. The mutation proofs mutated the container copy; the host tree is byte-identical to the committed
+4. **W5-11 timing note.** The first written version slept 2s after a `ttl=1` approve and occasionally
+   raced the gate (the lazy expiry is compared with floor-truncated epoch seconds, so a 1s approval can
+   stay live up to ~2s wall-time and a fast docker round-trip authorized the second call — the harness
+   correctly went RED). The scenario now polls `ledger_state` until the row durably ticks to `expired`,
+   then exercises the tool — deterministic, still fails if the gate honours an expired approval.
+5. The mutation proofs mutated the container copy; the host tree is byte-identical to the committed
    tree (only the pre-existing dirty `tests/e2e/ui-bridge-e2e-results.json` from the W9-9 run was
    unrelated work left untouched).
 

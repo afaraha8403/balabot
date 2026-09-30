@@ -1405,14 +1405,26 @@ def _w5_11_approval_expiry(tag: str, db: str) -> None:
     r0 = _w5_obj(_w5_cli(*args, enforce=True, db=db))
     key = r0.get("effect_key", "") if r0 else ""
     approved = bool(key) and _w5_approve(key, db=db, ttl=1)
-    time.sleep(2)
+    # The ledger expires approvals lazily on read. Poll ledger_state until it
+    # has durably ticked the row to 'expired' (so the check below races nothing
+    # against the clock); approval TTL is 1s so this settles within a few
+    # read attempts at most.
+    seen_expired = False
+    for _ in range(20):
+        st = _w5_ledger(key, db=db) if key else None
+        if st and st.get("state") == "expired":
+            seen_expired = True
+            break
+        time.sleep(0.5)
+    if seen_expired:
+        time.sleep(0.6)  # let the flip commit fully onto WAL before the check
     r = _w5_obj(_w5_cli(*args, enforce=True, db=db))
     expired = bool(r) and r.get("decision") == "expired" and r.get("ok") is False
     ledger = _w5_ledger(key, db=db) if key else None
     check(
         "W5-11 approval expiry",
         approved and expired and bool(ledger) and ledger.get("state") == "expired",
-        f"approved={approved} result={r and r.get('decision')} "
+        f"approved={approved} ttl_ticked={seen_expired} result={r and r.get('decision')} "
         f"ledger={ledger and ledger.get('state')}",
         fails_if="an approval whose TTL has elapsed still authorizes execution",
     )
