@@ -49,7 +49,7 @@ fi
 
 # Xvfb ships in the base Hermes image; the session stack is added by the
 # Dockerfile. Report plainly rather than half-starting if a piece is missing.
-for bin in Xvfb openbox dbus-daemon; do
+for bin in Xvfb openbox dbus-daemon xsetroot; do
     if ! command -v "$bin" >/dev/null 2>&1; then
         echo "[agent-computer] DORMANT — required binary '$bin' is missing from the image."
         exit 0
@@ -161,6 +161,16 @@ while IFS="$(printf '\t')" read -r agent display socket; do
     # A window manager is not cosmetic here: without one, windows open unmanaged
     # and never receive focus, so typing has nowhere to land.
     DISPLAY="$display" openbox --sm-disable >"/tmp/openbox-$agent.log" 2>&1 &
+
+    # A desktop needs a background, and openbox alone never paints the root
+    # window — without this the display is a black void. Solid brand colour
+    # rather than a wallpaper asset: no image to ship, one apt package, and
+    # nothing to break at capture time. (#3b82f6 is the product accent/ring
+    # token — ui/src/tokens.css.) Tolerated failure, not silent: a defect here
+    # must keep the slot UP (the desktop still runs), but the log must say so.
+    DISPLAY="$display" xsetroot -solid "#3b82f6" \
+        >"/tmp/xsetroot-$agent.log" 2>&1 || \
+        echo "[agent-computer] $agent: xsetroot could not paint the desktop — see /tmp/xsetroot-$agent.log"
 
     # BOUNDED mode with the capability manifest, non-interactively approved:
     # the daemon is never started unbounded, for any org's agent.

@@ -67,7 +67,7 @@ RUN chmod +x /usr/local/bin/balabot-entrypoint.sh \
 # bounded capability set is identical rather than re-invented.
 RUN DEBIAN_FRONTEND=noninteractive apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        xterm openbox dbus-x11 \
+        xterm openbox dbus-x11 x11-xserver-utils \
  && rm -rf /var/lib/apt/lists/*
 
 ARG CUA_DRIVER_VERSION=0.29.1
