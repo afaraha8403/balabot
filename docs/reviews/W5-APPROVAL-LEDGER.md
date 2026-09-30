@@ -170,6 +170,8 @@ cannot pass simply because reordered args collapse. Restored → GREEN:
 ## Commits
 
 ```
+d751e5b test(e2e): make W5-11 expiry deterministic (poll ledger tick) + document timing note
+b885635 docs(review): W5 approval-ledger live acceptance + changelog
 13b9bde test(e2e): W5-3 also asserts args-sensitivity so it cannot pass vacuously
 f50c301 test(e2e): W5-5 uses same scope (bot) for both calls; drop duplicate check
 a0811b0 test(e2e): replace W5 pending stubs with eight live container scenarios
