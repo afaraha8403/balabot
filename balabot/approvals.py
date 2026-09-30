@@ -288,29 +288,62 @@ def effect_key(tool: str, args: dict | None, scope: str | None) -> str:
 
 
 def _record_attempt(
-    *, key: str, tool: str, kind: str, scope: str, decision: str, detail: str = ""
+    *,
+    key: str,
+    tool: str,
+    kind: str,
+    scope: str,
+    decision: str,
+    detail: str = "",
+    conn: sqlite3.Connection | None = None,
 ) -> None:
-    """Append one attempt/classification row. Best-effort — a broken attempt
-    log must never break the caller (observe calls especially)."""
+    """Append one attempt/classification row.
+
+    Pass ``conn`` when the caller already holds an open write transaction on
+    the ledger (check_mutation/_tick): the row is written on THAT connection so
+    the audit entry commits atomically with the decision. Without ``conn`` the
+    row is written on its own short-lived connection (best-effort — a broken
+    attempt log must never break an observe/unenforced caller). Opening a second
+    connection while another write transaction is live would block on SQLite's
+    single-writer lock for the full busy_timeout, then be silently dropped.
+    """
+    sql = (
+        "INSERT INTO attempts (effect_key, tool, kind, scope, decision, at, detail) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)"
+    )
+    params = (key, tool, kind, scope or "", decision, _iso(_now()), detail)
+    if conn is not None:
+        conn.execute(sql, params)
+        return
     try:
-        with _get_conn() as conn:
-            conn.execute(
-                "INSERT INTO attempts (effect_key, tool, kind, scope, decision, at, detail) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (key, tool, kind, scope or "", decision, _iso(_now()), detail),
-            )
+        with _get_conn() as c:
+            c.execute(sql, params)
     except Exception:
         pass
 
 
-def _record_event(*, key: str, actor: str, action: str, detail: str = "") -> None:
+def _record_event(
+    *,
+    key: str,
+    actor: str,
+    action: str,
+    detail: str = "",
+    conn: sqlite3.Connection | None = None,
+) -> None:
+    """Append one decision/claim event — see ``_record_attempt`` for the
+    ``conn`` contract (write inside the caller's live transaction when one is
+    open, own connection otherwise)."""
+    sql = (
+        "INSERT INTO approval_events (effect_key, actor, action, at, detail) "
+        "VALUES (?, ?, ?, ?, ?)"
+    )
+    params = (key, actor, action, _iso(_now()), detail)
+    if conn is not None:
+        conn.execute(sql, params)
+        return
     try:
-        with _get_conn() as conn:
-            conn.execute(
-                "INSERT INTO approval_events (effect_key, actor, action, at, detail) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (key, actor, action, _iso(_now()), detail),
-            )
+        with _get_conn() as c:
+            c.execute(sql, params)
     except Exception:
         pass
 
@@ -340,6 +373,7 @@ def _tick(key: str, conn: sqlite3.Connection, now: datetime) -> sqlite3.Row | No
             actor="system",
             action="expire",
             detail="approval TTL elapsed before execution",
+            conn=conn,
         )
         return _row(key, conn)
     return row
@@ -446,6 +480,7 @@ def check_mutation(tool: str, args: dict | None, *, scope: str | None) -> dict:
                 scope=scope,
                 decision="refused",
                 detail="no approval on record",
+                conn=conn,
             )
             return {
                 "ok": False,
@@ -468,6 +503,7 @@ def check_mutation(tool: str, args: dict | None, *, scope: str | None) -> dict:
                 scope=scope,
                 decision="replay",
                 detail="already executed exactly once",
+                conn=conn,
             )
             return {
                 "ok": False,
@@ -489,6 +525,7 @@ def check_mutation(tool: str, args: dict | None, *, scope: str | None) -> dict:
                 scope=scope,
                 decision="expired",
                 detail="approval TTL elapsed",
+                conn=conn,
             )
             return {
                 "ok": False,
@@ -509,6 +546,7 @@ def check_mutation(tool: str, args: dict | None, *, scope: str | None) -> dict:
                 scope=scope,
                 decision="refused",
                 detail="no approval on record",
+                conn=conn,
             )
             return {
                 "ok": False,
@@ -526,7 +564,8 @@ def check_mutation(tool: str, args: dict | None, *, scope: str | None) -> dict:
         # concurrent caller wins the rowcount==1; the loser re-reads and sees
         # executed -> replay. This is the exactly-once claim.
         cur = conn.execute(
-            "UPDATE decisions SET executed_at = ?, claim_scope = ? "
+            "UPDATE decisions SET state = 'executed', executed_at = ?, "
+            "claim_scope = ? "
             "WHERE effect_key = ? AND state = 'approved' "
             "AND executed_at IS NULL AND expires_at >= ?",
             (_epoch(now), scope, key, _epoch(now)),
@@ -537,6 +576,7 @@ def check_mutation(tool: str, args: dict | None, *, scope: str | None) -> dict:
                 actor=scope,
                 action="claim",
                 detail="execution claimed by the approved scope",
+                conn=conn,
             )
             _record_attempt(
                 key=key,
@@ -545,6 +585,7 @@ def check_mutation(tool: str, args: dict | None, *, scope: str | None) -> dict:
                 scope=scope,
                 decision="authorized",
                 detail="approval claimed — execute once",
+                conn=conn,
             )
             return {
                 "decision": "authorized",
@@ -563,6 +604,7 @@ def check_mutation(tool: str, args: dict | None, *, scope: str | None) -> dict:
                 scope=scope,
                 decision="replay",
                 detail="another caller claimed execution",
+                conn=conn,
             )
             return {
                 "ok": False,
@@ -583,6 +625,7 @@ def check_mutation(tool: str, args: dict | None, *, scope: str | None) -> dict:
             scope=scope,
             decision="expired",
             detail="approval invalidated before claim",
+            conn=conn,
         )
         return {
             "ok": False,
