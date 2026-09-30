@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import collections
 import inspect
 import json
 import mimetypes
@@ -992,6 +993,19 @@ async def enqueue_session_message(session_id: str, request: Request):
     message_id = body.get("message_id")
     try:
         msg = q.enqueue(session_id, content, message_id=message_id)
+        try:
+            store_payload: dict = {
+                "session_id": session_id,
+                "messages": [{"role": "user", "content": content, "message_id": msg.get("message_id")}],
+            }
+            bot_id = body.get("bot_id") or body.get("botId")
+            if bot_id:
+                store_payload["bot_id"] = bot_id
+            res = _chat_append_session_state(store_payload)
+            for rec in (res.get("recorded_messages") or []):
+                _broadcast_session_message(session_id, rec)
+        except Exception:
+            pass
         return {"ok": True, "message": msg, "queue": q.queue_state(session_id)}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -2279,11 +2293,30 @@ def _session_store_blob(snippet: str, payload: dict) -> dict | None:
     return res
 
 
+_session_subscribers: dict[str, set[asyncio.Queue]] = collections.defaultdict(set)
+
+
+def _broadcast_session_message(session_id: str, msg: dict) -> None:
+    subs = _session_subscribers.get(session_id)
+    if not subs:
+        return
+    for q in list(subs):
+        try:
+            q.put_nowait(msg)
+        except Exception:
+            pass
+
+
 _SESSION_APPEND_SNIPPET = '''\
 from balabot.sessions import SessionStore, SessionError, UnknownSession
-out = {'session_id': payload['session_id']}
+out = {'session_id': payload['session_id'], 'recorded_messages': []}
 try:
     with SessionStore() as store:
+        if payload.get('bot_id'):
+            try:
+                store._require(payload['session_id'])
+            except UnknownSession:
+                store.create_session(payload['session_id'], payload['bot_id'], payload.get('purpose', 'New chat'))
         if payload.get('topic'):
             store.record_topic(payload['session_id'], payload['topic'])
         resume = payload.get('resume_state')
@@ -2297,9 +2330,10 @@ try:
                                   dec.get('provenance', 'jev-gate'),
                                   at=dec.get('at') or '')
         for msg in payload.get('messages') or []:
-            store.record_message(payload['session_id'], msg['role'], msg['content'],
-                                 message_id=msg.get('message_id'),
-                                 created_at=msg.get('created_at'))
+            rec = store.record_message(payload['session_id'], msg['role'], msg['content'],
+                                       message_id=msg.get('message_id'),
+                                       created_at=msg.get('created_at'))
+            out['recorded_messages'].append(rec)
 except UnknownSession as exc:
     out['ok'] = False
     out['error'] = 'unknown_session'
@@ -2322,7 +2356,8 @@ def _chat_append_session_state(payload: dict) -> dict:
 
 
 def _jev_prepare(profile: str, turn_text: str, session_id: str,
-                 messages: list, session_row: dict | None = None) -> dict:
+                 messages: list, session_row: dict | None = None,
+                 message_id: str | None = None) -> dict:
     """Everything the chat send path does with Jev + the session store,
     synchronously, BEFORE the upstream stream opens. Returns:
 
@@ -2412,13 +2447,16 @@ def _jev_prepare(profile: str, turn_text: str, session_id: str,
     #    to a stated event; it never breaks the turn.
     topic = purpose if (signal is not None and signal.drifted and purpose) else None
     _persist_turn_state(session_id, turn_text, out,
-                        topic=topic, decisions=decisions)
+                        topic=topic, decisions=decisions, bot_id=profile,
+                        message_id=message_id)
     return out
 
 
 def _persist_turn_state(session_id: str, turn_text: str, out: dict, *,
                         topic: str | None = None,
-                        decisions: list | None = None) -> dict:
+                        decisions: list | None = None,
+                        bot_id: str | None = None,
+                        message_id: str | None = None) -> dict:
     """Record this turn (user message, topic span, resume state, admitted
     decisions) in the durable session store - INDEPENDENTLY of Jev.
 
@@ -2427,6 +2465,8 @@ def _persist_turn_state(session_id: str, turn_text: str, out: dict, *,
     failure degrades to a stated event; it never breaks the turn.
     """
     store_payload: dict = {"session_id": session_id}
+    if bot_id:
+        store_payload["bot_id"] = bot_id
     if topic:
         store_payload["topic"] = topic
     # Resume state is recorded on EVERY turn - "where the work currently
@@ -2437,10 +2477,15 @@ def _persist_turn_state(session_id: str, turn_text: str, out: dict, *,
     if decisions:
         store_payload["decisions"] = decisions
     if turn_text:
-        store_payload["messages"] = [{"role": "user", "content": turn_text}]
+        msg_payload: dict = {"role": "user", "content": turn_text}
+        if message_id:
+            msg_payload["message_id"] = message_id
+        store_payload["messages"] = [msg_payload]
     res = _chat_append_session_state(store_payload)
     if res.get("ok"):
         out["store"] = {"appended": True}
+        for rec in (res.get("recorded_messages") or []):
+            _broadcast_session_message(session_id, rec)
     else:
         out["store"] = {"appended": False,
                         "error": res.get("error", "container_unreachable"),
@@ -2683,8 +2728,11 @@ async def chat(request: Request):
                 session_row = next(
                     (r for r in (routed.get("rows") or [])
                      if r.get("session_id") == session_id), None)
+            turn_msg = next((m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "user"), None)
+            turn_msg_id = (turn_msg.get("message_id") or turn_msg.get("id")) if turn_msg else None
             jev_state = _jev_prepare(profile, turn_text, session_id, messages,
-                                     session_row=session_row)
+                                     session_row=session_row,
+                                     message_id=turn_msg_id)
             if routed is not None:
                 route = routed.get("route")
                 if route is not None and route.outcome == "resume" \
@@ -2782,10 +2830,13 @@ async def chat(request: Request):
                     assistant_text = "".join(accumulated_content)
                     if assistant_text and session_id:
                         try:
-                            _chat_append_session_state({
+                            res_ast = _chat_append_session_state({
                                 "session_id": session_id,
+                                "bot_id": profile,
                                 "messages": [{"role": "assistant", "content": assistant_text}]
                             })
+                            for rec in (res_ast.get("recorded_messages") or []):
+                                _broadcast_session_message(session_id, rec)
                         except Exception:
                             pass
         except Exception as exc:  # noqa: BLE001
@@ -2886,7 +2937,8 @@ from balabot.sessions import SessionStore, UnknownSession
 try:
     with SessionStore() as store:
         limit = payload.get('limit')
-        msgs = store.messages(payload['session_id'], limit=limit)
+        since_seq = payload.get('since_seq')
+        msgs = store.messages(payload['session_id'], since_seq=since_seq, limit=limit)
 except UnknownSession as exc:
     print(json.dumps({'ok': False, 'error': 'not_found',
                       'detail': str(exc), 'status': 404}))
@@ -2898,6 +2950,11 @@ _SESSION_RECORD_MESSAGE_SNIPPET = '''\
 from balabot.sessions import SessionStore, UnknownSession, SessionError
 try:
     with SessionStore() as store:
+        if payload.get('bot_id'):
+            try:
+                store._require(payload['session_id'])
+            except UnknownSession:
+                store.create_session(payload['session_id'], payload['bot_id'], payload.get('purpose', 'New chat'))
         msg = store.record_message(payload['session_id'], payload['role'],
                                    payload['content'],
                                    message_id=payload.get('message_id'),
@@ -2958,7 +3015,8 @@ def _session_public(row: dict, bot: str) -> dict:
         "botId": bot,
         "title": row.get("purpose", "") or "Untitled conversation",
         "purpose": row.get("purpose", ""),
-        "createdAt": None,
+        "createdAt": row.get("last_activity") or row.get("createdAt"),
+        "lastActivity": row.get("last_activity"),
         "nextSeq": row.get("next_seq"),
         "compactionCount": row.get("compaction_count", 0),
         "lastCompactionAt": row.get("last_compaction_at"),
@@ -3052,6 +3110,7 @@ async def sessions_delete(session_id: str):
     record — leaving orphaned spans behind would be worse than none)."""
     if not container_ok():
         return unavailable("balabot container is not running — cannot delete conversations")
+    _session_subscribers.pop(session_id, None)
     res = await _org_run_async(_wrap(_SESSIONS_DELETE_SNIPPET, True),
                                payload={"session_id": session_id})
     if not res.get("ok"):
@@ -3096,12 +3155,14 @@ async def sessions_update(session_id: str, request: Request):
 
 
 @app.get("/api/sessions/{session_id}/messages")
-async def sessions_messages_list(session_id: str, limit: int = 0):
+async def sessions_messages_list(session_id: str, since_seq: int = 0, limit: int = 0):
     """Retrieve durable server-side transcript messages for a session."""
     if not container_ok():
         return unavailable("balabot container is not running — no conversation store")
     res = await _org_run_async(_wrap(_SESSIONS_MESSAGES_SNIPPET, True),
-                               payload={"session_id": session_id, "limit": limit or None})
+                               payload={"session_id": session_id,
+                                        "since_seq": since_seq or None,
+                                        "limit": limit or None})
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
@@ -3126,12 +3187,57 @@ async def sessions_messages_create(session_id: str, request: Request):
         "session_id": session_id, "role": role, "content": content,
         "message_id": body.get("message_id") or body.get("id"),
         "created_at": body.get("created_at") or body.get("createdAt"),
+        "bot_id": body.get("bot_id") or body.get("botId"),
     })
     if not res.get("ok"):
         if res.get("status"):
             _org_status_error(res)
         return unavailable(res.get("reason", "could not record session message"))
-    return {"created": True, "message": res.get("message")}
+    msg = res.get("message")
+    if msg:
+        _broadcast_session_message(session_id, msg)
+    return {"created": True, "message": msg}
+
+
+@app.get("/api/sessions/{session_id}/events")
+async def sessions_events(session_id: str, request: Request, since_seq: int = 0):
+    """Multi-client SSE fanout and catch-up stream for a session."""
+    if not container_ok():
+        return unavailable("balabot container is not running — no conversation store")
+
+    last_id = request.headers.get("last-event-id")
+    if last_id and last_id.isdigit():
+        since_seq = max(since_seq, int(last_id))
+
+    async def event_generator():
+        q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        _session_subscribers[session_id].add(q)
+        try:
+            # 1. Catch-up replay of missed messages
+            if since_seq is not None:
+                res = await _org_run_async(_wrap(_SESSIONS_MESSAGES_SNIPPET, True),
+                                           payload={"session_id": session_id, "since_seq": since_seq})
+                if res.get("ok"):
+                    for m in res.get("messages") or []:
+                        yield f"id: {m['seq']}\nevent: message\ndata: {json.dumps(m)}\n\n"
+
+            # 2. Live fanout of newly appended messages
+            while True:
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"id: {msg['seq']}\nevent: message\ndata: {json.dumps(msg)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            _session_subscribers[session_id].discard(q)
+            if not _session_subscribers[session_id]:
+                _session_subscribers.pop(session_id, None)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
 
 
 # ── SPA ──────────────────────────────────────────────────────────────────────
