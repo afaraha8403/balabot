@@ -75,5 +75,6 @@
 - Require an explicit chat confirmation before an agent files a bot proposal: `personas/principal/AGENTS.md` and `personas/governor/AGENTS.md` previously instructed agents to file immediately, which is why a request to hire an agent produced a proposal with no name, role or confirmation settled in the conversation.
 
 ### Changes
+- Replace the nine pending `W4-*` secret-store stubs in `tests/e2e/bridge_api_e2e.py` with live acceptance scenarios that drive the real in-container `secret_request` proxy and the `/api/org/*` HTTP surface: tools never return secret values, non-allowlisted origins refused, loopback/link-local/private destinations blocked, redirects never followed, response credential redaction, every attempt audited with no value/URL/query stored, non-granted bots receive nothing, and no secret value reaching any prompt surface (tool result, registry metadata, stored transcript, SSE stream). Pass/fail/pending counts remain reported separately; see `docs/reviews/W4-SECRET-STORE-HTTP.md`.
 - Rebase design tokens, CSS base, and typography onto Polaris (Wave 1 of 8): achieve token parity across :root, dark, and light scopes in `ui/src/tokens.css` and `ui/src/theme.ts`; adopt Geist typography; enforce `.rk-scroll` standard across all scroll regions; eliminate raw hex and px values across component styles.
 
