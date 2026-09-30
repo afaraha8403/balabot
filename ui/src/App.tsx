@@ -935,7 +935,7 @@ export default function App() {
     try {
       finalText = await streamChat(
         activeBot.id,
-        history.map(m => ({role: m.role, content: m.content, message_id: m.id})),
+        history.map(m => ({role: m.role, content: m.content, message_id: m.id, seq: m.seq})),
         tok => setStreamText(tok),
         controller.signal,
         (h: Handoff) => patchSession(session.id, s => ({...s, handoffs: [...s.handoffs, h]})),

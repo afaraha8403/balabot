@@ -3008,6 +3008,43 @@ async def chat(request: Request):
         raise HTTPException(status_code=404, detail=f"unknown bot {profile}")
     messages = body.get("messages") or []
     session_id = str(body.get("session_id") or "").strip()
+
+    # Delta protocol (W2-2): the client uploads ONLY the new user turn (the
+    # delta) plus its session_id. The durable session store is the transcript
+    # source of truth, so the server rebuilds the full history from the store
+    # and appends the delta before forwarding upstream — the model always sees
+    # the whole conversation, whatever the client chose to upload. Legacy
+    # clients that upload the full history never set `delta` and keep the old
+    # path untouched (additive guarantee, W2-8). A store read that fails
+    # degrades to the delta alone: the turn still runs, it just lacks the
+    # older context, and no error is fabricated.
+    if bool(body.get("delta")) and session_id:
+        try:
+            res = await _org_run_async(
+                _wrap(_SESSIONS_MESSAGES_SNIPPET, True),
+                payload={"session_id": session_id},
+            )
+            if res.get("ok"):
+                hist = res.get("messages") or []
+                deltas = list(messages)
+                # A re-sent turn is already recorded in the store (a retry of
+                # an idempotent message_id); never double-append the same user
+                # turn back into the upstream history.
+                if hist and deltas:
+                    tail = hist[-1]
+                    last = deltas[-1]
+                    if (
+                        isinstance(tail, dict)
+                        and isinstance(last, dict)
+                        and tail.get("role") == last.get("role")
+                        and str(tail.get("content")) == str(last.get("content"))
+                    ):
+                        hist = hist[:-1]
+                full = [{"role": m["role"], "content": m["content"]} for m in hist]
+                messages = full + deltas
+        except Exception:
+            pass  # degrade honestly — the delta alone still answers
+
     turn_text = next(
         (
             str(m.get("content") or "")

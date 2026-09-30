@@ -745,13 +745,126 @@ def w2_14_delete_is_server_side() -> None:
         delete(f"/api/sessions/{sid}")  # idempotent safety net
 
 
+# ── W2-2: client sends only the delta ────────────────────────────────────────
+def w2_02_client_sends_only_the_delta() -> None:
+    """A delta-protocol client uploads ONLY the new user turn (the delta),
+    never the whole history. The durable store is the transcript source of
+    truth: the server must rebuild the full context from the store so the
+    model still answers from the complete conversation.
+    Fails if: the delta turnaround is answered from the delta alone — the
+    model cannot recall a fact that only exists in the store history the
+    client deliberately did NOT re-upload (proof the server dropped the
+    durable history), or the delta send is rejected (non-additive rollout)."""
+    tag = secrets.token_hex(4)
+    sid = f"zz-api-w2s02-{tag}"
+    sentinel = f"PLUM-{secrets.token_hex(3).upper()}"
+    bot = "governor"
+    created = False
+    try:
+        st, body = post(
+            "/api/sessions", {"botId": bot, "id": sid, "title": "w2-2 delta probe"}
+        )
+        created = st == 200 and json.loads(body).get("created") is True
+        if not created:
+            pending(
+                "W2-2 client sends only the delta",
+                "W2",
+                f"could not create fixture session (HTTP {st})",
+            )
+            return
+
+        # Durable history the delta client will deliberately NOT re-upload —
+        # the whole point of the row: the server, not the payload, is memory.
+        st, body = post(
+            f"/api/sessions/{sid}/messages",
+            {
+                "role": "user",
+                "content": f"My agent codename is {sentinel}. Remember it.",
+                "message_id": f"zz-{tag}-seed",
+            },
+        )
+        if not (st == 200 and json.loads(body).get("created") is True):
+            pending(
+                "W2-2 client sends only the delta",
+                "W2",
+                f"could not seed durable history (HTTP {st})",
+            )
+            return
+
+        # The NEW client shape: session_id + ONLY the new user turn + delta=true.
+        status, stream = sse_post_chat(
+            {
+                "bot_id": bot,
+                "session_id": sid,
+                "delta": True,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "What is my agent codename? Reply with exactly "
+                        "that codename.",
+                    }
+                ],
+            }
+        )
+        check(
+            "W2-2 delta-only send accepted",
+            status == 200,
+            f"HTTP {status}",
+            fails_if="the delta-protocol request is rejected "
+            "(server requires the full history)",
+        )
+        check(
+            "W2-2 reply proves store history was rebuilt",
+            sentinel in stream,
+            sentinel,
+            fails_if="the answer could only have come from the delta alone — "
+            "the durable history was never merged, so the model could not "
+            "know the codename",
+        )
+
+        # Store integrity: the delta turn is appended ON TOP of the seed; the
+        # delta must not replace the durable history.
+        st, body = get(f"/api/sessions/{sid}/messages")
+        msgs = json.loads(body).get("messages", []) if st == 200 else []
+        contents = [str(m.get("content", "")) for m in msgs]
+        check(
+            "W2-2 store keeps seed AND delta",
+            any(sentinel in c for c in contents)
+            and any("codename" in c for c in contents),
+            f"{len(msgs)} rows",
+            fails_if="the delta turn replaced the durable history instead of "
+            "being appended to it",
+        )
+
+        # Additive guarantee (W2-8): a legacy full-history client still works.
+        status2, stream2 = sse_post_chat(
+            {
+                "bot_id": bot,
+                "session_id": sid,
+                "messages": [
+                    {"role": "user", "content": f"My agent codename is {sentinel}."},
+                    {"role": "assistant", "content": "Noted."},
+                    {
+                        "role": "user",
+                        "content": "Confirm you still remember my codename. "
+                        "Reply with exactly: LEGACY-OK",
+                    },
+                ],
+            }
+        )
+        check(
+            "W2-2 legacy full-history send still works",
+            status2 == 200 and "LEGACY-OK" in stream2,
+            f"HTTP {status2}",
+            fails_if="adding the delta protocol broke legacy full-history "
+            "sends (W2-8 breach)",
+        )
+    finally:
+        if created:
+            delete(f"/api/sessions/{sid}")
+
+
 def w2_pending() -> None:
-    pending(
-        "W2-2 client sends only the delta",
-        "W2",
-        "delta protocol not implemented (ui/src/api.ts still uploads "
-        "full history); observable only via the UI harness network capture",
-    )
     pending(
         "W2-6 compaction keeps newest user turn",
         "W2",
@@ -2125,6 +2238,7 @@ def main() -> int:
     w1_scenarios()
     w2_11_server_is_assembly_source()
     w2_14_delete_is_server_side()
+    w2_02_client_sends_only_the_delta()
     w2_pending()
     w3_04_owner_impersonation_refused()
     w3_11_decided_records_immutable()

@@ -536,8 +536,31 @@ export async function streamChat(
   /** Human take-over intervention raised by the bot. */
   onIntervention?: (i: InterventionPayload) => void,
 ): Promise<string> {
-  const payload: Record<string, unknown> = {bot_id: botId, messages};
-  if (sessionId) payload.session_id = sessionId;
+  // W2-2 delta protocol: with a server-side session, the durable store owns
+  // the transcript. Only turns the server has not confirmed yet (no durable
+  // seq) must leave the browser — the server rebuilds full context from the
+  // store, so the visible wire payload stays a delta, never the whole history.
+  let wire: {role: string; content: string}[] = messages;
+  if (sessionId) {
+    let lastSeq = 0;
+    for (const m of messages) {
+      const s = (m as {seq?: number}).seq;
+      if (typeof s === 'number' && s > lastSeq) lastSeq = s;
+    }
+    wire = lastSeq > 0
+      ? messages.filter(m => {
+          const s = (m as {seq?: number}).seq;
+          return typeof s !== 'number' || s > lastSeq;
+        })
+      : messages.slice(-1);
+    if (wire.length === 0) wire = messages.slice(-1);
+  }
+
+  const payload: Record<string, unknown> = {bot_id: botId, messages: wire};
+  if (sessionId) {
+    payload.session_id = sessionId;
+    payload.delta = true;
+  }
   if (attachments && attachments.length > 0) payload.attachments = attachments;
 
   const res = await fetch('/api/chat', {
