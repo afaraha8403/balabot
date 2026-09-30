@@ -1,9 +1,12 @@
 import {useEffect, useState} from 'react';
+import {Switch} from '@astryxdesign/core/Switch';
 import {isShippedBot, updateBot, type Bot, type BotEditableMeta} from './api';
 import {BotAvatar} from './BotAvatar';
 
 type Props = {
   bot: Bot;
+  showThinking: boolean;
+  onShowThinkingChange: (checked: boolean) => void;
   onClose: () => void;
   onUpdated: (botId: string) => void;
   onOpenKnowledge?: () => void;
@@ -15,7 +18,7 @@ type Props = {
  * Shipped bots (principal, governor) are locked: the backend refuses PATCH (409)
  * and the form disables editing affordances.
  */
-export function BotSettings({bot, onClose, onUpdated, onOpenKnowledge}: Props) {
+export function BotSettings({bot, showThinking, onShowThinkingChange, onClose, onUpdated, onOpenKnowledge}: Props) {
   const [name, setName] = useState(bot.name);
   const [title, setTitle] = useState(bot.title || '');
   const [description, setDescription] = useState(bot.description || '');
@@ -146,6 +149,29 @@ export function BotSettings({bot, onClose, onUpdated, onOpenKnowledge}: Props) {
           {success}
         </div>
       ) : null}
+
+      {/* Display preference (local, not a bot meta patch — usable on shipped bots too) */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          padding: '10px 12px',
+          borderRadius: '8px',
+          border: '1px solid var(--border)',
+          backgroundColor: 'var(--muted)',
+        }}
+      >
+        <span style={{fontSize: '13px', fontWeight: 600, color: 'var(--foreground)'}}>
+          Display
+        </span>
+        <Switch
+          label="Show thinking"
+          value={showThinking}
+          onChange={onShowThinkingChange}
+          description="Show the bot's reasoning as a collapsible note under each reply."
+        />
+      </div>
 
       {/* Field inputs */}
       <div style={{display: 'flex', flexDirection: 'column', gap: '14px'}}>

@@ -8,7 +8,6 @@ import {Card} from '@astryxdesign/core/Card';
 import {Grid} from '@astryxdesign/core/Grid';
 import {useStreamingText} from '@astryxdesign/core/hooks';
 import {Collapsible} from '@astryxdesign/core/Collapsible';
-import {Switch} from '@astryxdesign/core/Switch';
 import {ThinkingOrb} from 'thinking-orbs';
 import {
   activeTool,
@@ -1476,15 +1475,6 @@ export default function App() {
                 onClick={() => setShowCommandPalette(true)}
               />
 
-              <Switch
-                label="Show thinking"
-                value={showThinking}
-                onChange={checked => {
-                  setShowThinking(checked);
-                  saveShowThinking(checked);
-                }}
-              />
-
               <StatusDot
                 variant={healthOk === null ? 'neutral' : healthOk ? 'success' : 'error'}
                 label={healthOk ? 'API connected' : 'API unreachable'}
@@ -2087,6 +2077,11 @@ export default function App() {
               ) : rightPanelMode === 'settings' && activeBot ? (
                 <BotSettings
                   bot={activeBot}
+                  showThinking={showThinking}
+                  onShowThinkingChange={(checked) => {
+                    setShowThinking(checked);
+                    saveShowThinking(checked);
+                  }}
                   onClose={() => setRightPanelMode('screen')}
                   onUpdated={() => void reloadBots()}
                   onOpenKnowledge={() => setShowPanel(true)}
@@ -2136,7 +2131,7 @@ export default function App() {
                       <Text type="body" weight="semibold">
                         {activeBot.name}&apos;s screen
                       </Text>
-                    </HStack>
+</HStack>
                     <StatusDot
                       variant={isStreaming ? 'warning' : 'success'}
                       label={isStreaming ? 'Working' : 'Idle'}

@@ -78,6 +78,14 @@ const clickSwitch = (page) => page.evaluate(() => {
   el.click();
   return true;
 });
+/** The "Show thinking" switch lives in the bot settings panel (per-bot display
+ *  preference). Open that panel so the label/switch are present in the DOM. */
+const openBotSettings = (page) => page.evaluate(() => {
+  const b = [...document.querySelectorAll('button, [role="button"]')]
+    .find(x => (x.getAttribute('aria-label') || x.innerText || '').trim() === 'Bot settings');
+  if (b) b.click();
+  return !!b;
+});
 const isTrigger = (t) => /^Thinking(…|\.\.\.)?$/.test(t);
 const thinkingTriggers = (page) => page.evaluate(() =>
   [...document.querySelectorAll('button, [role="button"]')]
@@ -145,6 +153,8 @@ try {
   record('t02 no thinking disclosure element in the DOM when off',
     mounted && (await disclosures(page)) === 0 && (await thinkingTriggers(page)).length === 0,
     `disclosures=${await disclosures(page)} triggers=${(await thinkingTriggers(page)).length}`);
+  await openBotSettings(page);
+  await sleep(400);
   const sw0 = await switchEl(page);
   record('t03 toggle exists and is off by default', sw0.found && sw0.checked === false, JSON.stringify(sw0));
 
@@ -155,6 +165,8 @@ try {
   record('t05 toggle choice persisted to storage', stored === 'true', `stored=${stored}`);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await waitForText(page, 'CANARY_ANSWER_123');
+  await openBotSettings(page);
+  await sleep(400);
   const sw1 = await switchEl(page);
   record('t06 toggle survives a reload (persistent)', sw1.found && sw1.checked === true, JSON.stringify(sw1));
   record('t07 message content is not corrupted by the reasoning stream', !(await bodyText(page)).includes(CANARY), 'seeded thinking leaked into the thread body');
@@ -189,6 +201,8 @@ try {
   record('t16 expanding live thinking reveals the reasoning', segs.some(s => domAfter.includes(s)), `segs=${segs.length}`);
 
   // ---- 5. turn OFF again → everything hidden again ----
+  await openBotSettings(page);
+  await sleep(400);
   await clickSwitch(page);
   await sleep(500);
   record('t17 toggle turns back off', (await switchEl(page)).checked === false);
