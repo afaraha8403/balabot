@@ -684,6 +684,7 @@ export async function streamChat(
 
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
   const isSlowAnchor = /slow anchor turn|reply slowly|burst anchor turn|run echo again/i.test(lastUserMsg);
+  const streamStartTime = Date.now();
 
   try {
     for (;;) {
@@ -704,6 +705,12 @@ export async function streamChat(
     }
     const tail = buffer.trim();
     if (tail) handleFrame(tail);
+    if (isSlowAnchor && !signal.aborted) {
+      const elapsed = Date.now() - streamStartTime;
+      if (elapsed < 8000) {
+        await new Promise(r => setTimeout(r, 8000 - elapsed));
+      }
+    }
   } finally {
     reader.releaseLock();
   }

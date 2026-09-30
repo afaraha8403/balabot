@@ -33,6 +33,10 @@
  *     dialog (rowInDialog) — the same name exists in both lists.
  *  7. Deep into a run a click can land before React mounts the handler —
  *     openWithRetry waits for the button, clicks, polls, re-clicks.
+ *  8. CloakBrowser with `humanize: true` wheel-scrolls 15–20s trying to center
+ *     bottom-pinned elements whose y+h > 0.8*H before falling back. In
+ *     `sendViaComposer`, focus directly and use raw text insertion/press
+ *     so mid-turn submissions land while turns are genuinely in-flight.
  * ──────────────────────────────────────────────────────────────────────────
  *
  * Run:  node tests/e2e/ui_bridge_e2e.mjs           (all runnable scenarios)
@@ -194,11 +198,30 @@ async function findComposer(page) {
   });
 }
 
+/**
+ * TRAP 8: sendViaComposer must focus directly and insert text without
+ * CloakBrowser's humanize scroll/type delays (~25-30s on bottom-pinned elements),
+ * ensuring mid-turn submissions land while turns are genuinely in-flight.
+ */
 async function sendViaComposer(page, text) {
-  await page.click('[data-e2e-bridge-composer="1"]');
-  await page.keyboard.type(text, { delay: 15 });
-  await sleep(250);
-  await page.keyboard.press('Enter');
+  const sel = '[data-e2e-bridge-composer="1"]';
+  if (!(await page.$(sel))) {
+    await findComposer(page);
+  }
+  await page.focus(sel);
+  if (page._humanRawKb?.insertText) {
+    await page._humanRawKb.insertText(text);
+  } else if (page.keyboard.insertText) {
+    await page.keyboard.insertText(text);
+  } else {
+    await page.keyboard.type(text);
+  }
+  await sleep(50);
+  if (page._humanOriginals?.keyboardPress) {
+    await page._humanOriginals.keyboardPress('Enter');
+  } else {
+    await page.keyboard.press('Enter');
+  }
 }
 
 const bodyText = (page) => page.evaluate(() => document.body.innerText || '');
