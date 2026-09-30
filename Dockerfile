@@ -70,6 +70,32 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update \
         xterm openbox dbus-x11 x11-xserver-utils \
  && rm -rf /var/lib/apt/lists/*
 
+# Google Chrome, pinned the same way cua-driver is: version in the URL AND a
+# verified SHA256 of the downloaded artifact, so an implicit upgrade can never
+# slip in underneath a user (this browser is an execution surface — it renders
+# real web pages inside the agent's desktop). Chrome runs as root in this
+# container, so the LAUNCH site must pass --no-sandbox (upstream refuses to
+# start otherwise); that is stated next to the launch command in
+# balabot/computer.py, never buried here.
+#
+# Not `google-chrome-stable_current_amd64.deb`: the `_current_` URL is
+# unpinned by design and would re-pin whatever Google publishes today.
+# The pin below was verified against the apt Packages index at
+# dl.google.com/linux/deb/dists/stable/main/binary-amd64/Packages and the
+# SHA256 was re-checked against the downloaded deb before this line was written.
+ARG CHROME_VERSION=154.0.8037.92-1
+ARG CHROME_SHA256=69e3f6ac0a4811f4689ca23f1fd5cc5b2c01550881928b3e196a97131165c4a2
+RUN set -eux; \
+    DEBIAN_FRONTEND=noninteractive apt-get update; \
+    curl -fsSL -o /tmp/chrome.deb \
+      "https://dl.google.com/linux/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${CHROME_VERSION}_amd64.deb"; \
+    echo "${CHROME_SHA256}  /tmp/chrome.deb" | sha256sum -c -; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/chrome.deb; \
+    rm -f /tmp/chrome.deb; \
+    rm -rf /var/lib/apt/lists/*; \
+    test -x /usr/bin/google-chrome; \
+    test "$(dpkg-query -W -f='${Version}' google-chrome-stable)" = "${CHROME_VERSION}"
+
 ARG CUA_DRIVER_VERSION=0.29.1
 # TWO different artifacts, so TWO hashes. Checking one against the other's hash
 # is a guaranteed build failure: the archive and the binary inside it never

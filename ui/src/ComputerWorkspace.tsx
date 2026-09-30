@@ -18,6 +18,7 @@ export function ComputerWorkspace({
   children,
   terminalContent,
   filesContent,
+  onLaunchBrowser,
 }: {
   botId: string;
   hasControl: boolean;
@@ -25,6 +26,7 @@ export function ComputerWorkspace({
   children: ReactNode;
   terminalContent?: ReactNode;
   filesContent?: ReactNode;
+  onLaunchBrowser?: () => void;
 }) {
   const desktop = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<App[]>([]);
@@ -134,7 +136,11 @@ export function ComputerWorkspace({
           type="button"
           aria-label="Browser"
           aria-pressed={screenVisible}
-          onClick={() => setCollapsed(current => (open.length ? !current : false))}
+          onClick={() => {
+            onLaunchBrowser?.();
+            setCollapsed(false);
+            setOpen([]);
+          }}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -148,7 +154,7 @@ export function ComputerWorkspace({
             cursor: 'pointer',
             transition: 'background-color 150ms ease',
           }}
-          title="Show Screen"
+          title="Open Browser"
         >
           <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
             <circle cx="12" cy="12" r="10" />

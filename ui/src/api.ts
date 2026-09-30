@@ -247,12 +247,13 @@ export type ComputerFrame = {
 };
 
 export type ComputerAction = {
-  action: 'click' | 'doubleClick' | 'rightClick' | 'type' | 'key' | 'scroll';
+  action: 'click' | 'doubleClick' | 'rightClick' | 'type' | 'key' | 'scroll' | 'launch';
   x?: number;
   y?: number;
   text?: string;
   key?: string;
   amount?: number;
+  app?: string;
 };
 
 export type MemoryItem = {id: string; content: string; category?: string};

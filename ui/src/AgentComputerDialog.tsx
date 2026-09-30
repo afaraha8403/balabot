@@ -491,6 +491,7 @@ export function AgentComputerDialog({bot, onClose}: Props) {
             botId={bot.id}
             hasControl={inputsEnabled}
             dock={!isRecording}
+            onLaunchBrowser={() => void act({action: 'launch', app: 'chrome'})}
             terminalContent={<TerminalApp botId={bot.id} botName={bot.name} />}
             filesContent={<FilesApp botId={bot.id} botName={bot.name} />}
           >
