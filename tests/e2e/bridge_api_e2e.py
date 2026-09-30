@@ -36,6 +36,7 @@ import re
 import secrets
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -940,42 +941,540 @@ def w4_scenarios() -> None:
             delete(f"/api/sessions/{sid}")
 
 
-# ── W5: approvals + exactly-once — feature does not exist ────────────────────
+# ── W5: approval ledger — real-container scenarios ─────────────────────────
+# The gate (balabot/approvals.py) is exercised through the REAL Hermes call
+# site: `python3 -m balabot.bot_tools …` inside the balabot container, with
+# `BALABOT_APPROVALS_ENFORCE=1` passed on the invocation env (the deploy
+# switch; default OFF keeps the platform untouched). The container's
+# /opt/balabot is image-baked (only /opt/data is a volume), so the scenario
+# block first deploys the W5-committed approvals.py + gate-wired bot_tools.py
+# into the container and restores the container's previous copies on exit.
+# Each docker exec carries its own env, so the running server on :9119 never
+# sees the switch and the non-W5 harness rows are untouched.
 def w5_scenarios() -> None:
-    """W5 is entirely net-new (review: 'today nothing stands between a model
-    and an irreversible act'). Every scenario below is executable the day
-    Wave 1 lands; none can run today."""
-    pending(
+    """Drive the approval gate end to end in the container.
+
+    Setup: snapshot /opt/balabot/balabot/{approvals.py,bot_tools.py}, deploy
+    the committed W5 files, run the eight scenarios (each gates the REAL
+    `record_growth_audit`/`list_*` CLI verbs on its own isolated ledger file),
+    then restore the container's previous files in the finally block.
+    """
+    orig_dir = pathlib.Path("tests/e2e/_scratch/w5/orig")
+    orig_dir.mkdir(parents=True, exist_ok=True)
+    deployed = True
+    for name in ("approvals.py", "bot_tools.py"):
+        dst = f"/opt/balabot/balabot/{name}"
+        rc = subprocess.run(
+            ["docker", "exec", CONTAINER, "sh", "-c", f"cat {dst}"],
+            capture_output=True,
+            text=True,
+        )
+        if rc.returncode == 0:
+            (orig_dir / name).write_text(rc.stdout, encoding="utf-8")
+        r = subprocess.run(
+            ["docker", "cp", str(REPO / "balabot" / name), f"{CONTAINER}:{dst}"],
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            deployed = False
+            check(
+                "W5-setup deploy approvals+bot_tools to container",
+                False,
+                f"docker cp {name} failed: {r.stderr[:120]}",
+                fails_if="W5 product not deployed, scenarios would run stale code",
+            )
+            break
+    fixture_dbs = []
+    try:
+        if deployed:
+            check(
+                "W5-setup deploy approvals+bot_tools to container",
+                True,
+                "committed W5 files live in /opt/balabot (snapshot restored on exit)",
+            )
+            tag = secrets.token_hex(4)
+
+            def _db(name: str) -> str:
+                p = f"/opt/data/approvals/w5-{tag}-{name}.db"
+                fixture_dbs.append(p)
+                return p
+
+            _w5_01_unapproved_refused(tag, _db("refuse"))
+            _w5_03_deterministic_canonical(tag, _db("key"))
+            _w5_04_replay_no_execute(tag, _db("replay"))
+            _w5_05_mutated_args_new_action(tag, _db("mutated"))
+            _w5_08_classification_logged(tag, _db("classify"))
+            _w5_11_approval_expiry(tag, _db("expiry"))
+            _w5_13_concurrent_same_key(tag, _db("concurrent"))
+            _w5_14_read_only_never_gated(tag, _db("readonly"))
+    finally:
+        # restore the container's pre-W5 files (image is baked; this harness
+        # must not leave a mutated /opt/balabot behind).
+        for name in ("approvals.py", "bot_tools.py"):
+            orig = orig_dir / name
+            dst = f"/opt/balabot/balabot/{name}"
+            if orig.exists():
+                subprocess.run(
+                    ["docker", "cp", str(orig), f"{CONTAINER}:{dst}"],
+                    capture_output=True,
+                )
+            elif name == "approvals.py":
+                subprocess.run(
+                    ["docker", "exec", CONTAINER, "rm", "-f", dst],
+                    capture_output=True,
+                )
+        for p in fixture_dbs:
+            subprocess.run(
+                ["docker", "exec", CONTAINER, "rm", "-f", p, f"{p}-wal", f"{p}-shm"],
+                capture_output=True,
+            )
+
+
+def _w5_cli(*args: str, enforce: bool = False, db: str | None = None):
+    """Run the REAL bot_tools CLI in-container; return parsed JSON."""
+    env = ["-e", "BALABOT_DATA_ROOT=/opt/data"]
+    if db:
+        env += ["-e", f"BALABOT_APPROVALS_DB={db}"]
+    if enforce:
+        env += ["-e", "BALABOT_APPROVALS_ENFORCE=1"]
+    r = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "-w",
+            "/opt/balabot",
+            *env,
+            CONTAINER,
+            "python3",
+            "-m",
+            "balabot.bot_tools",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if r.returncode != 0:
+        return None
+    if r.stdout.strip().startswith("{"):
+        return _tool_json(r.stdout)
+    if r.stdout.strip().startswith("["):
+        return _tool_list(r.stdout)
+    return None
+
+
+def _w5_obj(result) -> dict | None:
+    return result if isinstance(result, dict) else None
+
+
+def _w5_list(result) -> list | None:
+    return result if isinstance(result, list) else None
+
+
+def _w5_key(tool: str, scope: str, args_json: str, *, db: str) -> str:
+    """The exact effect-key digest the gate computes (approvals `key` CLI)."""
+    r = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "-w",
+            "/opt/balabot",
+            "-e",
+            f"BALABOT_APPROVALS_DB={db}",
+            CONTAINER,
+            "python3",
+            "-m",
+            "balabot.approvals",
+            "key",
+            "--tool",
+            tool,
+            "--scope",
+            scope,
+            "--args",
+            args_json,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    j = _tool_json(r.stdout)
+    return j.get("effect_key", "") if isinstance(j, dict) else ""
+
+
+def _w5_ledger(key: str, *, db: str) -> dict | None:
+    r = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "-w",
+            "/opt/balabot",
+            "-e",
+            f"BALABOT_APPROVALS_DB={db}",
+            CONTAINER,
+            "python3",
+            "-m",
+            "balabot.approvals",
+            "state",
+            "--key",
+            key,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    j = _tool_json(r.stdout)
+    return j if isinstance(j, dict) else None
+
+
+def _w5_attempts(key: str, *, db: str) -> list[dict]:
+    r = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "-w",
+            "/opt/balabot",
+            "-e",
+            f"BALABOT_APPROVALS_DB={db}",
+            CONTAINER,
+            "python3",
+            "-m",
+            "balabot.approvals",
+            "attempts",
+            "--key",
+            key,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    lst = _tool_list(r.stdout)
+    return [x for x in lst if isinstance(x, dict)] if lst else []
+
+
+def _w5_approve(key: str, *, db: str, ttl: int = 3600) -> bool:
+    r = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "-w",
+            "/opt/balabot",
+            "-e",
+            f"BALABOT_APPROVALS_DB={db}",
+            CONTAINER,
+            "python3",
+            "-m",
+            "balabot.approvals",
+            "approve",
+            "--key",
+            key,
+            "--by",
+            "ali",
+            "--ttl",
+            str(ttl),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return r.returncode == 0 and "approved" in r.stdout
+
+
+def _w5_growth_args(tag: str, probe: str) -> list[str]:
+    bot = f"zz-w5-{probe}-{tag}"
+    return [
+        "record_growth_audit",
+        "--action",
+        "W5_PROBE",
+        "--target",
+        bot,
+        "--description",
+        probe,
+        "--bot",
+        bot,
+    ]
+
+
+def _w5_executed(body: dict | None) -> bool:
+    """The tool actually ran. When the gate authorizes, bot_tools prints the
+    tool's OWN output (the growth record) — not a gate body with a decision.
+    So 'executed' == a dict that is NOT a gate refusal/expiry/replay body."""
+    if not body:
+        return False
+    d = body.get("decision")
+    return d not in ("refused", "expired", "replay") and body.get("ok") is not False
+
+
+def _w5_growth_count(bot: str) -> int:
+    """Real growth-audit entries written for one fixture bot (the observable
+    mutation). -1 if the ledger is unreadable."""
+    r = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "-w",
+            "/opt/balabot",
+            "-e",
+            "BALABOT_DATA_ROOT=/opt/data",
+            CONTAINER,
+            "python3",
+            "-c",
+            "from balabot.growth import read_audit_entries; import sys; "
+            f"print(len(read_audit_entries({bot!r})))",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    try:
+        return int(r.stdout.strip().splitlines()[-1])
+    except Exception:
+        return -1
+
+
+def _w5_01_unapproved_refused(tag: str, db: str) -> None:
+    """W5-1 — an unapproved mutation is refused AND recorded.
+    Fails if: the gated tool runs at all (gate off/absent) or the refusal is
+    not persisted to the ledger attempts log."""
+    res = _w5_cli(*_w5_growth_args(tag, "refused"), enforce=True, db=db)
+    body = _w5_obj(res)
+    refused = (
+        bool(body) and body.get("decision") == "refused" and body.get("ok") is False
+    )
+    key = body.get("effect_key", "") if (refused and body) else ""
+    ledger = _w5_ledger(key, db=db) if key else None
+    att = _w5_attempts(key, db=db) if key else []
+    recorded = (
+        bool(ledger)
+        and ledger.get("state") == "refused"
+        and any(a.get("decision") == "refused" for a in att)
+    )
+    check(
         "W5-1 unapproved mutation refused + recorded",
-        "W5",
-        "approval ledger not implemented",
+        refused and recorded,
+        f"refused={refused} ledger={ledger and ledger.get('state')} "
+        f"attempts={[a.get('decision') for a in att]}",
+        fails_if="an unapproved mutation executes at all (gate off/absent) or "
+        "the refusal is not persisted to the ledger attempts log",
     )
-    pending(
-        "W5-3 effect key deterministic + canonical", "W5", "effect keys not implemented"
+
+
+def _w5_03_deterministic_canonical(tag: str, db: str) -> None:
+    """W5-3 — effect key is deterministic and canonical across processes.
+    Fails if: the same call hashes differently across runs, or arg
+    ordering/whitespace/case changes the key (not canonical)."""
+    scope = "zz-w5-3"
+    args_a = '{"name":"X","description":"d  ","method":"post"}'
+    args_b = '{"method":"POST","description":"d","name":"X"}'
+    k1 = _w5_key("secret_request", scope, args_a, db=db)
+    k2 = _w5_key("secret_request", scope, args_b, db=db)
+    k3 = _w5_key("secret_request", scope + "-other", args_b, db=db)
+    canonical = bool(k1) and k1 == k2 and k3 != ""
+    check(
+        "W5-3 effect key deterministic + canonical",
+        canonical and k3 != k1,
+        f"key(reordered+cased)='{k1}' == '{k2}', different scope differs={k3 != k1}",
+        fails_if="same call produces different keys across processes/runs, or "
+        "arg ordering/whitespace/case changes the key (not canonical)",
     )
-    pending(
+
+
+def _w5_04_replay_no_execute(tag: str, db: str) -> None:
+    """W5-4 — a dispatched turn that is retried does not double-execute.
+    Fails if: the same key authorizes more than once (no exactly-once claim),
+    or a replayed turn writes a second growth-audit entry."""
+    args = _w5_growth_args(tag, "replay")
+    bot = f"zz-w5-replay-{tag}"
+    r_first = _w5_obj(_w5_cli(*args, enforce=True, db=db))
+    key = r_first.get("effect_key", "") if r_first else ""
+    approved = bool(key) and _w5_approve(key, db=db)
+    r2 = _w5_obj(_w5_cli(*args, enforce=True, db=db))
+    r3 = _w5_obj(_w5_cli(*args, enforce=True, db=db))
+    auth_once = _w5_executed(r2)
+    replay = bool(r3) and r3.get("decision") == "replay" and r3.get("ok") is False
+    ledger = _w5_ledger(key, db=db) if key else None
+    executed = bool(ledger) and ledger.get("state") == "executed"
+    n_growth = _w5_growth_count(bot)
+    check(
         "W5-4 turn replay does not double-execute",
-        "W5",
-        "effect keys not implemented (also needs the replay harness)",
+        approved and auth_once and replay and executed and n_growth == 1,
+        f"approved={approved} ran_tool={_w5_executed(r2)} "
+        f"retry={r3 and r3.get('decision')}/{r3 and r3.get('status_code')} "
+        f"ledger={ledger and ledger.get('state')} growth_entries={n_growth}",
+        fails_if="a replayed turn authorizes a second execution (no exactly-"
+        "once claim), writes a second growth-audit entry, or the ledger never "
+        "lands executed",
     )
-    pending(
-        "W5-5 mutated args produce a new action", "W5", "effect keys not implemented"
+
+
+def _w5_05_mutated_args_new_action(tag: str, db: str) -> None:
+    """W5-5 — changing mutation args yields a NEW action that needs its own
+    approval. Fails if: different args collapse onto one key, or an approval
+    for call A also authorizes the different call B."""
+    args_a = _w5_growth_args(tag, "mutA")
+    args_b = _w5_growth_args(tag, "mutB")
+    bot_a = f"zz-w5-mutA-{tag}"
+    bot_b = f"zz-w5-mutB-{tag}"
+    ra = _w5_obj(_w5_cli(*args_a, enforce=True, db=db))
+    rb = _w5_obj(_w5_cli(*args_b, enforce=True, db=db))
+    key_a = ra.get("effect_key", "") if ra else ""
+    key_b = rb.get("effect_key", "") if rb else ""
+    distinct = bool(key_a) and bool(key_b) and key_a != key_b
+    isolated = False
+    if distinct:
+        _w5_approve(key_a, db=db)
+        r_auth = _w5_obj(_w5_cli(*args_a, enforce=True, db=db))
+        r_other = _w5_obj(_w5_cli(*args_b, enforce=True, db=db))
+        a_ran = _w5_executed(r_auth)
+        b_refused = bool(r_other) and r_other.get("decision") == "refused"
+        isolated = (
+            a_ran
+            and b_refused
+            and _w5_growth_count(bot_a) == 1
+            and _w5_growth_count(bot_b) == 0
+        )
+    check(
+        "W5-5 mutated args produce a new action",
+        distinct and isolated,
+        f"keys differ={distinct} ({key_a} vs {key_b}) running A + refusing B={isolated}",
+        fails_if="different mutation args collapse onto one key, or an "
+        "approval for call A also authorizes the different call B (yes/no by "
+        "growth-audit write + gate body)",
     )
-    pending(
+
+
+def _w5_08_classification_logged(tag: str, db: str) -> None:
+    """W5-8 — observe/mutate classification is explicit AND every invocation
+    is logged. Fails if: an observe call is gated/blocked, or a mutation
+    attempt carries no kind+decision in the ledger."""
+    bot = f"zz-w5-8-{tag}"
+    obs = _w5_cli("list_pending_requests", "--bot", bot, enforce=True, db=db)
+    obs_ran = isinstance(obs, list)
+    obs_key = _w5_key("list_pending_requests", bot, json.dumps({"bot_id": bot}), db=db)
+    obs_att = _w5_attempts(obs_key, db=db) if obs_key else []
+    obs_logged = any(
+        a.get("kind") == "observe" and a.get("decision") == "observe" for a in obs_att
+    )
+    mut = _w5_obj(_w5_cli(*_w5_growth_args(tag, "cls"), enforce=True, db=db))
+    mut_key = mut.get("effect_key", "") if mut else ""
+    mut_att = _w5_attempts(mut_key, db=db) if mut_key else []
+    mut_logged = any(
+        a.get("kind") == "mutate" and a.get("decision") == "refused" for a in mut_att
+    )
+    check(
         "W5-8 classification explicit + logged",
-        "W5",
-        "observe/mutate classifier not implemented",
+        obs_ran and obs_logged and mut_logged,
+        f"observe ran={obs_ran} observe_logged={obs_logged} mutate_logged={mut_logged}",
+        fails_if="a read-only tool is gated/blocked, or any invocation is "
+        "missing from the attempts log with kind+decision",
     )
-    pending("W5-11 approval expiry", "W5", "approval cards not implemented")
-    pending(
+
+
+def _w5_11_approval_expiry(tag: str, db: str) -> None:
+    """W5-11 — an approval whose TTL elapsed must never authorize.
+    Fails if: an expired approval still authorizes execution."""
+    args = _w5_growth_args(tag, "exp")
+    r0 = _w5_obj(_w5_cli(*args, enforce=True, db=db))
+    key = r0.get("effect_key", "") if r0 else ""
+    approved = bool(key) and _w5_approve(key, db=db, ttl=1)
+    time.sleep(2)
+    r = _w5_obj(_w5_cli(*args, enforce=True, db=db))
+    expired = bool(r) and r.get("decision") == "expired" and r.get("ok") is False
+    ledger = _w5_ledger(key, db=db) if key else None
+    check(
+        "W5-11 approval expiry",
+        approved and expired and bool(ledger) and ledger.get("state") == "expired",
+        f"approved={approved} result={r and r.get('decision')} "
+        f"ledger={ledger and ledger.get('state')}",
+        fails_if="an approval whose TTL has elapsed still authorizes execution",
+    )
+
+
+def _w5_13_concurrent_same_key(tag: str, db: str) -> None:
+    """W5-13 — concurrent approvals of the same key, executed exactly once.
+    Four docker execs race the same approved key; exactly one may authorize.
+    Fails if: two concurrent callers both authorize one key (double execution).
+    """
+    args = _w5_growth_args(tag, "conc")
+    r0 = _w5_obj(_w5_cli(*args, enforce=True, db=db))
+    key = r0.get("effect_key", "") if r0 else ""
+    if not key:
+        check(
+            "W5-13 concurrent approvals of the same key",
+            False,
+            "no effect key",
+            fails_if="gate refused before yielding a key (precondition)",
+        )
+        return
+    _w5_approve(key, db=db)
+    procs = []
+    for _ in range(4):
+        p = subprocess.Popen(
+            [
+                "docker",
+                "exec",
+                "-i",
+                "-w",
+                "/opt/balabot",
+                "-e",
+                "BALABOT_DATA_ROOT=/opt/data",
+                "-e",
+                f"BALABOT_APPROVALS_DB={db}",
+                "-e",
+                "BALABOT_APPROVALS_ENFORCE=1",
+                CONTAINER,
+                "python3",
+                "-m",
+                "balabot.bot_tools",
+                *args,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        procs.append(p)
+    verdicts = []
+    for p in procs:
+        out, _ = p.communicate(timeout=120)
+        j = _tool_json(out)
+        if isinstance(j, dict) and _w5_executed(j):
+            verdicts.append("authorized")
+        elif isinstance(j, dict) and j.get("decision") == "replay":
+            verdicts.append("replay")
+        else:
+            verdicts.append("other")
+    bot = f"zz-w5-conc-{tag}"
+    one_exec = (
+        verdicts.count("authorized") == 1
+        and all(v in ("replay", "authorized") for v in verdicts)
+        and _w5_growth_count(bot) == 1
+    )
+    check(
         "W5-13 concurrent approvals of the same key",
-        "W5",
-        "approval cards not implemented",
+        one_exec,
+        f"verdicts={verdicts} growth_entries={_w5_growth_count(bot)}",
+        fails_if="two concurrent callers both authorize one key (missing "
+        "atomic exactly-once claim) — double execution",
     )
-    pending(
+
+
+def _w5_14_read_only_never_gated(tag: str, db: str) -> None:
+    """W5-14 — read-only tools run even with enforcement ON.
+    Fails if: a read-only tool is intercepted/gated by the gate."""
+    obs = _w5_cli("list_org_secrets", "--bot", f"zz-w5-14-{tag}", enforce=True, db=db)
+    is_list = isinstance(obs, list)
+    check(
         "W5-14 read-only tools never gated",
-        "W5",
-        "observe/mutate classifier not implemented",
+        is_list,
+        f"list_org_secrets under enforce=1 -> {'list' if is_list else type(obs).__name__}",
+        fails_if="a read-only tool is intercepted/gated by the approval gate "
+        "when enforcement is on",
     )
 
 
