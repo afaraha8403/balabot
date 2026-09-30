@@ -1,6 +1,6 @@
 import type {Dispatch, SetStateAction} from 'react';
 import {getSessions} from './api';
-import type {ServerSession, Session, SessionsResponse} from './api';
+import type {ChatMessage, ServerMessage, ServerSession, Session, SessionsResponse} from './api';
 
 const KEY = 'balabot.sessions.v1';
 const LAST_KEY = 'balabot.lastBot.v1';
@@ -81,12 +81,71 @@ export function saveUnreadBots(ids: string[]) {
 
 
 /**
+ * Sort conversation messages monotonically: server-sequenced messages
+ * (seq) always precede unsequenced local messages, ordered strictly by seq.
+ * Unsequenced messages are ordered by local timestamp (at).
+ */
+export function sortMessages(messages: ChatMessage[]): ChatMessage[] {
+  return [...messages].sort((a, b) => {
+    if (a.seq !== undefined && b.seq !== undefined) {
+      return a.seq - b.seq;
+    }
+    if (a.seq !== undefined && b.seq === undefined) {
+      return -1;
+    }
+    if (a.seq === undefined && b.seq !== undefined) {
+      return 1;
+    }
+    return (a.at || 0) - (b.at || 0);
+  });
+}
+
+/**
+ * Merge incoming server-authoritative transcript messages with existing
+ * client state. Deduplicates by message_id, sequence number, or content/role match.
+ * Preserves optimistic UI properties (toolCalls, thinking, reactions) while updating
+ * server sequence and ID.
+ */
+export function mergeServerMessages(
+  existing: ChatMessage[],
+  incoming: ServerMessage[],
+): ChatMessage[] {
+  if (!incoming || incoming.length === 0) return existing;
+
+  // Filter out default onboarding placeholder if real messages exist
+  const withoutOnboarding = existing.filter(
+    m => m.seq !== undefined || m.role !== 'assistant' || !m.content.startsWith('Hey — good to meet you'),
+  );
+
+  const result = [...withoutOnboarding];
+  for (const sm of incoming) {
+    const idx = result.findIndex(
+      m => (sm.message_id && (m.id === sm.message_id || m.id === `msg-${sm.message_id}`)) ||
+           (m.seq !== undefined && m.seq === sm.seq) ||
+           (m.role === sm.role && m.content === sm.content && (!m.seq || m.seq === sm.seq)),
+    );
+    if (idx >= 0) {
+      result[idx] = {
+        ...result[idx],
+        id: sm.message_id || result[idx].id,
+        seq: sm.seq,
+      };
+    } else {
+      result.push({
+        id: sm.message_id,
+        role: sm.role as 'user' | 'assistant' | 'system',
+        content: sm.content,
+        at: sm.created_at ? Date.parse(sm.created_at) || Date.now() : Date.now(),
+        seq: sm.seq,
+      });
+    }
+  }
+  return sortMessages(result);
+}
+
+/**
  * Add a server session row into the local Session[] surface. The server is
- * the source of truth for the conversation REGISTER (id/botId/purpose/spans);
- * message bodies stay in the browser and are merged in as they exist here.
- * A session already present locally keeps its messages; one that is not gets
- * an empty thread (or, for the server rows, none at all — the register is what
- * we read from the server, not the transcripts).
+ * the source of truth for the conversation register and transcript.
  */
 export function mergeServerSession(
   sessions: Session[],
@@ -96,18 +155,23 @@ export function mergeServerSession(
   const realBot = row.botId || botId; // never accept an empty botId
   if (!realBot) return sessions;
   const existing = sessions.find(s => s.id === row.id);
+  const rawCreatedAt = row.createdAt || (row as any).lastActivity;
+  const idTs = row.id.startsWith('s_') ? parseInt(row.id.split('_')[1], 10) : NaN;
+  const createdAt = rawCreatedAt
+    ? (typeof rawCreatedAt === 'number' ? rawCreatedAt : (Date.parse(rawCreatedAt) || 0))
+    : (!isNaN(idTs) && idTs > 0 ? idTs : 0);
   if (existing) {
     return sessions.map(s =>
       s.id === row.id
         ? {...s, botId: s.botId || realBot, title: row.title || s.title,
            purpose: row.purpose ?? s.purpose,
            topicSpans: row.topicSpans ?? s.topicSpans,
+           createdAt: createdAt || s.createdAt,
            localOnly: false}
         : s,
     );
   }
   return [
-    ...sessions,
     {
       id: row.id,
       botId: realBot,
@@ -115,10 +179,11 @@ export function mergeServerSession(
       purpose: row.purpose || '',
       messages: [],
       handoffs: [],
-      createdAt: row.createdAt ?? Date.now(),
+      createdAt,
       topicSpans: row.topicSpans ?? [],
       localOnly: false,
     },
+    ...sessions,
   ];
 }
 
@@ -141,7 +206,7 @@ export async function syncSessionsFromServer(
       for (const row of res.sessions ?? []) {
         next = mergeServerSession(next, row, botId);
       }
-      return next;
+      return [...next].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     });
     return res;
   } catch {

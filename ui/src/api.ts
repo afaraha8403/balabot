@@ -87,10 +87,21 @@ export type VoiceMemoData = {
   audioUrl?: string;
 };
 
+export type ServerMessage = {
+  message_id: string;
+  session_id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  created_at?: string;
+  seq: number;
+};
+
 export type ChatMessage = {
+  id?: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   at: number;
+  seq?: number;
   /** Tool calls the assistant made while producing this message. */
   toolCalls?: ToolProgress[];
   /** The agent's private reasoning ("thinking") stream, kept separate from the answer. */
@@ -335,6 +346,111 @@ export async function patchServerSession(
     method: 'PATCH',
     body: JSON.stringify({purpose}),
   });
+}
+
+export async function getServerMessages(
+  sessionId: string,
+  sinceSeq?: number,
+  limit?: number,
+): Promise<{available: boolean; sessionId: string; messages: ServerMessage[]}> {
+  const params = new URLSearchParams();
+  if (sinceSeq !== undefined && sinceSeq > 0) params.set('since_seq', String(sinceSeq));
+  if (limit !== undefined && limit > 0) params.set('limit', String(limit));
+  const qs = params.toString();
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/messages${qs ? `?${qs}` : ''}`);
+}
+
+export async function createSessionMessage(
+  sessionId: string,
+  role: string,
+  content: string,
+  messageId?: string,
+  botId?: string,
+): Promise<{created: boolean; message: ServerMessage}> {
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({role, content, message_id: messageId, bot_id: botId}),
+  });
+}
+
+export function subscribeSessionEvents(
+  sessionId: string,
+  onMessage: (msg: ServerMessage) => void,
+  sinceSeq?: number,
+  signal?: AbortSignal,
+): () => void {
+  const controller = new AbortController();
+  const activeSignal = signal || controller.signal;
+
+  let currentSeq = sinceSeq ?? 0;
+  let running = true;
+
+  const run = async () => {
+    while (running && !activeSignal.aborted) {
+      try {
+        const url = `/api/sessions/${encodeURIComponent(sessionId)}/events?since_seq=${currentSeq}`;
+        const res = await fetch(url, {
+          credentials: 'include',
+          signal: activeSignal,
+          headers: {'Cache-Control': 'no-cache'},
+        });
+        if (!res.ok || !res.body) {
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        try {
+          while (running && !activeSignal.aborted) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+            let idx: number;
+            while ((idx = buffer.indexOf('\n\n')) !== -1) {
+              const frame = buffer.slice(0, idx).trim();
+              buffer = buffer.slice(idx + 2);
+              if (frame) {
+                let eventName = '';
+                let data = '';
+                let id = '';
+                for (const line of frame.split('\n')) {
+                  if (line.startsWith('event:')) eventName = line.slice(6).trim();
+                  else if (line.startsWith('data:')) data = line.slice(5).trim();
+                  else if (line.startsWith('id:')) id = line.slice(3).trim();
+                }
+                if (id && /^\d+$/.test(id)) {
+                  currentSeq = Math.max(currentSeq, parseInt(id, 10));
+                }
+                if (eventName === 'message' && data) {
+                  try {
+                    const parsed = JSON.parse(data) as ServerMessage;
+                    if (parsed.seq !== undefined) {
+                      currentSeq = Math.max(currentSeq, parsed.seq);
+                    }
+                    onMessage(parsed);
+                  } catch {}
+                }
+              }
+            }
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      } catch {
+        if (activeSignal.aborted || !running) break;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  };
+
+  void run();
+
+  return () => {
+    running = false;
+    controller.abort();
+  };
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -668,10 +784,11 @@ export async function enqueueMessage(
   sessionId: string,
   content: string,
   messageId?: string,
+  botId?: string,
 ): Promise<{ok: boolean; message: unknown; queue: unknown}> {
   return api(`/api/queue/${encodeURIComponent(sessionId)}`, {
     method: 'POST',
-    body: JSON.stringify({content, message_id: messageId}),
+    body: JSON.stringify({content, message_id: messageId, bot_id: botId}),
   });
 }
 
