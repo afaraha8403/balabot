@@ -293,31 +293,46 @@ product feature that does not exist in the repo, or a test hook that would
 violate the "no fixture logic in product code" rule. Building them now would be
 fabrication, not a fix.
 
+Verified against the current tree (HEAD `b1a18c5`); each needs a product feature
+that does not exist in the repo, or a test-only hook the "no fixture logic in
+product code" rule forbids.
+
 - **W6-8 pruning never drops this turn's image** and **W6-12 attachment payload
   size cap upstream** — the upstream payload is assembled and forwarded *inside*
   the `:9119` host process to a hard-coded upstream (`ui/server.py:64`
   `UPSTREAM = "http://127.0.0.1:8642"`). There is no payload-recording seam and,
-  more importantly, no context-pruning or upstream payload-cap feature in the
-  product (`grep` for `prune`/payload caps in `balabot/**` finds none). No
-  in-repo spec (docs/kb) states the pruning/cap contract, so implementing one
-  would invent behaviour. A "payload recorder" is a test double, not the feature.
+  more importantly, neither a context-pruning nor an upstream payload-cap feature
+  exists (`grep -n "prune|payload cap|max_payload|trim" balabot/ ui/server.py`
+  finds only the unrelated `SessionStore.compact`). No in-repo spec (`docs/kb/`)
+  states the pruning or cap contract, so implementing one would invent behaviour
+  and the "payload recorder" would be a test double rather than the feature.
 - **W3-15 lease audit trail completeness** — no screen-lease subsystem
-  (acquire/expire/force-release) and no lease endpoints exist to audit.
+  (acquire/expire/force-release) and no lease endpoints exist to audit
+  (`grep -n "lease" ui/server.py balabot/*.py` → 0 functional hits).
 - **W7-6 display cap and eviction** — no display-allocation/eviction state is
   queryable over HTTP; `balabot/computer.py` has no cap/eviction model.
 - **W7-14 sub-bots don't get displays** — no sub-agent display policy exists;
-  `ui/subagents.py` only *reads* the CLI lease from the container, it does not
-  gate display allocation.
-- **W8-1 slow container call doesn't stall endpoint** — already true by
-  construction: `_org_run_async` dispatches through `asyncio.to_thread`
-  (`ui/server.py:1319`). Proving it needs a slow-work fixture, and the only way
-  to inject one is a test-only branch in product code (forbidden) — there is no
-  genuinely slow endpoint to observe.
+  `ui/subagents.py` contains no display-allocation code to gate (its only
+  `lease` reference is a docstring about the container's CLI lease).
+- **W8-1 slow container call doesn't stall endpoint** — true by construction:
+  `_org_run_async` dispatches through `asyncio.to_thread` (`ui/server.py:1319`)
+  and the static audit `W8-13` proves no blocking call sits inside an `async def`.
+  Proving it dynamically needs a *known* slow work unit; the only genuine slow
+  container calls are the screenshot paths (`_computer_run` → `docker exec`, a
+  **sync** `def` served on the threadpool, not the `to_thread` path under test).
+  Injecting a delay is a test-only branch in product code (forbidden).
 - **W8-9 endpoints state 'pending' honestly** — needs the same absent slow-work
-  fixture; the honesty sweep is already covered by `tests/e2e/org_e2e.py` S10.
-- **W8-11 background task errors surface** — no background routine runner exists
-  to force a throwing task.
+  fixture; the honesty sweep itself is already proven by `tests/e2e/org_e2e.py`
+  S10 and `unavailable()` (`ui/server.py:182`), so a bridge re-assertion would be
+  redundant, not new coverage.
+- **W8-11 background task errors surface** — no background routine *runner*
+  exists. `ui/server.py` owns only a routine *list* (`_get_bot_routines`,
+  `create/update/delete`), nothing schedules or executes a task to make throw.
 
-**Net for this pass:** three rows landed and pushed — `W2-6`/`W2-7`
-(`022b99d`) and `W9-14` (`8da61c7`) — with full `pytest` green (487) and the
-live harness green (48 passed / 0 failed). Six rows remain honestly `pending`.
+**Net for this pass:** two required tasks landed and pushed —
+`W2-2` deterministic server-side checks (`740a061`) and the real `W2-13`
+client-ordering fix + transcript-scoped harness measurement (`b1a18c5`) — with
+full `pytest` green (**487 passed**) and the live API harness green
+(**48 passed / 0 failed / 8 pending**). The 8 rows above remain honestly
+`pending`: no in-repo spec authorises the missing product subsystems, and no
+fixture hook may be added to product code. An honest gap beats a fabricated pass.
