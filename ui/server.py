@@ -1097,6 +1097,91 @@ def end_intervention_endpoint(resume_token: str):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+# ── screen leases (one agent holds one display/session resource) ─────────────
+# Lease lifecycle with a complete audit trail. Every state transition appends
+# an immutable audit row; expiry is evaluated on read and swept lazily.
+@app.get("/api/leases")
+def list_leases():
+    from balabot.screen_lease import list_leases as lease_list
+
+    return {"ok": True, "leases": lease_list()}
+
+
+@app.get("/api/leases/audit")
+def list_lease_audit():
+    from balabot.screen_lease import list_audit
+
+    return {"ok": True, "audit": list_audit()}
+
+
+@app.get("/api/leases/{lease_id}/audit")
+def list_lease_audit_for_lease(lease_id: str):
+    from balabot.screen_lease import list_audit
+
+    return {"ok": True, "audit": list_audit(lease_id)}
+
+
+@app.post("/api/leases/acquire")
+async def acquire_lease_endpoint(request: Request):
+    from balabot.screen_lease import acquire_lease, LeaseError
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        rec = acquire_lease(
+            body.get("agent_id", ""),
+            body.get("resource_id", ""),
+            ttl=body.get("ttl", 60.0),
+        )
+        return {"ok": True, "record": rec}
+    except LeaseError as exc:
+        detail = str(exc)
+        status = 409 if "already leased by" in detail else 400
+        raise HTTPException(status_code=status, detail=detail)
+
+
+@app.get("/api/leases/{lease_id}")
+def get_lease_endpoint(lease_id: str):
+    from balabot.screen_lease import get_lease, LeaseNotFound
+
+    try:
+        return {"ok": True, "record": get_lease(lease_id)}
+    except LeaseNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/api/leases/{lease_id}/release")
+async def release_lease_endpoint(lease_id: str, request: Request):
+    from balabot.screen_lease import release_lease, LeaseError
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        rec = release_lease(lease_id, body.get("agent_id", ""))
+        return {"ok": True, "record": rec}
+    except LeaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/leases/{lease_id}/force-release")
+async def force_release_lease_endpoint(lease_id: str, request: Request):
+    from balabot.screen_lease import force_release, LeaseError
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        rec = force_release(lease_id, body.get("actor", ""), body.get("reason", ""))
+        return {"ok": True, "record": rec}
+    except LeaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 # ── bot routines (visible, toggleable schedule list) ─────────────────────────
 def _routines_dir() -> pathlib.Path:
     env = os.environ.get("BALABOT_DATA_ROOT")
