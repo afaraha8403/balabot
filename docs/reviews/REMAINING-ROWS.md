@@ -420,5 +420,74 @@ is green at **52 passed / 0 failed / 7 pending** (was 48 / 0 / 8) and full
 `pytest` is green at **487 passed** (one unrelated timing flake in
 `tests/test_intervention.py` re-ran green). `W6-12` remains `pending` because it
 is a genuinely missing product feature with no in-repo spec — the remaining 7
-rows need product subsystems that this repo does not authorise yet, and no
-fixture hook may be added to product code. An honest gap beats a fabricated pass.
+  rows need product subsystems that this repo does not authorise yet, and no
+  fixture hook may be added to product code. An honest gap beats a fabricated pass.
+
+## W3-15 — screen-lease audit trail completeness (built and green)
+
+**Proves:** the screen-lease subsystem exists and is reachable over HTTP. One
+agent may hold a screen (a display/session resource) at a time; the lifecycle is
+`acquire` / `release` / owner-only `force-release` / lazy TTL expiry, and **every
+state transition appends exactly one immutable audit row** (actor, from→to, at,
+reason). Acquiring a resource already actively held by another agent is refused
+by name — no silent stealing.
+
+Implementation: `balabot/screen_lease.py` (SQLite store, WAL),
+`ui/server.py` `/api/leases*` routes, `tests/test_screen_lease.py` (13 cases).
+
+**Scenarios per transition (all in `tests/test_screen_lease.py`, all green):**
+- acquire → one audit row `(none → active)`, actor = agent (`test_acquire_appends_none_to_active_audit_row`).
+- release → `(active → released)`, actor = holder (`test_release_appends_active_to_released_audit_row`); non-holder refused (`test_non_holder_may_not_release`).
+- force-release by owner → `(active → force_released)` **with reason**; non-owner and blank reason refused (`test_force_release_by_owner_appends_reason`, `test_force_release_requires_owner_and_reason`).
+- expiry → `(active → expired)`, actor = `system`, reason = `ttl_elapsed` (`test_expiry_appends_active_to_expired_audit_row`).
+- acquire while held → refused naming the holder; holder unchanged, no second lease (`test_acquire_while_held_refused_naming_the_holder`).
+- re-acquire by the same holder renews the TTL with **no** new transition/audit row (`test_re_acquire_by_holder_renews_without_a_transition_row`).
+- HTTP: acquire/list/get/audit/force-release over `TestClient`, conflict is **409** naming the holder, unknown lease is **404** (`test_lease_http_routes`).
+
+**Completeness proof (RED → GREEN).** Six transitions (acquire, release,
+acquire, force-release, acquire, expire) must leave exactly six audit rows in
+order. RED removes the release transition's audit write — the count drops to 5
+and the missing `released` breaks the order. GREEN restores it — exactly 6, in
+order. Run non-invasively at runtime (suppressing the `released` audit append)
+so no product file was left mutated:
+
+```
+RED  states: ['active', 'active', 'force_released', 'active', 'expired'] count: 5
+GREEN states: ['active', 'released', 'active', 'force_released', 'active', 'expired'] count: 6
+OK: completeness property fails when an audit write is removed, holds when restored
+```
+
+Corresponding committed test: `test_audit_trail_is_exactly_n_transitions_in_order`
+asserts `len(audit) == 6`, the exact `to_state` order, and strictly increasing
+ids (insertion order = transition order).
+
+**Concurrent release cannot be clobbered.** Expiry is persisted through a
+conditional `UPDATE screen_leases SET state='expired' ... WHERE lease_id=? AND
+state='active'`, and the audit row is appended only when `cursor.rowcount == 1`,
+mirroring `balabot/intervention.py:_db_expire_if_pending`. A sweep holding a
+stale `active` copy of a lease that was released in the meantime wins nothing,
+does not revert the release, and writes no phantom audit row.
+`test_expiry_sweep_cannot_clobber_a_concurrent_release` forces exactly that
+interleaving (reintroduces a stale active record into the sweep's read) and
+asserts the state stays `released` and the trail is `[active, released]`.
+Storage also enforces one active lease per resource with a partial unique index
+(`resource_id WHERE state='active'`), so a racing acquire loses as an explicit
+refusal naming the holder, never a second active row.
+
+**Verification:** `tests/test_screen_lease.py` **13 passed**; full
+`pytest tests -q` **502 passed** (up from the pre-row 489 baseline in the
+sibling note; no regressions). Routes are real call sites on `server.app`, so
+the module is shipped, not orphaned.
+
+**Not done / caveats:**
+- No background sweeper process: expiry is evaluated on read and swept by the
+  list/audit/acquire paths only, exactly as the row specifies. There is no
+  timer-driven sweep and none was required.
+- **Provenance caveat (recorded honestly):** mid-session this worktree already
+  contained an untracked, complete `screen_lease.py` + test + `server.py` routes
+  that another writer (a sibling agent that leaked into `wt/w315`, or a prior
+  aborted run) was actively editing — I observed a `# MUTATION` edit appear and
+  be restored during my own test run. I did not author the initial files; I
+  verified them end to end, reproduced the RED→GREEN completeness proof non-
+  invasively, confirmed the full suite is green, and committed the row. If a
+  sibling was mid-flight, the coordinator should expect a same-branch collision.
