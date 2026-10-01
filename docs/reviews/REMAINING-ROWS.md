@@ -477,6 +477,14 @@ Full suite: **493 passed** in this worktree.
 process restart) and there is no scheduler — a caller must trigger a run. Those
 are W8-3/W8-4/W8-7/W8-12 and are out of this row's scope.
 
+**Honest deployment gap.** No production code registers a routine handler yet,
+so against the live server every routine POST returns the honest `409` — the
+runner is a live, callable surface with no routine body wired behind it. That is
+the exact "declared capability, zero effect" shape the project rules warn about,
+and it is stated here rather than hidden: the row proves the *runner and its
+error surfacing*, not that any shipped routine executes. Wiring real routine
+bodies is follow-up work.
+
 ## W8-9 endpoints state 'pending' honestly — RETIRED (duplicate coverage)
 
 Not built. The honesty sweep already exists and is proven: the unavailable-state
