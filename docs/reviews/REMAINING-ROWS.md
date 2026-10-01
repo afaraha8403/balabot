@@ -422,3 +422,101 @@ is green at **52 passed / 0 failed / 7 pending** (was 48 / 0 / 8) and full
 is a genuinely missing product feature with no in-repo spec — the remaining 7
 rows need product subsystems that this repo does not authorise yet, and no
 fixture hook may be added to product code. An honest gap beats a fabricated pass.
+
+## W7-6 — display cap and eviction (landed, commit `de45425`)
+
+**Proves:** a single org's concurrent displays are bounded by a named cap
+(default **5**, overridable via `BALABOT_DISPLAY_CAP`). Allocation state is
+queryable over HTTP — per org: which display is allocated, to which agent, the
+cap, and every eviction. A named persistent agent that requests a display **at**
+the cap evicts the least-recently-used allocation, records the eviction
+(evicted agent, requested-by, reason, timestamp), and is granted the freed
+display. A request **under** the cap never evicts.
+
+**Changes:**
+- `balabot/fleet.py` — runtime allocator layered on the manifest resolver:
+  `display_cap()` (named `DISPLAY_CAP_DEFAULT = 5`, env-read, rejects a
+  non-integer/sub-1 value with `FleetError`), `display_pool_base()`,
+  `displays_db()`, `displays_state(org)`, `allocate_display(org, agent)`.
+  State is one JSON file under `BALABOT_DATA_ROOT` (override
+  `BALABOT_DISPLAYS_DB`), written atomically (`tmp` + `os.replace`) under a
+  `threading.Lock` so two concurrent requests cannot both read the same LRU and
+  lose an eviction. Recency is a monotonic per-org `last_used_seq`, so
+  eviction order is deterministic rather than wall-clock-dependent.
+- `ui/server.py` — `GET /api/orgs/{org}/displays` and
+  `POST /api/orgs/{org}/displays` (`{"agent": ...}` → grant / policy), run
+  through the existing `_org_run` container bridge like the other org surfaces.
+- `tests/test_display_policy.py` — 14 tests: cap default/config/rejection,
+  under-cap never evicts, idempotent touch, at-cap evicts-LRU-records-grants,
+  the explicit recency test, sub-agent refusal, unknown org, and the HTTP
+  surface.
+
+**RED→GREEN (W7-6).** RED: eviction disabled by replacing the `if slot is None:`
+LRU block with `slot = f":{base + cap}"` (grant past the cap, no record):
+```
+$ pytest tests/test_display_policy.py -q -k "cap_evicts or lru"   # eviction off
+FAILED test_allocate_at_cap_evicts_lru_with_record_and_grants
+FAILED test_lru_distinguishes_recency
+E   AssertionError: assert ':4' == ':1'          # no freed-slot reuse
+E   TypeError: 'NoneType' object is not subscriptable   # evicted record is None
+2 failed
+```
+GREEN after restoring the LRU block + eviction record:
+```
+$ pytest tests/test_display_policy.py -q
+14 passed
+$ pytest tests -q
+503 passed in 70.26s
+```
+
+**LRU distinctness (explicit ask).** `test_lru_distinguishes_recency`: cap=3,
+allocate `alpha`,`bravo`,`charlie`, re-touch `alpha`, then request `delta`. The
+evicted agent is `bravo` (`:2`), not `alpha` — without the touch, `alpha`
+(oldest) would have been evicted.
+
+## W7-14 — sub-agents don't get displays (landed, commit `de45425`)
+
+**Proves:** a sub-agent is a job, not an identity. A display request for an id
+the org's computer-space manifest does not declare is refused with the explicit
+sub-agent policy reason, is given no display, and consumes no cap slot
+(`displays_state` count and the eviction list are unchanged) — including when
+the org is already at the cap.
+
+**Change:** `balabot/fleet.py::allocate_display` refuses any `agent_id` absent
+from the org manifest before it opens the state file, returning
+`granted=False, refused=True` with a reason naming the policy. The HTTP route
+surfaces that refusal as a policy outcome (`available: true`, `granted: false`),
+not a bridge error.
+
+**RED→GREEN (W7-14).** RED: the sub-agent guard removed
+(`if agent_id not in manifest.agents:` → `if False:`):
+```
+$ pytest tests/test_display_policy.py -q -k "subagent"   # guard off
+FAILED test_subagent_refused_with_policy_reason_and_no_allocation
+FAILED test_subagent_does_not_count_against_cap_or_evict
+FAILED test_http_subagent_refused_with_reason_and_state_unchanged
+E   assert True is False    # granted a display outright
+E   assert False is True    # refusal flag absent
+3 failed
+```
+GREEN after restoring the guard:
+```
+$ pytest tests/test_display_policy.py -q
+14 passed
+$ pytest tests -q
+503 passed in 70.26s
+```
+
+**Honest gaps.**
+- "Named persistent agent" is defined by membership in the org's fleet manifest
+  (`fleet/balacode.json`) — the resolver's existing source of truth. There is no
+  separate sub-agent identity registry, so an unknown/undeclared id is the
+  sub-agent case. The spawn ledger `ui/subagents.py` reads is not consulted.
+- The two HTTP routes run inside the container via `_org_run`; the running
+  container keeps its image-baked `balabot/fleet.py`, so until the module is
+  deployed (image rebuild) the routes report an honest `unavailable` against the
+  live server. The pytest HTTP tests exercise the real route + snippet against
+  the real `fleet` functions through an in-process `_org_run` stand-in.
+- `tests/e2e/bridge_api_e2e.py` still registers both rows as `pending`; the live
+  integration-gate scenario is left to the coordinator (the harness is run
+  serially and was not run or edited this pass).
