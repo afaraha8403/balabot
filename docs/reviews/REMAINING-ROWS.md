@@ -286,6 +286,95 @@ $ python tests/e2e/bridge_api_e2e.py
   checks passed in both runs. The harness makes live model turns, so a rare
   timing/answer flake is expected; no code path in this change was implicated.
 
+## W6-8 — pruning never drops this turn's image (landed)
+
+**Proves:** the server-side pruning that already exists — `SessionStore.compact()`
+in `balabot/sessions.py:366` (landed with W2-6/W2-7) — force-retains the newest
+user turn, so the turn that carries this turn's image reference survives
+compaction while the older middle is dropped. The prior `REMAINING-ROWS` note
+that "neither a context-pruning ... feature exists" was wrong: `compact()` **is**
+the pruning mechanism, not an unrelated helper, and W6-8 is an invariant of it —
+not a new feature and not blocked on an upstream payload recorder.
+
+**Changes:**
+- `tests/e2e/bridge_api_e2e.py` — `w6_scenarios()` replaces the W6-8 `pending`
+  row with `_w6_08_compact_keeps_newest_turn_image()`, driven through the live
+  HTTP surface. It uploads a real PNG via `POST /api/attachments`, writes the
+  served `/api/attachments/...` URL into the **newest** user turn, compacts with
+  `protect_first_n=1, protect_last_n=1` (so the tail window holds only the
+  trailing assistant reply and the newest user turn would be pruned without the
+  protection), then reads the durable transcript back.
+- Shared `_container_deploy()` / `_container_restore()` helpers snapshot the
+  container's image-baked `balabot/sessions.py`, deploy the committed copy for
+  the run, and restore it on exit (the same contract the W2-6/W5/W9 rows use).
+
+**GREEN evidence** (live `:9119`, committed `sessions.py` deployed):
+```
+[PASS] W6-8 compact accepted                                    HTTP 200 pruned=3 remaining=3
+[PASS] W6-8 newest turn's image survives pruning                image kept=True (3 turns remain)
+[PASS] W6-8 older middle content dropped (not a no-op)          3 messages remain
+[PASS] W6-8 image file survives pruning                         GET /api/attachments/... -> HTTP 200
+```
+`pruned=3 remaining=3` = the immortal head `u1` + the newest user turn `u3`
+(image) + the trailing reply `a3`; the middle `a1,u2,a2` is gone, and `u3`'s
+image URL is still in the transcript.
+
+**RED evidence** (mutation: `balabot/sessions.py` newest-user-turn retention
+inverted — `keep.add(s)` → `keep.discard(s)` — so the prune is *forced* to
+include the newest turn):
+```
+[PASS] W6-8 compact accepted                                    HTTP 200 pruned=4 remaining=2
+[FAIL] W6-8 newest turn's image survives pruning                image kept=False (2 turns remain)  [fails if: the newest user turn carrying this turn's image was pruned]
+[PASS] W6-8 older middle content dropped (not a no-op)          2 messages remain
+[PASS] W6-8 image file survives pruning                         GET /api/attachments/... -> HTTP 200
+```
+Only the image-survival check flips — the row genuinely measures the protected-
+newest-turn property and nothing else. Restored to GREEN above; the mutation was
+never committed (`git checkout -- balabot/sessions.py`).
+
+**Honest scope of the proof.** The durable transcript stores the turn's text; the
+attachment's served URL is the reference that rides the newest turn in this
+scenario, and the attachment **file** lives under the attachments directory
+(outside the pruned transcript) so pruning never targets it. What the scenario
+proves at the pruning layer is therefore the load-bearing fact: `compact()` never
+drops the newest user turn. End-to-end multimodal forwarding of the *current*
+turn's image (request-body `attachments` → `image_url` parts before upstream) is
+separately proven by `tests/test_attachments_p0_5.py::
+test_chat_converts_image_attachment_to_multimodal_object`. Together the image
+cannot be dropped by pruning.
+
+**Honest limit (unchanged contract):** the running container keeps its
+image-baked `sessions.py` (the harness restores it), so the endpoint reports an
+honest `unavailable` against the container until `balabot/sessions.py` is
+deployed — like the rest of the W5/W9 surface.
+
+## W6-12 — attachment payload size cap upstream (stays pending, missing spec)
+
+**This one is genuinely a missing feature.** No upstream payload-size cap exists
+anywhere in the repo, and no in-repo spec asks for one, so it is left `pending`
+with the precise account below rather than fabricated.
+
+- **The upstream payload path.** `/api/chat` (`ui/server.py:2999`) assembles the
+  forwarded `messages` — including multimodal `{"type": "image_url", ...}` parts
+  built in `ui/server.py:3057-3141` — and streams it to the hard-coded upstream
+  `UPSTREAM = "http://127.0.0.1:8642"` (`ui/server.py:64`) at
+  `f"{UPSTREAM}/p/{profile}/v1/chat/completions"` (`ui/server.py:2134`).
+- **The only size control today.** `ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024`
+  (`ui/server.py:713`), enforced per file inside `upload_attachment`
+  (`ui/server.py:716-802`). That bounds a *single* uploaded attachment; it does
+  **not** bound the assembled upstream payload. N attachments, or a large
+  accumulated transcript, forward unbounded.
+- **Where a cap would live.** A byte/size budget on the assembled `messages`
+  right before the upstream stream opens (`ui/server.py:3130-3160`), or an
+  explicit payload guard in the chat handler.
+- **The missing spec.** No `docs/kb/` note states the cap's threshold, what it
+  counts (attachments only, transcript text, or both), or its behaviour on breach
+  (refuse the turn / drop oldest / drop images). Building it now would invent the
+  contract — exactly the fabrication the project rules forbid.
+
+**Honest pending count this pass:** W6-8 landed (pending 8 → 7); W6-12 remains
+one of the 7.
+
 ## Rows not landed — honest blockers
 
 These remain registered `pending` in `tests/e2e/bridge_api_e2e.py`. Each needs a
@@ -293,19 +382,13 @@ product feature that does not exist in the repo, or a test hook that would
 violate the "no fixture logic in product code" rule. Building them now would be
 fabrication, not a fix.
 
-Verified against the current tree (HEAD `b1a18c5`); each needs a product feature
+Verified against the current tree (HEAD `8db3e9e`); each needs a product feature
 that does not exist in the repo, or a test-only hook the "no fixture logic in
 product code" rule forbids.
 
-- **W6-8 pruning never drops this turn's image** and **W6-12 attachment payload
-  size cap upstream** — the upstream payload is assembled and forwarded *inside*
-  the `:9119` host process to a hard-coded upstream (`ui/server.py:64`
-  `UPSTREAM = "http://127.0.0.1:8642"`). There is no payload-recording seam and,
-  more importantly, neither a context-pruning nor an upstream payload-cap feature
-  exists (`grep -n "prune|payload cap|max_payload|trim" balabot/ ui/server.py`
-  finds only the unrelated `SessionStore.compact`). No in-repo spec (`docs/kb/`)
-  states the pruning or cap contract, so implementing one would invent behaviour
-  and the "payload recorder" would be a test double rather than the feature.
+- **W6-12 attachment payload size cap upstream** — see the dedicated section
+  above: no payload-cap behaviour exists, the per-file 10 MiB upload limit is the
+  only size control, and no in-repo spec defines the cap contract.
 - **W3-15 lease audit trail completeness** — no screen-lease subsystem
   (acquire/expire/force-release) and no lease endpoints exist to audit
   (`grep -n "lease" ui/server.py balabot/*.py` → 0 functional hits).
@@ -329,10 +412,13 @@ product code" rule forbids.
   exists. `ui/server.py` owns only a routine *list* (`_get_bot_routines`,
   `create/update/delete`), nothing schedules or executes a task to make throw.
 
-**Net for this pass:** two required tasks landed and pushed —
-`W2-2` deterministic server-side checks (`740a061`) and the real `W2-13`
-client-ordering fix + transcript-scoped harness measurement (`b1a18c5`) — with
-full `pytest` green (**487 passed**) and the live API harness green
-(**48 passed / 0 failed / 8 pending**). The 8 rows above remain honestly
-`pending`: no in-repo spec authorises the missing product subsystems, and no
+**Net for this pass (W6-8 landed):** `W6-8` now runs as a real RED→GREEN
+scenario against the live artifact (`8db3e9e`) — it disproves the earlier claim
+that server-side pruning did not exist: `SessionStore.compact()` **is** the
+pruning mechanism, and the newest turn's image survives it. The live API harness
+is green at **52 passed / 0 failed / 7 pending** (was 48 / 0 / 8) and full
+`pytest` is green at **487 passed** (one unrelated timing flake in
+`tests/test_intervention.py` re-ran green). `W6-12` remains `pending` because it
+is a genuinely missing product feature with no in-repo spec — the remaining 7
+rows need product subsystems that this repo does not authorise yet, and no
 fixture hook may be added to product code. An honest gap beats a fabricated pass.
