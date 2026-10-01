@@ -4,6 +4,7 @@ import {
   createRoutine,
   updateRoutine,
   deleteRoutine,
+  bindRoutineHandler,
   type Routine,
 } from './api';
 
@@ -209,6 +210,7 @@ export function RoutineEditor({
           enabled,
         });
         if (res.ok) {
+          if (prompt.trim()) await bindRoutineHandler(botId, res.routine.id);
           onSaved(res.routine);
           onNotify(`Routine "${res.routine.title}" updated.`);
           onBack();
@@ -221,6 +223,7 @@ export function RoutineEditor({
           enabled,
         });
         if (res.ok) {
+          if (prompt.trim()) await bindRoutineHandler(botId, res.routine.id);
           onSaved(res.routine);
           onNotify(`Routine "${res.routine.title}" created for ${botName}.`);
           onBack();
