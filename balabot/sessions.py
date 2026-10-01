@@ -363,6 +363,66 @@ class SessionStore:
             for (mid, sid, r, c, ca, s) in rows
         ]
 
+    def compact(
+        self,
+        session_id: str,
+        *,
+        protect_first_n: int = 3,
+        protect_last_n: int = 20,
+        at: str | None = None,
+    ) -> dict[str, Any]:
+        """Prune the transcript's middle server-side: keep an immortal head, a
+        live tail, and the newest user turn; drop everything between them.
+
+        BOUNDED — only messages OUTSIDE the first+last window are removed, so
+        re-running at the floor prunes nothing. RECORDED via
+        record_compaction() so churn is visible to churn_report().
+
+        Returns {pruned, remaining, protected, compaction_count,
+        last_compaction_at}. `at` is an ISO timestamp supplied by the caller;
+        when omitted the current time is used only to stamp the bookkeeping."""
+        self._require(session_id)
+        rows = self._conn.execute(
+            "SELECT seq, role FROM messages WHERE session_id = ? ORDER BY seq ASC",
+            (session_id,),
+        ).fetchall()
+        seqs = [s for (s, _) in rows]
+        roles = {s: r for (s, r) in rows}
+        total = len(seqs)
+        head = seqs[: max(protect_first_n, 0)]
+        tail = seqs[max(0, total - max(protect_last_n, 0)) :]
+        window = list(dict.fromkeys(head + tail))
+        keep = set(window)
+        # A compaction that dropped the user's latest message would sever the
+        # live thread mid-turn, so the newest user turn is retained even when
+        # it falls outside the tail window.
+        for s in reversed(seqs):
+            if roles.get(s) == "user":
+                keep.add(s)
+                break
+        drop = [s for s in seqs if s not in keep]
+        if drop:
+            placeholders = ",".join("?" for _ in drop)
+            self._conn.execute(
+                f"DELETE FROM messages WHERE session_id = ? AND seq IN ({placeholders})",
+                [session_id, *drop],
+            )
+        stamp = at or datetime.now(timezone.utc).isoformat()
+        self.record_compaction(session_id, at=stamp)
+        row = self._conn.execute(
+            "SELECT compaction_count, last_compaction_at FROM sessions "
+            "WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        self._conn.commit()
+        return {
+            "pruned": len(drop),
+            "remaining": total - len(drop),
+            "protected": len(keep),
+            "compaction_count": row[0],
+            "last_compaction_at": row[1],
+        }
+
     # ------------------------------------------------------------------
     # Compaction bookkeeping
     # ------------------------------------------------------------------

@@ -150,6 +150,65 @@ def test_churn_report_flags_thrashing_after_n_compactions(db):
 
 
 # ---------------------------------------------------------------------------
+# Compaction: newest user turn survives, bounded, recorded (W2-6 / W2-7)
+# ---------------------------------------------------------------------------
+
+def test_compact_keeps_newest_user_turn_even_outside_tail(db):
+    """W2-6 — the newest USER turn survives compaction even when the tail
+    window holds only a newer assistant message and would otherwise drop it.
+    Fails if: the user's latest message vanishes after compact() — the live
+    thread would be severed mid-turn."""
+    db.create_session("s_compact", "governor", "thread")
+    # u1, a1, u2, a2, u3, a3 — the newest user turn (u3) is followed by a
+    # newer ASSISTANT turn (a3), so a tail window of 1 holds only a3 and the
+    # protection must work to keep u3.
+    for i in range(1, 4):
+        db.record_message("s_compact", "user", f"user msg {i}")
+        db.record_message("s_compact", "assistant", f"reply {i}")
+
+    # window = first 1 + last 1 = {u1, a3}; the newest user turn is u3 (seq 5).
+    out = db.compact("s_compact", protect_first_n=1, protect_last_n=1)
+    surviving = [m["content"] for m in db.messages("s_compact")]
+    assert "user msg 3" in surviving, surviving
+    assert out["pruned"] == 3  # a1, u2, a2 dropped; u3 protected
+    assert out["remaining"] == 3  # u1 + u3 + a3
+    assert out["compaction_count"] == 1
+    assert out["last_compaction_at"]
+
+
+def test_compact_is_bounded_and_recorded(db):
+    """W2-7 — compaction keeps exactly first_n + last_n, never prunes below
+    the floor, is idempotent at the floor, and records compaction_count /
+    last_compaction_at.
+    Fails if: pruning breaches the first+last window or the store does not
+    record the compaction."""
+    db.create_session("s_bounded", "governor", "thread")
+    for i in range(1, 11):
+        role = "user" if i % 2 else "assistant"
+        db.record_message("s_bounded", role, f"bulk msg {i}")
+
+    out = db.compact("s_bounded", protect_first_n=3, protect_last_n=5)
+    assert out["remaining"] == 8  # 3 + 5, the exact window
+    assert out["pruned"] == 2  # 10 - 8
+    assert out["compaction_count"] == 1
+    assert out["last_compaction_at"]
+
+    again = db.compact("s_bounded", protect_first_n=3, protect_last_n=5)
+    assert again["pruned"] == 0  # already at the floor — idempotent
+    assert again["remaining"] == 8
+    assert again["compaction_count"] == 2
+
+    surviving = [m["content"] for m in db.messages("s_bounded")]
+    assert "bulk msg 9" in surviving  # newest user turn still present
+
+
+def test_compact_unknown_session_raises(db):
+    """Compaction on an unknown id fails loud — never auto-creates."""
+    with pytest.raises(UnknownSession):
+        db.compact("nope", protect_first_n=3, protect_last_n=5)
+
+
+# ---------------------------------------------------------------------------
 # Fail loud on unknown session ids
 # ---------------------------------------------------------------------------
 

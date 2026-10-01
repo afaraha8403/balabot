@@ -3467,6 +3467,22 @@ except UnknownSession as exc:
 print(json.dumps({'ok': True, 'session_id': payload['session_id'], 'messages': msgs}))
 """
 
+_SESSIONS_COMPACT_SNIPPET = """\
+from balabot.sessions import SessionStore, UnknownSession
+try:
+    with SessionStore() as store:
+        out = store.compact(
+            payload['session_id'],
+            protect_first_n=payload['protect_first_n'],
+            protect_last_n=payload['protect_last_n'],
+        )
+except UnknownSession as exc:
+    print(json.dumps({'ok': False, 'error': 'not_found',
+                      'detail': str(exc), 'status': 404}))
+    raise SystemExit(0)
+print(json.dumps({'ok': True, 'compacted': True, **out}))
+"""
+
 _SESSION_RECORD_MESSAGE_SNIPPET = """\
 from balabot.sessions import SessionStore, UnknownSession, SessionError
 try:
@@ -3764,6 +3780,40 @@ async def sessions_messages_create(session_id: str, request: Request):
     if msg:
         _broadcast_session_message(session_id, msg)
     return {"created": True, "message": msg}
+
+
+@app.post("/api/sessions/{session_id}/compact")
+async def sessions_compact(session_id: str, request: Request):
+    """Compact a session's transcript server-side: prune the middle, keeping the
+    immortal head, the live tail, and the newest user turn. Bounded by design —
+    the first+last window is never breached — and recorded in the store's
+    compaction bookkeeping (W2-6/W2-7)."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not container_ok():
+        return unavailable("balabot container is not running — no conversation store")
+    res = await _org_run_async(
+        _wrap(_SESSIONS_COMPACT_SNIPPET, True),
+        payload={
+            "session_id": session_id,
+            "protect_first_n": int(body.get("protect_first_n") or 3),
+            "protect_last_n": int(body.get("protect_last_n") or 20),
+        },
+    )
+    if not res.get("ok"):
+        if res.get("status"):
+            _org_status_error(res)
+        return unavailable(res.get("reason", "could not compact the session"))
+    return {
+        "available": True,
+        "compacted": True,
+        "pruned": res.get("pruned", 0),
+        "remaining": res.get("remaining", 0),
+        "compactionCount": res.get("compaction_count", 0),
+        "lastCompactionAt": res.get("last_compaction_at"),
+    }
 
 
 @app.get("/api/sessions/{session_id}/events")

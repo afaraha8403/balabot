@@ -99,6 +99,42 @@ def pending(name: str, tag: str, why: str) -> None:
     results.append((name, PENDING, f"pending ({tag}) — {why}"))
 
 
+def sse_reply_text(stream: str) -> str:
+    """Assemble the assistant's plain-text reply from a raw SSE capture.
+
+    The gateway streams the answer split across many `data:` frames (one
+    OpenAI-style chunk each), so a substring that fits a single frame is NOT
+    the honest check — a phrase spanning two frames must still match. Collects
+    `choices[0].delta.content` / `message.content` fragments (and any bare
+    `content` frames) in order and returns the joined text."""
+    parts: list[str] = []
+    for line in stream.splitlines():
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if not payload or payload.startswith("["):
+            continue
+        try:
+            d = json.loads(payload)
+        except Exception:
+            continue
+        if not isinstance(d, dict):
+            continue
+        choices = d.get("choices")
+        if isinstance(choices, list) and choices:
+            ch = choices[0]
+            if isinstance(ch, dict):
+                delta = ch.get("delta")
+                msg = ch.get("message")
+                if isinstance(delta, dict) and delta.get("content"):
+                    parts.append(str(delta["content"]))
+                elif isinstance(msg, dict) and msg.get("content"):
+                    parts.append(str(msg["content"]))
+        if isinstance(d.get("content"), str) and d["content"]:
+            parts.append(d["content"])
+    return "".join(parts)
+
+
 def sse_post_chat(body: dict, *, timeout: int = 300) -> tuple[int, str]:
     """POST /api/chat and capture the raw SSE stream as text."""
     req = urllib.request.Request(
@@ -815,7 +851,7 @@ def w2_02_client_sends_only_the_delta() -> None:
         )
         check(
             "W2-2 reply proves store history was rebuilt",
-            sentinel in stream,
+            sentinel in sse_reply_text(stream),
             sentinel,
             fails_if="the answer could only have come from the delta alone — "
             "the durable history was never merged, so the model could not "
@@ -854,7 +890,7 @@ def w2_02_client_sends_only_the_delta() -> None:
         )
         check(
             "W2-2 legacy full-history send still works",
-            status2 == 200 and "LEGACY-OK" in stream2,
+            status2 == 200 and "LEGACY-OK" in sse_reply_text(stream2),
             f"HTTP {status2}",
             fails_if="adding the delta protocol broke legacy full-history "
             "sends (W2-8 breach)",
@@ -864,17 +900,210 @@ def w2_02_client_sends_only_the_delta() -> None:
             delete(f"/api/sessions/{sid}")
 
 
-def w2_pending() -> None:
-    pending(
-        "W2-6 compaction keeps newest user turn",
-        "W2",
-        "no server-side compaction endpoint exists yet",
+# ── W2-6 / W2-7: server-side compaction (one endpoint, two guarantees) ───────
+# POST /api/sessions/{id}/compact prunes the transcript's middle server-side,
+# keeping an immortal head, a live tail, and the newest USER turn (W2-6),
+# BOUNDED so the first+last window is never breached and idempotent at the
+# floor (W2-7a), and RECORDED in the store's compaction_count /
+# last_compaction_at bookkeeping (W2-7b). The host server on :9119 shells the
+# store calls into the container, whose /opt/balabot is image-baked — so this
+# block snapshots the container's sessions.py, deploys the committed copy, runs
+# the scenarios, and restores the container copy on exit (same contract as W5).
+def w2_compact_scenarios() -> None:
+    orig_dir = REPO / "tests" / "e2e" / "_scratch" / "w2" / "orig"
+    orig_dir.mkdir(parents=True, exist_ok=True)
+    dst = "/opt/balabot/balabot/sessions.py"
+    rc = subprocess.run(
+        ["docker", "exec", CONTAINER, "sh", "-c", f"cat {dst}"],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
-    pending(
-        "W2-7 compaction bounded + recorded",
-        "W2",
-        "no server-side compaction endpoint exists yet",
+    if rc.returncode == 0:
+        (orig_dir / "sessions.py").write_text(rc.stdout, encoding="utf-8")
+    r = subprocess.run(
+        ["docker", "cp", str(REPO / "balabot" / "sessions.py"), f"{CONTAINER}:{dst}"],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
+    if r.returncode != 0:
+        for n in (
+            "W2-6 compaction keeps newest user turn",
+            "W2-7 compaction bounded + recorded",
+        ):
+            pending(n, "W2", f"docker cp sessions.py failed: {r.stderr[:120]}")
+        return
+    try:
+        _w2_06_compact_keeps_newest_user_turn()
+        _w2_07_compact_bounded_and_recorded()
+    finally:
+        orig = orig_dir / "sessions.py"
+        if orig.exists():
+            subprocess.run(
+                ["docker", "cp", str(orig), f"{CONTAINER}:{dst}"],
+                capture_output=True,
+                timeout=60,
+            )
+
+
+def _w2_compact_fixture() -> tuple[str, str] | None:
+    """Create a fresh fixture session; return (sid, tag) or None on failure."""
+    tag = secrets.token_hex(4)
+    sid = f"zz-api-w2s6-{tag}"
+    st, body = post(
+        "/api/sessions",
+        {"botId": "governor", "id": sid, "title": "w2-6/7 compact probe"},
+    )
+    if st == 200 and json.loads(body).get("created") is True:
+        return sid, tag
+    return None
+
+
+def _w2_record(sid: str, role: str, content: str, mid: str) -> bool:
+    st, body = post(
+        f"/api/sessions/{sid}/messages",
+        {"role": role, "content": content, "message_id": mid},
+    )
+    return st == 200 and json.loads(body).get("created") is True
+
+
+def _w2_06_compact_keeps_newest_user_turn() -> None:
+    """W2-6 — the newest USER turn survives compaction even when the tail
+    window holds only a newer assistant message and would otherwise drop it.
+    Fails if: the agent's latest user message vanishes after compaction (the
+    live thread would be severed mid-turn)."""
+    fx = _w2_compact_fixture()
+    if not fx:
+        pending(
+            "W2-6 compaction keeps newest user turn",
+            "W2",
+            "could not create fixture session",
+        )
+        return
+    sid, tag = fx
+    try:
+        # u1,a1,u2,a2,u3,a3 — u3 is the newest user turn, followed by a3, so
+        # a tail window of 1 holds ONLY a3 and the protection must keep u3.
+        for i in range(1, 4):
+            if not _w2_record(sid, "user", f"user msg {i}", f"zz-{tag}-u{i}"):
+                pending(
+                    "W2-6 compaction keeps newest user turn",
+                    "W2",
+                    f"could not seed user message {i}",
+                )
+                return
+            if not _w2_record(sid, "assistant", f"reply {i}", f"zz-{tag}-a{i}"):
+                pending(
+                    "W2-6 compaction keeps newest user turn",
+                    "W2",
+                    f"could not seed assistant message {i}",
+                )
+                return
+
+        st, body = post(
+            f"/api/sessions/{sid}/compact",
+            {"protect_first_n": 1, "protect_last_n": 1},
+        )
+        ok = st == 200 and json.loads(body).get("compacted") is True
+        check(
+            "W2-6 compact accepted",
+            ok,
+            f"HTTP {st}",
+            fails_if="the compaction endpoint rejected the bounded request",
+        )
+        _, body = get(f"/api/sessions/{sid}/messages")
+        msgs = json.loads(body).get("messages", []) if body.startswith("{") else []
+        contents = [str(m.get("content", "")) for m in msgs]
+        check(
+            "W2-6 newest user turn survives compaction",
+            "user msg 3" in contents,
+            f"{len(msgs)} messages after compact",
+            fails_if="the newest user turn was pruned (the live thread is severed)",
+        )
+        check(
+            "W2-6 middle turns dropped (not a no-op)",
+            len(msgs) < 6 and len(msgs) >= 2,
+            f"{len(msgs)} of 6 survive (u1 + u3 + a3)",
+            fails_if="compaction pruned nothing — the window rule never fires",
+        )
+    finally:
+        delete(f"/api/sessions/{sid}")
+
+
+def _w2_07_compact_bounded_and_recorded() -> None:
+    """W2-7 — compaction is BOUNDED (keeps exactly first_n + last_n, never
+    prunes below the floor, idempotent once at the floor) and RECORDED
+    (compaction_count increments, last_compaction_at set).
+    Fails if: pruning exceeds the first+last window, or the store's compaction
+    bookkeeping did not advance."""
+    fx = _w2_compact_fixture()
+    if not fx:
+        pending(
+            "W2-7 compaction bounded + recorded",
+            "W2",
+            "could not create fixture session",
+        )
+        return
+    sid, tag = fx
+    try:
+        for i in range(1, 11):
+            role = "user" if i % 2 else "assistant"
+            if not _w2_record(sid, role, f"bulk msg {i}", f"zz-{tag}-m{i}"):
+                pending(
+                    "W2-7 compaction bounded + recorded",
+                    "W2",
+                    f"could not seed message {i}",
+                )
+                return
+
+        st, body = post(
+            f"/api/sessions/{sid}/compact",
+            {"protect_first_n": 3, "protect_last_n": 5},
+        )
+        d = json.loads(body) if body.startswith("{") else {}
+        check(
+            "W2-7 compaction bounded + recorded",
+            st == 200
+            and d.get("remaining") == 8  # 3 + 5, never more
+            and d.get("pruned") == 2  # 10 - 8
+            and d.get("compactionCount") == 1
+            and bool(d.get("lastCompactionAt")),
+            f"HTTP {st} remaining={d.get('remaining')} pruned={d.get('pruned')} "
+            f"count={d.get('compactionCount')} at={bool(d.get('lastCompactionAt'))}",
+            fails_if="pruning breached the first+last window OR the store did "
+            "not record the compaction",
+        )
+
+        # Idempotent at the floor: a second compact prunes nothing.
+        _, body2 = post(
+            f"/api/sessions/{sid}/compact",
+            {"protect_first_n": 3, "protect_last_n": 5},
+        )
+        d2 = json.loads(body2) if body2.startswith("{") else {}
+        check(
+            "W2-7 re-compact idempotent at the floor",
+            d2.get("pruned") == 0
+            and d2.get("remaining") == 8
+            and d2.get("compactionCount") == 2,
+            f"pruned={d2.get('pruned')} remaining={d2.get('remaining')} "
+            f"count={d2.get('compactionCount')}",
+            fails_if="a second compaction at the floor pruned again or the "
+            "bookkeeping did not advance",
+        )
+
+        # The newest user turn must be inside the surviving 8.
+        _, body = get(f"/api/sessions/{sid}/messages")
+        msgs = json.loads(body).get("messages", []) if body.startswith("{") else []
+        contents = [str(m.get("content", "")) for m in msgs]
+        check(
+            "W2-7 newest user turn inside the surviving window",
+            any("bulk msg 9" in c for c in contents),
+            f"{len(msgs)} messages remain",
+            fails_if="the bounded compaction still dropped the newest user turn",
+        )
+    finally:
+        delete(f"/api/sessions/{sid}")
 
 
 # ── W3-4: owner impersonation refused ────────────────────────────────────────
@@ -2239,7 +2468,7 @@ def main() -> int:
     w2_11_server_is_assembly_source()
     w2_14_delete_is_server_side()
     w2_02_client_sends_only_the_delta()
-    w2_pending()
+    w2_compact_scenarios()
     w3_04_owner_impersonation_refused()
     w3_11_decided_records_immutable()
     w3_pending()
