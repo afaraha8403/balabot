@@ -386,9 +386,8 @@ Verified against the current tree (HEAD `8db3e9e`); each needs a product feature
 that does not exist in the repo, or a test-only hook the "no fixture logic in
 product code" rule forbids.
 
-- **W6-12 attachment payload size cap upstream** — see the dedicated section
-  above: no payload-cap behaviour exists, the per-file 10 MiB upload limit is the
-  only size control, and no in-repo spec defines the cap contract.
+- **W6-12 attachment payload size cap upstream** — **landed**; see the dedicated
+  landed section at the end of this file.
 - **W3-15 lease audit trail completeness** — no screen-lease subsystem
   (acquire/expire/force-release) and no lease endpoints exist to audit
   (`grep -n "lease" ui/server.py balabot/*.py` → 0 functional hits).
@@ -422,3 +421,70 @@ is green at **52 passed / 0 failed / 7 pending** (was 48 / 0 / 8) and full
 is a genuinely missing product feature with no in-repo spec — the remaining 7
 rows need product subsystems that this repo does not authorise yet, and no
 fixture hook may be added to product code. An honest gap beats a fabricated pass.
+## W6-12 — per-turn attachment payload cap upstream (landed)
+
+**Proves:** `/api/chat` refuses a turn whose *summed* attachment payload exceeds
+`CHAT_ATTACHMENT_PAYLOAD_MAX_BYTES` (default **8 MiB**, read from
+`BALABOT_CHAT_ATTACHMENT_MAX_BYTES`), with an explicit 4xx naming the limit and
+the offending size. It never truncates or drops. At/under the cap, behaviour is
+unchanged and the attachment still reaches the upstream payload.
+
+**Implementation** (`ui/server.py`):
+- `CHAT_ATTACHMENT_PAYLOAD_MAX_BYTES` (`ui/server.py:716`) — named constant,
+  env-overridable, default `8 * 1024 * 1024`. No magic number in the handler.
+- `_attachment_byte_size()` (`ui/server.py:722`) — raw size of one attachment,
+  mirroring assembly: inline `content` (base64/`data:` decoded), else on-disk
+  `path`, else a stored `/api/attachments/...` URL.
+- `_enforce_chat_attachment_cap()` (`ui/server.py:760`) — sums the bytes and
+  raises `HTTPException(413, detail={"error": "attachment_payload_exceeds_limit",
+  "limit_bytes": ..., "attachment_bytes": ...})` when over.
+- **Live call site** (`ui/server.py:3124`): `_enforce_chat_attachment_cap(attachments)`
+  runs unconditionally at the top of the `attachments = body.get("attachments")`
+  block — the same path that builds `image_parts`/`att_lines` and forwards
+  `payload = {"model", "messages", "stream"}` to
+  `f"{UPSTREAM}/p/{profile}/v1/chat/completions"`. Not a helper nobody calls.
+
+**Tests** (`tests/test_wave6_attachment_cap.py`, committed):
+- `test_one_byte_over_cap_is_refused_explicitly` — 1025 bytes vs cap 1024 → 4xx,
+  `error=attachment_payload_exceeds_limit`, `limit_bytes=1024`, `attachment_bytes=1025`.
+- `test_at_cap_succeeds_and_reaches_upstream` — exactly at cap → turn runs and
+  the image is forwarded upstream as `{"type": "image_url", ...}`.
+- `test_under_cap_multiple_attachments_sum_correctly` — three sub-cap files whose
+  sum is over still refuse (the cap bounds the assembled payload, not one file).
+
+**RED evidence** (mutation: cap call removed at `ui/server.py:3124` — the
+over-cap request must then be accepted):
+```
+F.F                                                                      [100%]
+________________ test_one_byte_over_cap_is_refused_explicitly ________________
+>       with pytest.raises(server.HTTPException) as excinfo:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+______________ test_under_cap_multiple_attachments_sum_correctly _____________
+>       with pytest.raises(server.HTTPException) as excinfo:
+E       Failed: DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>
+FAILED tests/test_wave6_attachment_cap.py::test_one_byte_over_cap_is_refused_explicitly
+FAILED tests/test_wave6_attachment_cap.py::test_under_cap_multiple_attachments_sum_correctly
+2 failed, 1 passed in 3.49s
+```
+The at-cap success test still passes — only the refusal property flips, so the
+row measures the cap and nothing else. The mutation was never committed.
+
+**GREEN evidence** (cap restored):
+```
+..........                                                               [100%]
+10 passed in 10.75s
+```
+(`tests/test_wave6_attachment_cap.py` + `tests/test_attachments_p0_5.py`.)
+
+**Honest notes / gaps:**
+- The per-file `ATTACHMENT_MAX_BYTES` (10 MiB) upload limit is unchanged; this is
+  a separate, additive budget on the per-turn sum.
+- `docs/CHANGELOG.md` was **not** touched: the row's scope wall is `ui/server.py`
+  + its tests, and the changelog is a shared/contested file.
+- The shared E2E harness and `:9119` were **not** run (scope wall: serialised
+  resources). Evidence is `pytest` in this worktree.
+- `tests/test_attachments_p0_5.py` in the working tree also gained an equivalent
+  W6-12 test block and reformatting from an **external writer** active during
+  this run; those edits are not mine and were deliberately **not** staged or
+  committed (only `ui/server.py` + `tests/test_wave6_attachment_cap.py` were).
+  The uncommitted diff is left in place, untampered.
