@@ -40,6 +40,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 __all__ = [
     "ApprovalError",
     "DEFAULT_APPROVAL_TTL",
@@ -54,6 +56,9 @@ __all__ = [
     "ledger_state",
     "attempts",
     "events",
+    "vault_artifact",
+    "vault_artifact_path",
+    "record_vault_artifact",
     "main",
 ]
 
@@ -641,6 +646,126 @@ def check_mutation(tool: str, args: dict | None, *, scope: str | None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# OKF vault artifacts — the human-readable decision record (W5-10 / W9-6 /
+# W9-14). One markdown file per effect key under BALABOT_VAULT_DIR (default
+# <BALABOT_DATA_ROOT>/vault). Same promise as the governor's ledger: "if it is
+# not in the ledger, it did not happen". Writing is IDEMPOTENT on replay — a
+# repeated decision for one effect key never creates a second artifact and
+# never rewrites the first, so the artifact is a stable record.
+# ---------------------------------------------------------------------------
+
+
+def _vault_dir() -> Path:
+    env = os.environ.get("BALABOT_VAULT_DIR")
+    if env:
+        return Path(env)
+    root = os.environ.get("BALABOT_DATA_ROOT", "/opt/data")
+    return Path(root) / "vault"
+
+
+def vault_artifact_path(key: str) -> Path:
+    """The vault artifact path for one effect key (deterministic, one file/key)."""
+    return _vault_dir() / f"{str(key or '').strip()}.md"
+
+
+def _read_vault_artifact(path: Path) -> dict | None:
+    """Parse the YAML frontmatter of a vault artifact; None if unreadable."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not text.startswith("---\n"):
+        return None
+    end = text.find("\n---", 4)
+    if end == -1:
+        return None
+    try:
+        return yaml.safe_load(text[4:end]) or {}
+    except yaml.YAMLError:
+        return None
+
+
+def record_vault_artifact(
+    key: str,
+    *,
+    actor: str,
+    action: str,
+    tool: str = "",
+    scope: str = "",
+    canonical: str = "{}",
+    detail: str = "",
+) -> dict:
+    """Write the OKF decision artifact for one effect key, idempotently.
+
+    A REPLAY of the same decision (same key, same action) is a no-op: it never
+    creates a second artifact and never rewrites the first (W9-14). A later,
+    DIFFERENT decision for the same key supersedes the single artifact so the
+    record never contradicts the ledger. Returns {effect_key, path, created,
+    updated, artifact}.
+    """
+    key = str(key or "").strip()
+    if not key:
+        raise ApprovalError("effect key is required")
+    path = vault_artifact_path(key)
+    existed = path.exists()
+    if existed:
+        existing = _read_vault_artifact(path)
+        if existing and existing.get("action") == action:
+            return {
+                "effect_key": key,
+                "path": str(path),
+                "created": False,
+                "updated": False,
+                "artifact": existing,
+            }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    at = _iso(_now())
+    frontmatter = {
+        "type": "decision",
+        "title": f"Approval decision for {key}",
+        "description": f"{action} by {actor}",
+        "effect_key": key,
+        "actor": actor,
+        "action": action,
+        "tool": tool,
+        "scope": scope,
+        "args_hash": canonical,
+        "detail": detail,
+        "timestamp": at,
+        "tags": ["okf", "ledger", "decision", "approval"],
+    }
+    body = (
+        "\n# Approval decision\n\n"
+        f"- **Effect key:** `{key}`\n"
+        f"- **Actor:** {actor}\n"
+        f"- **Action:** {action}\n"
+        f"- **Tool:** {tool or '(unknown)'}\n"
+        f"- **Scope:** {scope or '(none)'}\n"
+        f"- **Args hash:** `{canonical}`\n"
+        f"- **When:** {at}\n"
+    )
+    path.write_text(
+        "---\n" + yaml.safe_dump(frontmatter, sort_keys=False) + "---\n" + body,
+        encoding="utf-8",
+    )
+    return {
+        "effect_key": key,
+        "path": str(path),
+        "created": not existed,
+        "updated": existed,
+        "artifact": frontmatter,
+    }
+
+
+def vault_artifact(key: str) -> dict | None:
+    """The recorded vault decision for one effect key, or None if absent (W9-6)."""
+    path = vault_artifact_path(key)
+    if not path.exists():
+        return None
+    return _read_vault_artifact(path)
+
+
+# ---------------------------------------------------------------------------
 # Human decisions (owner only — a bot can never approve or deny)
 # ---------------------------------------------------------------------------
 
@@ -701,12 +826,22 @@ def approve(
             ),
         )
     _record_event(key=key, actor=by, action="approve", detail=f"approved for {ttl}s")
+    artifact = record_vault_artifact(
+        key,
+        actor=by,
+        action="approve",
+        tool=(row["tool"] if row else ""),
+        scope=(row["scope"] if row else ""),
+        canonical=(row["canonical"] if row else "{}"),
+        detail=f"approved for {ttl}s",
+    )
     return {
         "ok": True,
         "decision": "approved",
         "effect_key": key,
         "approved_by": by,
         "expires_at": _epoch(now + timedelta(seconds=ttl)),
+        "vault_artifact": artifact,
     }
 
 
@@ -742,7 +877,22 @@ def deny(key: str, *, by: str, note: str = "") -> dict:
             ),
         )
     _record_event(key=key, actor=by, action="deny", detail=note or "")
-    return {"ok": True, "decision": "refused", "effect_key": key, "denied_by": by}
+    artifact = record_vault_artifact(
+        key,
+        actor=by,
+        action="deny",
+        tool=(row["tool"] if row else ""),
+        scope=(row["scope"] if row else ""),
+        canonical=(row["canonical"] if row else "{}"),
+        detail=note or "",
+    )
+    return {
+        "ok": True,
+        "decision": "refused",
+        "effect_key": key,
+        "denied_by": by,
+        "vault_artifact": artifact,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -833,7 +983,7 @@ def main(argv: list[str] | None = None) -> int:
             "key --tool T --scope S [--args '<json>'] | "
             "approve --key K --by B [--ttl SECONDS] [--note N] | "
             "deny --key K --by B [--note N] | "
-            "state --key K | attempts [--key K] [--limit N] | "
+            "state --key K | vault --key K | attempts [--key K] [--limit N] | "
             "events [--key K] [--limit N]",
             file=sys.stderr,
         )
@@ -880,6 +1030,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if cmd == "state":
             print(json.dumps(ledger_state(f.get("key", "")) or {}))
+            return 0
+        if cmd == "vault":
+            print(json.dumps(vault_artifact(f.get("key", "")) or {}))
             return 0
         if cmd == "attempts":
             print(

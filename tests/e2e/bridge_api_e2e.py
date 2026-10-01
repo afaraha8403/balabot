@@ -2421,12 +2421,144 @@ def w8_13_blocking_call_audit() -> None:
     )
 
 
-# ── W9-14: vault artifact idempotency (W5-dependent) ─────────────────────────
+# ── W9-14: vault artifact idempotency on replay (W5-dependent) ───────────────
+# The W5 approval ledger records decisions as SQLite rows. W9-14 proves the
+# human-readable OKF vault artifact for an effect key is IDEMPOTENT on replay:
+# approving the same key twice yields exactly ONE artifact and never rewrites
+# it. /opt/balabot is image-baked, so the block snapshots the container's
+# approvals.py, deploys the committed copy, runs, and restores it on exit.
 def w9_scenarios() -> None:
-    pending(
-        "W9-14 vault artifact idempotency on replay",
-        "W9",
-        "requires W5 effect keys + the OKF vault ledger (not built)",
+    orig_dir = REPO / "tests" / "e2e" / "_scratch" / "w9" / "orig"
+    orig_dir.mkdir(parents=True, exist_ok=True)
+    dst = "/opt/balabot/balabot/approvals.py"
+    rc = subprocess.run(
+        ["docker", "exec", CONTAINER, "sh", "-c", f"cat {dst}"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if rc.returncode == 0:
+        (orig_dir / "approvals.py").write_text(rc.stdout, encoding="utf-8")
+    r = subprocess.run(
+        ["docker", "cp", str(REPO / "balabot" / "approvals.py"), f"{CONTAINER}:{dst}"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if r.returncode != 0:
+        pending(
+            "W9-14 vault artifact idempotency on replay",
+            "W9",
+            f"docker cp approvals.py failed: {r.stderr[:120]}",
+        )
+        return
+    tag = secrets.token_hex(4)
+    db = f"/opt/data/approvals/w9-{tag}.db"
+    vault = f"/opt/data/vault/w9-{tag}"
+    try:
+        _w9_14_vault_artifact_idempotent(tag, db, vault)
+    finally:
+        orig = orig_dir / "approvals.py"
+        if orig.exists():
+            subprocess.run(
+                ["docker", "cp", str(orig), f"{CONTAINER}:{dst}"],
+                capture_output=True,
+                timeout=60,
+            )
+        subprocess.run(
+            [
+                "docker",
+                "exec",
+                CONTAINER,
+                "rm",
+                "-rf",
+                db,
+                f"{db}-wal",
+                f"{db}-shm",
+                vault,
+            ],
+            capture_output=True,
+        )
+
+
+def _w9_cli(*args: str, db: str, vault: str) -> dict | None:
+    """Run the REAL approvals CLI in-container with a fixture db + vault dir."""
+    r = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "-w",
+            "/opt/balabot",
+            "-e",
+            "BALABOT_DATA_ROOT=/opt/data",
+            "-e",
+            f"BALABOT_APPROVALS_DB={db}",
+            "-e",
+            f"BALABOT_VAULT_DIR={vault}",
+            CONTAINER,
+            "python3",
+            "-m",
+            "balabot.approvals",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if r.returncode != 0:
+        return None
+    return _tool_json(r.stdout)
+
+
+def _w9_14_vault_artifact_idempotent(tag: str, db: str, vault: str) -> None:
+    """W9-14 — the OKF vault artifact for an effect key is idempotent on replay.
+    Fails if: replaying an approval creates a second artifact, or rewrites the
+    existing one (the vault would then disagree with itself across replays)."""
+    keyres = _w9_cli(
+        "key", "--tool", "message_agent", "--scope", f"w9-{tag}", db=db, vault=vault
+    )
+    key = (keyres or {}).get("effect_key")
+    if not key:
+        pending(
+            "W9-14 vault artifact idempotency on replay",
+            "W9",
+            "could not compute a fixture effect key",
+        )
+        return
+
+    first = _w9_cli("approve", "--key", key, "--by", "owner", db=db, vault=vault)
+    art1 = _w9_cli("vault", "--key", key, db=db, vault=vault)
+    check(
+        "W9-14 approval lands an OKF vault artifact",
+        bool(first)
+        and bool(art1)
+        and art1.get("effect_key") == key
+        and art1.get("action") == "approve"
+        and art1.get("actor") == "owner",
+        f"artifact={'yes' if art1 else 'no'} action={(art1 or {}).get('action')}",
+        fails_if="approvals exist only as SQLite rows and no vault artifact is written",
+    )
+
+    # Replay: approve the same key again. It must be a no-op.
+    replay = _w9_cli("approve", "--key", key, "--by", "owner", db=db, vault=vault)
+    art2 = _w9_cli("vault", "--key", key, db=db, vault=vault)
+    n_files = subprocess.run(
+        ["docker", "exec", CONTAINER, "sh", "-c", f"ls -1 {vault} 2>/dev/null | wc -l"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    ).stdout.strip()
+    replay_art = (replay or {}).get("vault_artifact") or {}
+    check(
+        "W9-14 replay does not duplicate or rewrite the artifact",
+        replay_art.get("created") is False
+        and replay_art.get("updated") is False
+        and art1 == art2
+        and n_files == "1",
+        f"created={replay_art.get('created')} updated={replay_art.get('updated')} "
+        f"files={n_files} same={art1 == art2}",
+        fails_if="a replayed approval creates a second artifact or mutates the first",
     )
 
 

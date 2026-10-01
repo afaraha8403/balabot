@@ -127,3 +127,62 @@ harness restores it after proving the endpoint (leaving `/opt/balabot` mutated
 would be a side effect). `POST /api/sessions/{id}/compact` therefore reports an
 honest `unavailable` against the running container until `balabot/sessions.py`
 is deployed (image rebuild or `docker cp`), exactly as the W5 approval rows are.
+
+## W9-14 — vault artifact idempotency on replay
+
+**Proves:** every approval decision lands as a human-readable OKF vault artifact
+(one markdown file per effect key), and replaying the same decision is a no-op —
+it never creates a second artifact and never rewrites the first. This is the
+"vault writer" the W5-10 and W9-6 rows were waiting on: the artifact carries the
+decision, actor, tool/scope, canonical args hash, and timestamp, and is
+queryable by effect key.
+
+**Changes:**
+- `balabot/approvals.py` — `record_vault_artifact()` writes the OKF markdown
+  (YAML frontmatter + body) under `BALABOT_VAULT_DIR` (default
+  `<BALABOT_DATA_ROOT>/vault`) keyed by effect key; a same-action replay returns
+  the existing artifact unchanged, a different decision supersedes the single
+  file. `vault_artifact()` / `vault_artifact_path()` read it back. Wired into
+  `approve()` and `deny()`; new `vault --key K` CLI verb.
+- `tests/test_approvals.py` — three unit tests (written, queryable, idempotent
+  on replay, supersedes on a different decision).
+- `tests/e2e/bridge_api_e2e.py` — `w9_scenarios()` replaces the pending row with
+  a real container-driven scenario (snapshot/deploy/restore `approvals.py`, same
+  contract as the W5 rows).
+
+**RED evidence — idempotency broken (same-action no-op disabled):**
+```
+E       assert True is False
+E        +  where True = replay_out["vault_artifact"]["updated"]
+tests/test_approvals.py:64: AssertionError
+FAILED tests/test_approvals.py::test_vault_artifact_idempotent_on_replay
+```
+
+**GREEN evidence:**
+```
+$ pytest tests/test_approvals.py -q
+3 passed in 0.25s
+
+$ pytest tests -q
+487 passed in 34.20s
+
+$ python tests/e2e/bridge_api_e2e.py
+[  ok ] W9-14 approval lands an OKF vault artifact               artifact=yes action=approve
+[  ok ] W9-14 replay does not duplicate or rewrite the artifact  created=False updated=False files=1 same=True
+...
+48 passed, 0 failed, 8 pending
+```
+
+**Not done / honest gap:**
+- The sibling rows `W5-10` (approvals land as OKF vault artifacts) and `W9-6`
+  (vault decision record queryable by effect key) live in `bridge_shell_e2e.sh`
+  and are still registered `pending` there. The capability now exists and is
+  proven here; flipping those two shell rows is mechanical follow-up, not landed
+  in this pass.
+- The running container keeps its image-baked `approvals.py` (the harness
+  restores it), so the vault artifact is written only once `balabot/approvals.py`
+  is deployed (image rebuild or `docker cp`), like the rest of the W5 surface.
+- One earlier full-harness run reported a single transient failure in an
+  unrelated row; the immediate re-run was 48 passed / 0 failed and the new W9-14
+  checks passed in both runs. The harness makes live model turns, so a rare
+  timing/answer flake is expected; no code path in this change was implicated.
