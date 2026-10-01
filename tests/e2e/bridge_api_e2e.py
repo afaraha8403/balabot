@@ -1232,12 +1232,65 @@ def w3_11_decided_records_immutable() -> None:
         pass
 
 
-def w3_pending() -> None:
-    pending(
+def w3_15_lease_scenarios() -> None:
+    """W3-15 — screen leases over HTTP with a complete audit trail.
+
+    Every state transition appends exactly one immutable audit row (actor,
+    from->to, at, reason); the per-lease trail is ordered and complete.
+    Acquiring a resource already actively leased is refused naming the holder.
+    Every fixture is released/force-released/expired, so no active lease is left.
+    Fails if: a transition leaves no audit row, the trail is not exactly the
+    transitions in order, or a held resource is acquired silently.
+    """
+    fx = "zz-api-" + secrets.token_hex(4)
+
+    def _trail(lease_id: str) -> list:
+        st, body = get(f"/api/leases/{lease_id}/audit")
+        return (json.loads(body).get("audit") or []) if st == 200 else []
+
+    st_a, b_a = post("/api/leases/acquire", {"agent_id": "zz-api-a", "resource_id": fx + "-r1"})
+    lease1 = (json.loads(b_a).get("record") or {}).get("lease_id", "") if st_a == 200 else ""
+    st_b, b_b = post("/api/leases/acquire", {"agent_id": "zz-api-b", "resource_id": fx + "-r1"})
+    st_r, _ = post(f"/api/leases/{lease1}/release", {"agent_id": "zz-api-a"}) if lease1 else (0, "")
+    pairs = [(r.get("from_state"), r.get("to_state")) for r in _trail(lease1)]
+    check(
         "W3-15 lease audit trail completeness",
-        "W3",
-        "screen leases (acquire/expire/force-release) not implemented — "
-        "no lease endpoints exist",
+        st_a == 200 and st_r == 200
+        and pairs == [("none", "active"), ("active", "released")],
+        f"acquire={st_a} release={st_r} trail={pairs}",
+        fails_if="a transition leaves no audit row, or the trail is not exactly the transitions in order",
+    )
+    check(
+        "W3-15 acquiring a held resource is refused naming the holder",
+        st_b == 409 and "zz-api-a" in b_b,
+        f"HTTP {st_b} {b_b[:70]}",
+        fails_if="a resource leased to another agent is acquired silently",
+    )
+
+    st_c, b_c = post("/api/leases/acquire", {"agent_id": "zz-api-c", "resource_id": fx + "-r2"})
+    lease2 = (json.loads(b_c).get("record") or {}).get("lease_id", "") if st_c == 200 else ""
+    st_f, _ = post(f"/api/leases/{lease2}/force-release",
+                   {"actor": "owner", "reason": "zz-api forced"}) if lease2 else (0, "")
+    reasons = {r.get("to_state"): r.get("reason") for r in _trail(lease2)}
+    check(
+        "W3-15 force-release is audited with its reason",
+        reasons.get("force_released") == "zz-api forced",
+        f"HTTP {st_f} reasons={reasons}",
+        fails_if="a force-release is not recorded with its reason",
+    )
+
+    st_d, b_d = post("/api/leases/acquire",
+                     {"agent_id": "zz-api-d", "resource_id": fx + "-r3", "ttl": 0.05})
+    lease3 = (json.loads(b_d).get("record") or {}).get("lease_id", "") if st_d == 200 else ""
+    time.sleep(0.4)
+    st_e, b_e = get(f"/api/leases/{lease3}") if lease3 else (0, "")
+    state3 = (json.loads(b_e).get("record") or {}).get("state") if st_e == 200 else None
+    exp_reason = next((r.get("reason") for r in _trail(lease3) if r.get("to_state") == "expired"), None)
+    check(
+        "W3-15 lazy expiry on read is recorded with a reason",
+        state3 == "expired" and exp_reason == "ttl_elapsed",
+        f"state={state3} reason={exp_reason}",
+        fails_if="a lease past its TTL reads active, or expiry leaves no audit row with a reason",
     )
 
 
@@ -2828,7 +2881,7 @@ def main() -> int:
     w2_compact_scenarios()
     w3_04_owner_impersonation_refused()
     w3_11_decided_records_immutable()
-    w3_pending()
+    w3_15_lease_scenarios()
     w4_scenarios()
     w5_scenarios()
     w6_scenarios()
