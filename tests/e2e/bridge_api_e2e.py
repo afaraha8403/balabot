@@ -2298,17 +2298,42 @@ def _w5_14_read_only_never_gated(tag: str, db: str) -> None:
 # (`ui/server.py` `ATTACHMENT_MAX_BYTES`, enforced in `upload_attachment`). A cap
 # is a product feature with no in-repo spec, so implementing one would be
 # fabrication — the row stays honestly pending.
+def _w6_12_attachment_payload_cap() -> None:
+    """W6-12 — the per-turn attachment payload cap is enforced where /api/chat
+    assembles the request: a turn whose summed attachment bytes exceed the cap
+    is REFUSED with an explicit 4xx naming the limit and the offending size.
+    Never silently truncated or dropped.
+    Fails if: an over-cap payload is accepted (or truncated) instead of refused,
+    or the refusal does not name the limit and the size."""
+    import tempfile
+
+    limit = 8 * 1024 * 1024
+    fd, path = tempfile.mkstemp(suffix=".bin")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(b"\0" * (limit + 1))
+        st, body = post(
+            "/api/chat",
+            {
+                "bot_id": "principal",
+                "messages": [{"role": "user", "content": "zz-w6-12-cap-probe"}],
+                "attachments": [{"name": "over.bin", "path": path}],
+            },
+        )
+    finally:
+        os.unlink(path)
+    ok = st == 413 and "attachment_payload_exceeds_limit" in body
+    check(
+        "W6-12 attachment payload size cap upstream",
+        ok,
+        f"HTTP {st} {body[:110]}",
+        fails_if="an over-cap attachment payload is accepted or truncated instead of refused",
+    )
+
+
 def w6_scenarios() -> None:
     _w6_08_compact_keeps_newest_turn_image()
-    pending(
-        "W6-12 attachment payload size cap upstream",
-        "W6",
-        "no upstream payload-cap behaviour exists: /api/chat assembles and "
-        "forwards the multimodal payload with no size/byte budget; the only cap "
-        "is the 10 MiB per-FILE upload limit (ui/server.py ATTACHMENT_MAX_BYTES). "
-        "A payload cap is a product feature with no in-repo spec — inventing one "
-        "would fabricate behaviour.",
-    )
+    _w6_12_attachment_payload_cap()
 
 
 def _container_deploy(rel: str) -> tuple[pathlib.Path, str] | None:
