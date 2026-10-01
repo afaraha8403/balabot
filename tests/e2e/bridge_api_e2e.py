@@ -2560,7 +2560,7 @@ def w8_pending_scenarios() -> None:
         "W8-1 slow container call doesn't stall endpoint",
         "W8",
         "true by construction: _org_run_async dispatches through "
-        "asyncio.to_thread (ui/server.py:1403, def at 1391) and W8-13 "
+        "asyncio.to_thread (ui/server.py:1406, def at 1394) and W8-13 "
         "statically proves no blocking call sits inside an async def. A dynamic "
         "proof would need a delay injected into shipped product code (forbidden).",
     )
