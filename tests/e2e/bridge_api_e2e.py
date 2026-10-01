@@ -99,6 +99,15 @@ def pending(name: str, tag: str, why: str) -> None:
     results.append((name, PENDING, f"pending ({tag}) — {why}"))
 
 
+def _safe_json(text: str) -> dict:
+    """Parse a JSON object from a response body; {} on anything else."""
+    try:
+        value = json.loads(text)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
 def sse_reply_text(stream: str) -> str:
     """Assemble the assistant's plain-text reply from a raw SSE capture.
 
@@ -2548,16 +2557,118 @@ def _w6_08_compact_keeps_newest_turn_image() -> None:
 
 # ── W7: display cap / sub-bot policy ─────────────────────────────────────────
 def w7_scenarios() -> None:
-    pending(
-        "W7-6 display cap and eviction",
-        "W7",
-        "no display-allocation/eviction state queryable over HTTP",
+    """W7-6 / W7-14 — org display cap, LRU eviction record, sub-agent refusal.
+
+    The display routes run INSIDE the container (allocation state lives on the
+    /opt/data volume), so this deploys the committed `balabot/fleet.py` into the
+    container for the scenario and restores the image-baked copy afterwards
+    (the W6-8 deploy/restore pattern) — the running image predates the module.
+    The product's real display state is snapshotted and restored too.
+    Fails if: the cap is not visible over HTTP, an under-cap grant evicts, the
+    LRU display is not evicted with a record at the cap, or a sub-agent request
+    is granted (or consumes a cap slot) instead of refused with a reason.
+    """
+    deployed = _container_deploy("balabot/fleet.py")
+    if deployed is None:
+        pending("W7-6 display cap and eviction", "W7",
+                "could not deploy balabot/fleet.py into the container")
+        pending("W7-14 sub-bots don't get displays", "W7",
+                "could not deploy balabot/fleet.py into the container")
+        return
+
+    org = "balacode"
+    state_path = "/opt/data/displays.json"
+    snap = subprocess.run(
+        ["docker", "exec", CONTAINER, "sh", "-c",
+         f"if [ -f {state_path} ]; then cat {state_path}; else echo __ABSENT__; fi"],
+        capture_output=True, text=True, timeout=60,
     )
-    pending(
-        "W7-14 sub-bots don't get displays",
-        "W7",
-        "sub-agent display policy not implemented",
-    )
+    existed = snap.stdout.strip() != "__ABSENT__"
+    original = snap.stdout
+    tmp = "/tmp/zz-api-w7-" + secrets.token_hex(3)
+
+    try:
+        st, body = get(f"/api/orgs/{org}/displays")
+        st_all, body_all = post(f"/api/orgs/{org}/displays", {"agent": "governor"})
+        low = _safe_json(body)
+        grant = _safe_json(body_all)
+        cap = low.get("cap")
+        check(
+            "W7-6 display cap and allocation state are queryable over HTTP",
+            st == 200 and cap == 5 and "allocations" in low
+            and st_all == 200 and grant.get("granted") is True
+            and grant.get("evicted") is None,
+            f"stateHTTP={st} cap={cap} grantHTTP={st_all} evicted={grant.get('evicted')}",
+            fails_if="the cap/allocation state is not queryable, or an under-cap grant evicts a display",
+        )
+
+        sub = "zz-api-sub-" + secrets.token_hex(3)
+        st_s, body_s = post(f"/api/orgs/{org}/displays", {"agent": sub})
+        st_a, body_a = get(f"/api/orgs/{org}/displays")
+        sres = _safe_json(body_s)
+        after = _safe_json(body_a)
+        check(
+            "W7-14 sub-agent display request is refused with the policy reason",
+            st_s == 200 and sres.get("refused") is True and sres.get("granted") is False
+            and "not a declared agent" in (sres.get("reason") or "")
+            and after.get("count") == grant.get("count"),
+            f"HTTP {st_s} refused={sres.get('refused')} count={after.get('count')} vs {grant.get('count')}",
+            fails_if="a sub-agent is granted a display, or its refusal consumes a cap slot",
+        )
+
+        manifest = json.dumps({
+            "version": 1, "org": org, "container": "agent-computer-" + org,
+            "agents": [
+                {"id": "zz-a1", "display": ":1", "socket": "/run/cua-driver/zz-a1.sock"},
+                {"id": "zz-a2", "display": ":2", "socket": "/run/cua-driver/zz-a2.sock"},
+                {"id": "zz-a3", "display": ":3", "socket": "/run/cua-driver/zz-a3.sock"},
+            ],
+        })
+        subprocess.run(["docker", "exec", CONTAINER, "mkdir", "-p", tmp],
+                       capture_output=True, timeout=60)
+        subprocess.run(["docker", "exec", "-i", CONTAINER, "sh", "-c",
+                        f"cat > {tmp}/{org}.json"],
+                       input=manifest, capture_output=True, text=True, timeout=60)
+        snippet = (
+            "import json\n"
+            "from balabot import fleet\n"
+            "g=[fleet.allocate_display('" + org + "', a) for a in ('zz-a1','zz-a2','zz-a3')]\n"
+            "print(json.dumps({'g': g, 's': fleet.displays_state('" + org + "')}))\n"
+        )
+        r = subprocess.run(
+            ["docker", "exec", "-i",
+             "-e", f"BALABOT_FLEET_DIR={tmp}",
+             "-e", "BALABOT_DISPLAY_CAP=2",
+             "-e", f"BALABOT_DISPLAYS_DB={tmp}/displays.json",
+             "-e", "PYTHONPATH=/opt/balabot",
+             CONTAINER, "python3", "-"],
+            input=snippet, capture_output=True, text=True, timeout=60,
+        )
+        parsed = _safe_json(r.stdout.strip().splitlines()[-1] if r.stdout.strip() else "")
+        g = parsed.get("g") or []
+        evicted = g[-1].get("evicted") if g else None
+        evs = (parsed.get("s") or {}).get("evictions") or []
+        rec = evs[-1] if evs else None
+        check(
+            "W7-6 LRU display is evicted with a record at the cap",
+            bool(evicted) and evicted.get("evicted_agent") == "zz-a1"
+            and evicted.get("requested_by") == "zz-a3"
+            and bool(rec) and rec.get("evicted_agent") == "zz-a1"
+            and rec.get("requested_by") == "zz-a3",
+            f"evicted={(evicted or {}).get('evicted_agent')} record={(rec or {}).get('evicted_agent')}",
+            fails_if="at the cap the least-recently-used display is not evicted, or the eviction leaves no record",
+        )
+    finally:
+        subprocess.run(["docker", "exec", CONTAINER, "rm", "-rf", tmp],
+                       capture_output=True, timeout=60)
+        _container_restore(*deployed)
+        if existed:
+            subprocess.run(["docker", "exec", "-i", CONTAINER, "sh", "-c",
+                            f"cat > {state_path}"],
+                           input=original, capture_output=True, text=True, timeout=60)
+        else:
+            subprocess.run(["docker", "exec", CONTAINER, "rm", "-f", state_path],
+                           capture_output=True, timeout=60)
 
 
 # ── W8-6: WAL mode on, every database (API leg of the pragma check) ─────────
