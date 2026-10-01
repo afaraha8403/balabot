@@ -72,17 +72,17 @@
   {
     "name": "t14 live stream carried reasoning_content",
     "ok": true,
-    "detail": "reasoningChars=106"
+    "detail": "reasoningChars=692"
   },
   {
     "name": "t15 live reasoning not shown while collapsed",
     "ok": true,
-    "detail": "leaked=0"
+    "detail": "canaryVisible=false"
   },
   {
     "name": "t16 expanding live thinking reveals the reasoning",
     "ok": true,
-    "detail": "segs=3"
+    "detail": "canaryVisible=true"
   },
   {
     "name": "t17 toggle turns back off",
