@@ -186,3 +186,39 @@ $ python tests/e2e/bridge_api_e2e.py
   unrelated row; the immediate re-run was 48 passed / 0 failed and the new W9-14
   checks passed in both runs. The harness makes live model turns, so a rare
   timing/answer flake is expected; no code path in this change was implicated.
+
+## Rows not landed — honest blockers
+
+These remain registered `pending` in `tests/e2e/bridge_api_e2e.py`. Each needs a
+product feature that does not exist in the repo, or a test hook that would
+violate the "no fixture logic in product code" rule. Building them now would be
+fabrication, not a fix.
+
+- **W6-8 pruning never drops this turn's image** and **W6-12 attachment payload
+  size cap upstream** — the upstream payload is assembled and forwarded *inside*
+  the `:9119` host process to a hard-coded upstream (`ui/server.py:64`
+  `UPSTREAM = "http://127.0.0.1:8642"`). There is no payload-recording seam and,
+  more importantly, no context-pruning or upstream payload-cap feature in the
+  product (`grep` for `prune`/payload caps in `balabot/**` finds none). No
+  in-repo spec (docs/kb) states the pruning/cap contract, so implementing one
+  would invent behaviour. A "payload recorder" is a test double, not the feature.
+- **W3-15 lease audit trail completeness** — no screen-lease subsystem
+  (acquire/expire/force-release) and no lease endpoints exist to audit.
+- **W7-6 display cap and eviction** — no display-allocation/eviction state is
+  queryable over HTTP; `balabot/computer.py` has no cap/eviction model.
+- **W7-14 sub-bots don't get displays** — no sub-agent display policy exists;
+  `ui/subagents.py` only *reads* the CLI lease from the container, it does not
+  gate display allocation.
+- **W8-1 slow container call doesn't stall endpoint** — already true by
+  construction: `_org_run_async` dispatches through `asyncio.to_thread`
+  (`ui/server.py:1319`). Proving it needs a slow-work fixture, and the only way
+  to inject one is a test-only branch in product code (forbidden) — there is no
+  genuinely slow endpoint to observe.
+- **W8-9 endpoints state 'pending' honestly** — needs the same absent slow-work
+  fixture; the honesty sweep is already covered by `tests/e2e/org_e2e.py` S10.
+- **W8-11 background task errors surface** — no background routine runner exists
+  to force a throwing task.
+
+**Net for this pass:** three rows landed and pushed — `W2-6`/`W2-7`
+(`022b99d`) and `W9-14` (`8da61c7`) — with full `pytest` green (487) and the
+live harness green (48 passed / 0 failed). Six rows remain honestly `pending`.
