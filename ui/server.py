@@ -1459,6 +1459,28 @@ else:
     print(json.dumps({'grant': row}))
 """
 
+# W7-6 / W7-14: display allocation is org-scoped state that lives in the
+# container's /opt/data volume (same reason as the org registry: the host
+# cannot read the named volume). Both routes therefore run through _org_run,
+# exactly like the other org surfaces.
+_ORGS_DISPLAYS_STATE_SNIPPET = """\
+from balabot import fleet
+try:
+    print(json.dumps(fleet.displays_state(payload['org'])))
+except fleet.FleetError as exc:
+    print(json.dumps({'ok': False, 'error': 'unknown_org',
+                      'detail': str(exc), 'status': 404}))
+"""
+
+_ORGS_DISPLAY_ALLOCATE_SNIPPET = """\
+from balabot import fleet
+try:
+    print(json.dumps(fleet.allocate_display(payload['org'], payload['agent'])))
+except fleet.FleetError as exc:
+    print(json.dumps({'ok': False, 'error': 'bad_request',
+                      'detail': str(exc), 'status': 404}))
+"""
+
 ORG_KINDS = ("secret", "skill", "workspace", "display")
 
 
@@ -1540,6 +1562,45 @@ def orgs_list():
             "after creating it (python -m balabot.orgs)"
         )
     return {"available": True, "orgs": rows}
+
+
+@app.get("/api/orgs/{org}/displays")
+def org_displays_state(org: str):
+    """The org's display allocation state: cap, allocations, eviction records."""
+    res = _org_run(_wrap(_ORGS_DISPLAYS_STATE_SNIPPET, True), payload={"org": org})
+    if not res.get("ok"):
+        return unavailable(
+            res.get("detail") or res.get("reason") or "could not read display state"
+        )
+    res.pop("ok", None)
+    return {"available": True, **res}
+
+
+@app.post("/api/orgs/{org}/displays")
+async def org_display_allocate(org: str, request: Request):
+    """Request a display for a named persistent agent.
+
+    A declared agent is granted a display (evicting the LRU at the cap, with a
+    record). A sub-agent id is refused with the policy reason and consumes no
+    cap slot — the refusal is a policy outcome, not a bridge error.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="body must be JSON")
+    agent = body.get("agent") or ""
+    if not isinstance(agent, str) or not agent.strip():
+        raise HTTPException(status_code=400, detail="agent is required")
+    res = _org_run(
+        _wrap(_ORGS_DISPLAY_ALLOCATE_SNIPPET, True),
+        payload={"org": org, "agent": agent},
+    )
+    if not res.get("ok"):
+        return unavailable(
+            res.get("detail") or res.get("reason") or "could not allocate a display"
+        )
+    res.pop("ok", None)
+    return {"available": True, **res}
 
 
 @app.post("/api/org/secrets")
