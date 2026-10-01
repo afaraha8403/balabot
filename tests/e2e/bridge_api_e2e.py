@@ -2283,18 +2283,189 @@ def _w5_14_read_only_never_gated(tag: str, db: str) -> None:
     )
 
 
-# ── W6: attachment pruning — needs the upstream stub harness ─────────────────
+# ── W6: attachment pruning — the newest turn's image survives compaction ─────
+# `SessionStore.compact()` (balabot/sessions.py) IS the server-side pruning
+# mechanism (landed with W2-6/W2-7) — it is not a missing feature. W6-8 is an
+# INVARIANT of that pruning: the newest USER turn carries this turn's image
+# reference (the `/api/attachments/...` URL the client wrote into the turn), and
+# compaction force-retains the newest user turn, so the image reference survives
+# while the older middle is dropped. The attachment FILE lives outside the pruned
+# transcript (under the attachments dir) and is never a pruning target.
+#
+# W6-12 is different: there is genuinely NO upstream payload-size cap anywhere.
+# `/api/chat` assembles the multimodal payload and forwards it with no byte
+# budget; the only size control is the per-file 10 MiB upload limit
+# (`ui/server.py` `ATTACHMENT_MAX_BYTES`, enforced in `upload_attachment`). A cap
+# is a product feature with no in-repo spec, so implementing one would be
+# fabrication — the row stays honestly pending.
 def w6_scenarios() -> None:
-    pending(
-        "W6-8 pruning never drops this turn's image",
-        "W6",
-        "pruning not implemented; needs payload-recording stub",
-    )
+    _w6_08_compact_keeps_newest_turn_image()
     pending(
         "W6-12 attachment payload size cap upstream",
         "W6",
-        "upstream payload cap not implemented; needs payload recorder",
+        "no upstream payload-cap behaviour exists: /api/chat assembles and "
+        "forwards the multimodal payload with no size/byte budget; the only cap "
+        "is the 10 MiB per-FILE upload limit (ui/server.py ATTACHMENT_MAX_BYTES). "
+        "A payload cap is a product feature with no in-repo spec — inventing one "
+        "would fabricate behaviour.",
     )
+
+
+def _container_deploy(rel: str) -> tuple[pathlib.Path, str] | None:
+    """Snapshot the container's image-baked copy of `rel` and deploy the
+    committed one so a live scenario exercises the repo code. Returns
+    (orig_path, dst) for restore, or None when the deploy failed."""
+    orig_dir = REPO / "tests" / "e2e" / "_scratch" / "container_orig"
+    orig_dir.mkdir(parents=True, exist_ok=True)
+    dst = "/opt/balabot/" + rel
+    rc = subprocess.run(
+        ["docker", "exec", CONTAINER, "sh", "-c", f"cat {dst}"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    orig = orig_dir / pathlib.Path(rel).name
+    if rc.returncode == 0:
+        orig.write_text(rc.stdout, encoding="utf-8")
+    r = subprocess.run(
+        ["docker", "cp", str(REPO / rel), f"{CONTAINER}:{dst}"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if r.returncode != 0:
+        return None
+    return orig, dst
+
+
+def _container_restore(orig: pathlib.Path, dst: str) -> None:
+    """Restore the container copy snapshotted by `_container_deploy`."""
+    if orig.exists():
+        subprocess.run(
+            ["docker", "cp", str(orig), f"{CONTAINER}:{dst}"],
+            capture_output=True,
+            timeout=60,
+        )
+
+
+def _w6_08_compact_keeps_newest_turn_image() -> None:
+    """W6-8 — the newest user turn's image reference survives server-side pruning
+    (`SessionStore.compact`), while older middle turns are dropped.
+    Fails if: compaction drops the newest user turn — that severs the live thread
+    and loses this turn's image reference even though the turn is current."""
+    deployed = _container_deploy("balabot/sessions.py")
+    if deployed is None:
+        pending(
+            "W6-8 pruning never drops this turn's image",
+            "W6",
+            "docker cp balabot/sessions.py failed",
+        )
+        return
+    orig, dst = deployed
+    tag = secrets.token_hex(4)
+    sid = f"zz-api-w6s8-{tag}"
+    image_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15c4"
+    )
+    att_path: str | None = None
+    try:
+        st, body = post(
+            "/api/sessions",
+            {"botId": "governor", "id": sid, "title": "w6-8 compact image probe"},
+        )
+        if not (st == 200 and json.loads(body).get("created") is True):
+            pending(
+                "W6-8 pruning never drops this turn's image",
+                "W6",
+                f"could not create fixture session (HTTP {st})",
+            )
+            return
+
+        # The turn's image is a REAL uploaded artifact, not a bare string: upload
+        # a tiny PNG and write its served URL into the newest turn's content.
+        st, body = post(
+            "/api/attachments",
+            {
+                "name": f"w6-8-{tag}.png",
+                "mime_type": "image/png",
+                "content": base64.b64encode(image_bytes).decode("ascii"),
+            },
+        )
+        att = json.loads(body) if body.startswith("{") else {}
+        img_url = str(att.get("url") or "")
+        att_path = att.get("path")
+        if st != 200 or not img_url:
+            pending(
+                "W6-8 pruning never drops this turn's image",
+                "W6",
+                f"could not upload the turn's image (HTTP {st})",
+            )
+            return
+
+        # u1,a1,u2,a2,u3(image),a3 — the image rides the NEWEST user turn (u3);
+        # a tail window of 1 holds only a3, so without the newest-user-turn
+        # protection u3 (and its image reference) is pruned.
+        seeded = [
+            ("user", f"W6-8 oldest turn {tag}", f"zz-{tag}-u1"),
+            ("assistant", f"W6-8 reply one {tag}", f"zz-{tag}-a1"),
+            ("user", f"W6-8 middle turn {tag}", f"zz-{tag}-u2"),
+            ("assistant", f"W6-8 reply two {tag}", f"zz-{tag}-a2"),
+            ("user", f"W6-8 newest image turn {tag} {img_url}", f"zz-{tag}-u3"),
+            ("assistant", f"W6-8 reply three {tag}", f"zz-{tag}-a3"),
+        ]
+        for role, content, mid in seeded:
+            if not _w2_record(sid, role, content, mid):
+                pending(
+                    "W6-8 pruning never drops this turn's image",
+                    "W6",
+                    f"could not seed {mid}",
+                )
+                return
+
+        st, body = post(
+            f"/api/sessions/{sid}/compact",
+            {"protect_first_n": 1, "protect_last_n": 1},
+        )
+        d = json.loads(body) if body.startswith("{") else {}
+        check(
+            "W6-8 compact accepted",
+            st == 200 and d.get("compacted") is True and d.get("pruned", 0) >= 1,
+            f"HTTP {st} pruned={d.get('pruned')} remaining={d.get('remaining')}",
+            fails_if="the compaction endpoint rejected the bounded request or pruned nothing",
+        )
+
+        _, body = get(f"/api/sessions/{sid}/messages")
+        msgs = json.loads(body).get("messages", []) if body.startswith("{") else []
+        contents = [str(m.get("content", "")) for m in msgs]
+        check(
+            "W6-8 newest turn's image survives pruning",
+            any(img_url in c for c in contents),
+            f"image kept={img_url in '|'.join(contents)} ({len(msgs)} turns remain)",
+            fails_if="the newest user turn carrying this turn's image was pruned",
+        )
+        check(
+            "W6-8 older middle content dropped (not a no-op)",
+            not any("W6-8 middle turn" in c for c in contents),
+            f"{len(msgs)} messages remain",
+            fails_if="compaction pruned nothing, so 'the image survives' proves nothing",
+        )
+
+        st_img, _ = get(img_url)
+        check(
+            "W6-8 image file survives pruning",
+            st_img == 200,
+            f"GET {'/api/attachments/...'} -> HTTP {st_img}",
+            fails_if="pruning deleted the attachment the newest turn still references",
+        )
+    finally:
+        delete(f"/api/sessions/{sid}")
+        if att_path:
+            subprocess.run(
+                ["docker", "exec", CONTAINER, "rm", "-f", att_path],
+                capture_output=True,
+            )
+        _container_restore(orig, dst)
 
 
 # ── W7: display cap / sub-bot policy ─────────────────────────────────────────
