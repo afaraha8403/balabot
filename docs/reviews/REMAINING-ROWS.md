@@ -489,7 +489,7 @@ weakened.
 ## W8-1 slow container call doesn't stall endpoint — RETIRED (not provable without test logic in the product)
 
 Not built. It is **true by construction**: `_org_run_async` dispatches through
-`asyncio.to_thread` (`ui/server.py:1403`, def at `ui/server.py:1391`), and the
+`asyncio.to_thread` (`ui/server.py:1406`, def at `ui/server.py:1394`), and the
 static audit `W8-13` proves no blocking call sits inside an `async def`.
 Proving it *dynamically* requires injecting a delay into shipped product code — a
 test-only branch in the product, which is forbidden. Registered retired in
