@@ -112,3 +112,65 @@ def test_run_unknown_routine_is_a_404(client):
     bot = "zz-w8-11d"
     resp = client.post(f"/api/bots/{bot}/routines/no-such-routine/run")
     assert resp.status_code == 404
+
+
+def _bind_handler(client, bot_id, routine_id, handler: str = "prompt"):
+    return client.post(
+        f"/api/bots/{bot_id}/routines/{routine_id}/handler",
+        json={"handler": handler},
+    )
+
+
+def test_production_binding_runs_the_routine_and_failure_surfaces(client, monkeypatch):
+    from ui import server
+
+    bot = "zz-w8-11e"
+    routine = _make_routine(client, bot, "Bound routine")
+
+    # Bind through the production entry point. This test never calls
+    # register_routine_handler itself — that is the whole point.
+    bind = _bind_handler(client, bot, routine["id"])
+    assert bind.status_code == 200
+    assert bind.json() == {"ok": True, "routineId": routine["id"], "handler": "prompt"}
+
+    async def _backend_down(profile, messages):
+        raise RuntimeError("backend down")
+
+    monkeypatch.setattr(server, "_upstream_turn", _backend_down)
+
+    started = client.post(f"/api/bots/{bot}/routines/{routine['id']}/run")
+    assert started.status_code == 200
+    assert started.json() == {"ok": True, "started": True, "routineId": routine["id"]}
+
+    run = _wait_for_status(client, bot, routine["id"], "failed")
+    assert "backend down" in run["error"]
+    assert "RuntimeError" in run["error"]
+
+
+def test_bound_prompt_handler_records_the_bots_reply(client, monkeypatch):
+    from ui import server
+
+    bot = "zz-w8-11f"
+    routine = _make_routine(client, bot, "Replied routine")
+    assert _bind_handler(client, bot, routine["id"]).status_code == 200
+
+    async def _reply(profile, messages):
+        assert profile == bot
+        assert messages == [{"role": "user", "content": "work"}]
+        return "all done"
+
+    monkeypatch.setattr(server, "_upstream_turn", _reply)
+    started = client.post(f"/api/bots/{bot}/routines/{routine['id']}/run")
+    assert started.status_code == 200
+    completed = _wait_for_status(client, bot, routine["id"], "completed")
+    assert completed["result"] == {"reply": "all done"}
+
+
+def test_binding_an_unknown_handler_is_refused(client):
+    bot = "zz-w8-11g"
+    routine = _make_routine(client, bot, "R")
+    assert _bind_handler(client, bot, routine["id"], handler="nope").status_code == 400
+
+
+def test_binding_an_unknown_routine_is_a_404(client):
+    assert _bind_handler(client, "zz-w8-11h", "no-such-routine").status_code == 404

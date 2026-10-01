@@ -738,13 +738,87 @@ Full suite: **493 passed** in this worktree.
 process restart) and there is no scheduler — a caller must trigger a run. Those
 are W8-3/W8-4/W8-7/W8-12 and are out of this row's scope.
 
-**Honest deployment gap.** No production code registers a routine handler yet,
-so against the live server every routine POST returns the honest `409` — the
-runner is a live, callable surface with no routine body wired behind it. That is
-the exact "declared capability, zero effect" shape the project rules warn about,
-and it is stated here rather than hidden: the row proves the *runner and its
-error surfacing*, not that any shipped routine executes. Wiring real routine
-bodies is follow-up work.
+**Honest deployment gap (now closed).** When this row landed no production code
+registered a routine handler, so against the live server every routine POST
+returned the honest `409` — the runner was a live, callable surface with no
+routine body wired behind it, the exact "declared capability, zero effect" shape
+the project rules warn about. That gap is closed by the follow-up landed below
+(`POST .../handler` binds the built-in `prompt` executor, and the toggled
+routine list in the UI invokes it on save), so a routine created or edited
+through the product is now actually runnable while an unbound routine keeps the
+existing `409`.
+
+## W8-11 follow-up — the routine runner gets a real production call site (landed, this pass)
+
+**The defect.** `register_routine_handler` (`ui/server.py`) had callers only in
+`tests/test_routines.py`. Nothing in the product ever bound an executor to a
+routine, so no routine a real user created could run — every `POST .../run`
+returned the honest `409`.
+
+**The mechanism (chosen).** A production route binds a named built-in executor
+to an existing routine: `POST /api/bots/{bot_id}/routines/{routine_id}/handler`
+(`handler` defaults to `prompt`, the only built-in today). The built-in
+`prompt` executor (`_run_routine_prompt`) runs the routine's configured
+instruction as one turn for its bot through the existing `_upstream_turn` helper
+and records the reply as the run result. The route is the production call site
+for `register_routine_handler`; it refuses an unknown executor (`400`) and a
+routine with no instructions (`400`), and a routine that was never bound still
+returns the existing `409`. The routine editor (`ui/src/RoutinesList.tsx`)
+calls `bindRoutineHandler` on save, so a routine created or edited through the
+product is actually runnable — the consumer is a real user flow, not a test.
+
+Why an explicit bind route over auto-registering for every routine: the
+existing honest-`409` test and the live bridge row for `rt_principal_1` both
+rely on a routine with no bound executor staying un-runnable. An explicit bind
+step preserves that contract while making the product path real.
+
+**Production-path proof (the test never calls `register_routine_handler`).**
+`tests/test_routines.py`:
+- `test_production_binding_runs_the_routine_and_failure_surfaces` — create
+  routine → `POST .../handler` → `POST .../run` (200) → the failed run surfaces
+  `RuntimeError: backend down` over `GET .../runs`.
+- `test_bound_prompt_handler_records_the_bots_reply` — the bound executor sends
+  the routine's prompt to its bot's profile and the reply becomes
+  `result == {"reply": "all done"}`.
+- `test_binding_an_unknown_handler_is_refused` (400) and
+  `test_binding_an_unknown_routine_is_a_404` (404). The pre-existing
+  `test_run_without_a_registered_handler_is_an_honest_409` and
+  `test_run_unknown_routine_is_a_404` are unchanged.
+
+**RED evidence** (production call site bypassed — the
+`register_routine_handler` call commented out inside the bind route):
+```
+....FF..                                                                 [100%]
+FAILED tests/test_routines.py::test_production_binding_runs_the_routine_and_failure_surfaces
+    assert 409 == 200   # run falls back to the honest refusal
+FAILED tests/test_routines.py::test_bound_prompt_handler_records_the_bots_reply
+    assert 409 == 200
+2 failed, 6 passed in 0.62s
+```
+Only the two production-path checks flip; the 409/404 rows still pass, so the
+RED measures the production call site and nothing else.
+
+**GREEN evidence** (call site restored):
+```
+........                                                                 [100%]
+8 passed in 0.69s
+```
+Full suite: **527 passed in 42.83s** (baseline **523 passed**; +4 new tests, no
+regression).
+
+**Live call sites (not orphaned).**
+- `ui/server.py` `bind_routine_handler` → `register_routine_handler(routine_id, handler)`.
+- `ui/src/RoutinesList.tsx` `handleSave` → `bindRoutineHandler(botId, res.routine.id)`
+  (the UI consumer), backed by `ui/src/api.ts`.
+
+**Honest limits.**
+- The bound executor is in-memory, like the run log itself; a server restart
+  loses the binding until the routine is saved again. That is the runner's
+  existing in-memory contract (persistence is W8-3/W8-4), not a new gap.
+- The UI build (`npm run build`) was **not** run: `ui/dist` is the shared
+  `:9119` deploy and this run is serialised against a sibling worktree. The
+  server route is proven with `pytest`; the UI call site is source-verified
+  (this worktree has no `node_modules` for a UI typecheck).
 
 ## W8-9 endpoints state 'pending' honestly — RETIRED (duplicate coverage)
 

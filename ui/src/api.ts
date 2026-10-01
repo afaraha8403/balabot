@@ -850,6 +850,18 @@ export async function deleteRoutine(
   );
 }
 
+/** POST /api/bots/{botId}/routines/{routineId}/handler — bind the built-in executor so the routine can run. */
+export async function bindRoutineHandler(
+  botId: string,
+  routineId: string,
+  handler = 'prompt',
+): Promise<{ok: boolean; routineId: string; handler: string}> {
+  return api<{ok: boolean; routineId: string; handler: string}>(
+    `/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(routineId)}/handler`,
+    {method: 'POST', body: JSON.stringify({handler})},
+  );
+}
+
 
 export async function getFleet(): Promise<Fleet> {
   return api<Fleet>('/api/fleet');

@@ -1330,6 +1330,30 @@ def register_routine_handler(routine_id: str, handler) -> None:
         _routine_handlers[routine_id] = handler
 
 
+async def _run_routine_prompt(routine: dict) -> dict:
+    """Built-in ``prompt`` executor: run the routine's instruction as one turn.
+
+    The routine's configured ``prompt`` is sent to its bot's profile and the
+    reply becomes the run result. A backend failure propagates to
+    ``_execute_routine`` so it is recorded and readable over HTTP, never
+    swallowed.
+    """
+    profile = str(routine.get("botId") or "").strip() or "principal"
+    prompt = str(routine.get("prompt") or "").strip()
+    if not prompt:
+        raise ValueError("routine has no instructions to run")
+    reply = await _upstream_turn(profile, [{"role": "user", "content": prompt}])
+    return {"reply": reply}
+
+
+_BUILTIN_ROUTINE_HANDLERS = {"prompt": _run_routine_prompt}
+
+
+def _builtin_routine_handler(kind: str):
+    """Resolve a named built-in executor; ``None`` when the name is unknown."""
+    return _BUILTIN_ROUTINE_HANDLERS.get(kind)
+
+
 def _record_routine_run(record: dict) -> None:
     with _routine_runs_lock:
         _routine_runs.append(record)
@@ -1379,6 +1403,37 @@ async def run_routine(bot_id: str, routine_id: str):
     _routine_tasks.add(task)
     task.add_done_callback(_routine_tasks.discard)
     return {"ok": True, "started": True, "routineId": routine_id}
+
+
+@app.post("/api/bots/{bot_id}/routines/{routine_id}/handler")
+async def bind_routine_handler(bot_id: str, routine_id: str, request: Request):
+    """Bind a built-in executor to an existing routine.
+
+    This is the production call site for ``register_routine_handler``: a
+    routine only becomes runnable once the product binds an executor to it.
+    ``handler`` defaults to the built-in ``prompt`` executor, which runs the
+    routine's instruction as a turn for its bot. An unknown executor, or a
+    routine with no instructions to run, is refused with an explicit 4xx —
+    never silently bound.
+    """
+    routines = _get_bot_routines(bot_id)
+    routine = next((r for r in routines if r["id"] == routine_id), None)
+    if routine is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    kind = str(body.get("handler") or "prompt").strip() or "prompt"
+    handler = _builtin_routine_handler(kind)
+    if handler is None:
+        raise HTTPException(status_code=400, detail=f"unknown routine handler {kind!r}")
+    if not str(routine.get("prompt") or "").strip():
+        raise HTTPException(
+            status_code=400, detail="routine has no instructions to bind"
+        )
+    register_routine_handler(routine_id, handler)
+    return {"ok": True, "routineId": routine_id, "handler": kind}
 
 
 @app.get("/api/bots/{bot_id}/routines/runs")
