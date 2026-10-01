@@ -488,3 +488,27 @@ row measures the cap and nothing else. The mutation was never committed.
   this run; those edits are not mine and were deliberately **not** staged or
   committed (only `ui/server.py` + `tests/test_wave6_attachment_cap.py` were).
   The uncommitted diff is left in place, untampered.
+
+### W6-12 addendum — independent verification from the colliding writer
+
+The "external writer" referenced above was a **second agent assigned the same
+worktree** (`wt/w612`), which independently derived the same cap and reproduced
+the RED→GREEN before discovering the row was already committed by the writer
+above (`468661c` + `cbc48a3`). Its duplicate draft tests in
+`tests/test_attachments_p0_5.py` have since been reverted, so the committed
+tests own the row. No product change was needed.
+
+- **Live call site confirmed independently:** `ui/server.py:3124`
+  `_enforce_chat_attachment_cap(attachments)` runs unconditionally on the
+  `/api/chat` assembly path, immediately before the block that builds
+  `image_parts`/`att_lines` and forwards upstream — a live call, not an orphan
+  helper.
+- **Independent RED** (call commented out): the over-cap refusal checks fail
+  with `DID NOT RAISE <class 'fastapi.exceptions.HTTPException'>` while the
+  at-cap success check still passes — only the refusal property flips.
+- **Independent GREEN** (call restored): `tests/test_wave6_attachment_cap.py`
+  + `tests/test_attachments_p0_5.py` → **10 passed**.
+- **Full suite** on the committed state → **492 passed** (tree clean).
+
+This addendum is a record of independent verification only; the load-bearing
+implementation and its evidence are the committed section above.
