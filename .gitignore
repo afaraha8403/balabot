@@ -27,3 +27,7 @@ Thumbs.db
 ui/node_modules/
 ui/dist/
 ui/tsconfig.tsbuildinfo
+
+# e2e harness scratch state (W1/W2/W5/W9 fixtures, container snapshots) —
+# regenerated every run; never source, never committed.
+tests/e2e/_scratch/
