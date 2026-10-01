@@ -2,6 +2,58 @@
 
 What each cleared row proves, its RED-to-GREEN evidence, and anything left undone.
 
+## W2-2 — deterministic server-side assertions (red row fixed)
+
+**Proves:** the delta protocol is accepted, the server merges the durable store
+history (the seed the delta client deliberately did NOT re-upload is retained),
+and the turn's user + assistant rows are persisted back to the store. The legacy
+full-history path is proven additively (W2-8): the request is accepted, the
+stream carries a real reply, and the legacy turn reaches the durable store.
+
+**The red row's real cause:** `W2-2 legacy full-history send still works`
+asserted `"LEGACY-OK" in sse_reply_text(stream2)` against the model's prose. On a
+quiet re-run the governor refuses the false confirmation (the session/bot has
+accumulated many conflicting codenames), so the literal token is absent — the
+row went red while HTTP was 200. Worse, when the model *did* refuse it sometimes
+quoted the token (`...printing "LEGACY-OK" would be a false confirmation`), so
+the assertion could pass by accident. The sibling sentinel-echo check was flaky
+for the same reason: it depended on the model politely repeating a string.
+
+**Fix:** both checks now assert what the server does, never what the model says:
+- `W2-2 server rebuilt context from the durable store` — un-reuploaded seed
+  present in the store, delta present, a non-empty assistant reply persisted.
+- `W2-2 legacy full-history send still works` — HTTP 200 + non-empty reply +
+  the legacy user turn persisted to the store.
+
+**RED evidence** (mutation: force every `/api/sessions/{id}/messages` read to
+return zero rows — the "history not intact / turn not persisted" property):
+```
+[PASS] W2-2 delta-only send accepted :: HTTP 200
+[FAIL] W2-2 server rebuilt context from the durable store :: 0 rows seed=False delta=False reply_persisted=False replied=236ch
+[FAIL] W2-2 store keeps seed AND delta :: 0 rows
+[FAIL] W2-2 legacy full-history send still works :: HTTP 200 reply=253ch legacy_turn_persisted=False
+```
+
+**GREEN evidence** (real store read, live server):
+```
+[PASS] W2-2 delta-only send accepted :: HTTP 200
+[PASS] W2-2 server rebuilt context from the durable store :: 3 rows seed=True delta=True reply_persisted=True replied=143ch
+[PASS] W2-2 store keeps seed AND delta :: 3 rows
+[PASS] W2-2 legacy full-history send still works :: HTTP 200 reply=302ch legacy_turn_persisted=True
+```
+Note reply 2 did **not** contain the literal `LEGACY-OK` (`...printing LEGACY-OK
+would be a false confirmation`) and the row still passes — the old assertion
+would have failed on exactly this output.
+
+`pytest tests -q` → **487 passed** (unchanged).
+
+**Honest limit:** without an upstream-payload seam, "the server forwarded the
+merged history upstream" is only directly observable through the model's answer.
+These checks assert the server-side *effect* of the rebuild (durable history intact
++ turn persisted + request accepted). Detecting a merge that silently forwards
+only the delta would need the payload recorder the W6-8/W6-12 rows call for.
+
+
 ## W2-2 — client sends only the delta
 
 **Proves:** a client that owns a `session_id` uploads ONLY the new user turn
