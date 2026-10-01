@@ -684,3 +684,82 @@ $ pytest tests -q
 - `tests/e2e/bridge_api_e2e.py` still registers both rows as `pending`; the live
   integration-gate scenario is left to the coordinator (the harness is run
   serially and was not run or edited this pass).
+---
+
+# Track W8 — background routine runner + honest retirement (branch `wt/w8`)
+
+Evidence for this section is `pytest` in this worktree only. The shared E2E
+harness (`tests/e2e/bridge_api_e2e.py`) is the coordinator's serial gate and was
+**not run here**; the W8 rows below were updated in that file but the counts it
+prints are the coordinator's to report.
+
+## W8-11 background task errors surface — BUILT (commits `6677927`, `aa79fc8`)
+
+**What the row proves.** A registered routine now actually executes as a
+background task, and a routine that **throws is recorded** — the failure (routine
+id, error, timestamps) is readable over HTTP at
+`GET /api/bots/{bot_id}/routines/runs`. The throwing task is guarded so it can
+never escape and kill the runner or the endpoint; a handler-less routine is an
+honest `409`, an unknown routine a `404`.
+
+**Where.** `ui/server.py`: `register_routine_handler` (`ui/server.py:1175`),
+`_execute_routine` (guarded task, `ui/server.py:1191`), trigger
+`POST /api/bots/{bot_id}/routines/{routine_id}/run` (`ui/server.py:1221`), run
+log `GET /api/bots/{bot_id}/routines/runs` (`ui/server.py:1236`). Sync handlers
+run through `asyncio.to_thread`; in-flight tasks are retained in `_routine_tasks`
+so asyncio's weak-reference GC cannot silently drop a running routine.
+
+**RED→GREEN.** Fails-if: the failure never reaches the surface.
+
+- **RED** — remove the error capture (`except Exception: raise`) and run
+  `pytest tests/test_routines.py -q`:
+  ```
+  2 failed, 2 passed in 12.08s
+  FAILED tests/test_routines.py::test_throwing_routine_error_surfaces_over_http
+  FAILED tests/test_routines.py::test_failing_routine_does_not_kill_runner_or_endpoint
+  ERROR asyncio Task exception was never retrieved
+    exception=RuntimeError('routine boom')
+  E  AssertionError: no failed run for rt_..._a50cd1 within 5.0s
+  ```
+  The failure vanished: no `failed` run record, only an unraisable asyncio log —
+  exactly the swallowed-background-error this row guards.
+- **GREEN** — restore the capture (`git checkout -- ui/server.py`):
+  ```
+  .... 4 passed in 2.92s
+  ```
+
+**Coverage.** `tests/test_routines.py` (4 tests) exercises the real FastAPI app
+with an in-process handler registered through the public entry point: a throw
+surfaces with `RuntimeError: routine boom`, a subsequent good routine still
+completes, the endpoints stay alive after the failure, and 404/409 are honest.
+Full suite: **493 passed** in this worktree.
+
+**Not done.** The runner is in-memory only (run log is not persisted across a
+process restart) and there is no scheduler — a caller must trigger a run. Those
+are W8-3/W8-4/W8-7/W8-12 and are out of this row's scope.
+
+**Honest deployment gap.** No production code registers a routine handler yet,
+so against the live server every routine POST returns the honest `409` — the
+runner is a live, callable surface with no routine body wired behind it. That is
+the exact "declared capability, zero effect" shape the project rules warn about,
+and it is stated here rather than hidden: the row proves the *runner and its
+error surfacing*, not that any shipped routine executes. Wiring real routine
+bodies is follow-up work.
+
+## W8-9 endpoints state 'pending' honestly — RETIRED (duplicate coverage)
+
+Not built. The honesty sweep already exists and is proven: the unavailable-state
+contract is `unavailable()` at `ui/server.py:183` and the live sweep is
+`tests/e2e/org_e2e.py` S10. A bridge re-assertion of the same property would be
+**duplicate coverage, not new coverage**, so the row is registered retired in
+`tests/e2e/bridge_api_e2e.py` (`retired(...)`) rather than pending. Nothing was
+weakened.
+
+## W8-1 slow container call doesn't stall endpoint — RETIRED (not provable without test logic in the product)
+
+Not built. It is **true by construction**: `_org_run_async` dispatches through
+`asyncio.to_thread` (`ui/server.py:1406`, def at `ui/server.py:1394`), and the
+static audit `W8-13` proves no blocking call sits inside an `async def`.
+Proving it *dynamically* requires injecting a delay into shipped product code — a
+test-only branch in the product, which is forbidden. Registered retired in
+`tests/e2e/bridge_api_e2e.py` with that justification; nothing was weakened.

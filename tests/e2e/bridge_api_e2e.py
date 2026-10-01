@@ -46,7 +46,7 @@ KEY_FILE = pathlib.Path(r"C:/Users/ali/secrets/balabot-dashboard.key")
 REPO = pathlib.Path(__file__).resolve().parents[2]
 CONTAINER = "balabot-balabot-1"
 
-PASS, FAIL, PENDING = "PASS", "FAIL", "PENDING"
+PASS, FAIL, PENDING, RETIRED = "PASS", "FAIL", "PENDING", "RETIRED"
 results: list[tuple[str, str, str]] = []
 
 
@@ -106,6 +106,10 @@ def _safe_json(text: str) -> dict:
         return value if isinstance(value, dict) else {}
     except Exception:
         return {}
+def retired(name: str, tag: str, why: str) -> None:
+    """A row proven elsewhere, or not provable without test logic in product
+    code. It is not pending: nothing is left to build."""
+    results.append((name, RETIRED, f"retired ({tag}) — {why}"))
 
 
 def sse_reply_text(stream: str) -> str:
@@ -2737,23 +2741,57 @@ def w8_06_wal_every_db() -> None:
     )
 
 
-# ── W8-9 / W8-11: honest pending states & surfaced task errors ───────────────
+# ── W8-1 / W8-9: retired with a written justification; W8-11: live surface ──
 def w8_pending_scenarios() -> None:
-    pending(
+    retired(
         "W8-1 slow container call doesn't stall endpoint",
         "W8",
-        "no delay-injection test hook in the container bridge yet",
+        "true by construction: _org_run_async dispatches through "
+        "asyncio.to_thread (ui/server.py:1406, def at 1394) and W8-13 "
+        "statically proves no blocking call sits inside an async def. A dynamic "
+        "proof would need a delay injected into shipped product code (forbidden).",
     )
-    pending(
+    retired(
         "W8-9 endpoints state 'pending' honestly",
         "W8",
-        "no slow-work fixture to observe; honesty sweep covered by "
-        "org_e2e S10 — this scenario needs the W8 work hook",
+        "duplicate coverage: the honesty sweep is already proven by "
+        "tests/e2e/org_e2e.py S10 and unavailable() at ui/server.py:183 — "
+        "a bridge re-assertion is not new coverage.",
     )
-    pending(
-        "W8-11 background task errors surface",
-        "W8",
-        "no routine runner hook to force a throwing background task",
+    _w8_11_routine_run_surface()
+
+
+def _w8_11_routine_run_surface() -> None:
+    """W8-11 — is the routine runner's HTTP surface live and honest?
+
+    The throw-capture property (a routine that raises is recorded with its
+    error) is proven in tests/test_routines.py against the real app with an
+    in-process handler — the only place a handler can be registered, since
+    there is no HTTP endpoint to inject a throwing routine and adding one to
+    product code would be test logic in the product. This live check proves the
+    endpoint is reachable and honest about a routine with no registered handler.
+    """
+    st, _body = post("/api/bots/principal/routines/rt_principal_1/run", {})
+    if st == 404:
+        pending(
+            "W8-11 routine runner HTTP surface is live",
+            "W8",
+            f"server predates the runner (HTTP {st}); runner built in "
+            "ui/server.py, throw-capture proven by tests/test_routines.py",
+        )
+        return
+    check(
+        "W8-11 handler-less routine is refused honestly",
+        st == 409,
+        f"HTTP {st}",
+        fails_if="a routine with no registered handler is scheduled as if it ran",
+    )
+    st2, _body2 = get("/api/bots/principal/routines/runs")
+    check(
+        "W8-11 run history is readable over HTTP",
+        st2 == 200,
+        f"HTTP {st2}",
+        fails_if="the runner exposes no HTTP-readable run log",
     )
 
 
@@ -3007,12 +3045,20 @@ def main() -> int:
     n_pass = sum(1 for _, s, _ in results if s == PASS)
     n_fail = sum(1 for _, s, _ in results if s == FAIL)
     n_pend = sum(1 for _, s, _ in results if s == PENDING)
+    n_ret = sum(1 for _, s, _ in results if s == RETIRED)
     for name, st, detail in results:
-        flag = {"PASS": "  ok ", "FAIL": " FAIL", "PENDING": " ..  "}[st]
+        flag = {
+            "PASS": "  ok ",
+            "FAIL": " FAIL",
+            "PENDING": " ..  ",
+            "RETIRED": " --  ",
+        }[st]
         print(f"[{flag}] {name.ljust(width)}  {detail[:96]}")
     print(
-        f"\n{n_pass} passed, {n_fail} failed, {n_pend} pending "
-        f"(pending = feature not built — honest, never a vacuous pass)"
+        f"\n{n_pass} passed, {n_fail} failed, {n_pend} pending, "
+        f"{n_ret} retired (pending = feature not built — honest, never a "
+        f"vacuous pass; retired = proven elsewhere or not provable without "
+        f"test logic in the product)"
     )
     return 1 if n_fail else 0
 

@@ -42,6 +42,7 @@ import re
 import secrets
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 
@@ -1299,6 +1300,92 @@ def delete_routine(bot_id: str, routine_id: str):
     filtered = [r for r in routines if r["id"] != routine_id]
     _save_bot_routines(bot_id, filtered)
     return {"ok": True, "deleted": True}
+
+
+# ── background routine runner ────────────────────────────────────────────────
+# The routine list above is configuration; nothing executed it. This is the
+# minimal runner: a caller registers a callable for a routine id, the HTTP
+# trigger schedules it with asyncio.create_task, and every outcome — including
+# a raised exception — is appended to a run log readable over HTTP. A failing
+# routine is recorded, never allowed to escape the task: an unhandled
+# background exception is swallowed by the event loop, so without this capture
+# the failure vanishes with no operator-visible trace.
+_routine_handlers: dict[str, object] = {}
+_routine_runs: list[dict] = []
+_routine_runs_lock = threading.Lock()
+# Strong references to in-flight background tasks. asyncio only holds a weak
+# reference to a running task, so a bare create_task() result can be garbage
+# collected mid-run and the routine silently disappears.
+_routine_tasks: set[asyncio.Task] = set()
+_MAX_ROUTINE_RUNS = 200
+
+
+def register_routine_handler(routine_id: str, handler) -> None:
+    """Register the callable that runs a routine's work.
+
+    The handler receives the routine's own dict (id, title, prompt, ...) so it
+    has the configuration it needs, and may be sync or async.
+    """
+    with _routine_runs_lock:
+        _routine_handlers[routine_id] = handler
+
+
+def _record_routine_run(record: dict) -> None:
+    with _routine_runs_lock:
+        _routine_runs.append(record)
+        del _routine_runs[:-_MAX_ROUTINE_RUNS]
+
+
+async def _execute_routine(routine: dict, handler) -> None:
+    started = time.time()
+    record = {
+        "id": f"run_{int(started * 1000)}_{uuid.uuid4().hex[:6]}",
+        "botId": routine.get("botId"),
+        "routineId": routine["id"],
+        "startedAt": started,
+        "status": "running",
+    }
+    _record_routine_run(record)
+    try:
+        if inspect.iscoroutinefunction(handler):
+            result = await handler(routine)
+        else:
+            # A sync handler runs off the event loop so a slow routine never
+            # stalls every other endpoint (the W8-1 contract).
+            result = await asyncio.to_thread(handler, routine)
+        if inspect.isawaitable(result):
+            result = await result
+        with _routine_runs_lock:
+            record["status"] = "completed"
+            record["result"] = result
+            record["finishedAt"] = time.time()
+    except Exception as exc:
+        with _routine_runs_lock:
+            record["status"] = "failed"
+            record["error"] = f"{type(exc).__name__}: {exc}"
+            record["finishedAt"] = time.time()
+
+
+@app.post("/api/bots/{bot_id}/routines/{routine_id}/run")
+async def run_routine(bot_id: str, routine_id: str):
+    routines = _get_bot_routines(bot_id)
+    routine = next((r for r in routines if r["id"] == routine_id), None)
+    if routine is None:
+        raise HTTPException(status_code=404, detail="routine not found")
+    handler = _routine_handlers.get(routine_id)
+    if handler is None:
+        raise HTTPException(status_code=409, detail="routine has no registered handler")
+    task = asyncio.create_task(_execute_routine(routine, handler))
+    _routine_tasks.add(task)
+    task.add_done_callback(_routine_tasks.discard)
+    return {"ok": True, "started": True, "routineId": routine_id}
+
+
+@app.get("/api/bots/{bot_id}/routines/runs")
+def get_routine_runs(bot_id: str):
+    with _routine_runs_lock:
+        runs = [dict(r) for r in _routine_runs if r.get("botId") == bot_id]
+    return {"ok": True, "runs": runs}
 
 
 # ── message queueing (durable per-session message queue) ────────────────────
