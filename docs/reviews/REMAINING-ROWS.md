@@ -53,6 +53,53 @@ These checks assert the server-side *effect* of the rebuild (durable history int
 + turn persisted + request accepted). Detecting a merge that silently forwards
 only the delta would need the payload recorder the W6-8/W6-12 rows call for.
 
+## W2-13 — two clients converge to one order under interleave (real defect)
+
+**Proves:** when two browser clients send into the same session in the same
+instant, both transcripts render the two turns in the SAME order, and neither
+client loses the other's turn.
+
+**The defect (real, not a flake).** `ui/src/sessions.ts` `findLocalEcho()`
+adopted ANY incoming server row onto ANY same-role local message that was
+unsequenced and at the tail — content-agnostic, by design, to absorb a
+client-transformed assistant copy. When client A's user turn fanned out to
+client B, B adopted A's server row onto B's OWN unsequenced optimistic user
+message (a different turn): A's content was swallowed and B's own echo then
+appended a second copy of B. A quiet-server transcript dump showed it directly:
+```
+--- page A ---   ... E2E-W2-13a-320146 / E2E-W2-13b-320146   (correct)
+--- page B ---   ... E2E-W2-13b-320146 / E2E-W2-13b-320146   (A missing, B twice)
+```
+
+**Fix:** the client already sends its optimistic id as the wire `message_id`, so
+the server echo for that turn carries that exact id (handled by the id-match
+branch). `findLocalEcho` now refuses to adopt a server row whose `message_id`
+differs from the local candidate's id — only an id-less local (the transformed
+assistant copy) stays adoption-eligible.
+
+**Harness measurement fixed (same pass, not a relaxation).** The scenario read
+`document.body.innerText.indexOf(text)`, which matches the session-list preview
+earlier in the DOM, so it measured the sidebar, not the conversation. It now
+reads the transcript rows (`[data-message-id]`) under the unique stamp.
+
+**RED evidence** (product guard disabled, rebuilt, quiet server):
+```
+FAIL  W2-13 two clients converge to the same order under interleave  <- a=[624,625] b=[-1,624]
+```
+
+**GREEN evidence:**
+```
+PASS  W2-13 two clients converge to the same order under interleave
+1/1 runnable scenarios passed, 0 reported pending
+```
+And the raw transcript tails, post-fix, converge on both pages:
+```
+page A: E2E-W2-13a-402335 / E2E-W2-13b-402335
+page B: E2E-W2-13a-402335 / E2E-W2-13b-402335
+```
+
+`npm run build` in `ui/` deployed the SPA fix. `pytest tests -q` → **487 passed**.
+
 
 ## W2-2 — client sends only the delta
 

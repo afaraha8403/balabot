@@ -566,12 +566,23 @@ async function w2s13(browser) {
   await sendViaComposer(a.page, `E2E-W2-13a-${stamp}`);
   await sendViaComposer(b.page, `E2E-W2-13b-${stamp}`);
   await sleep(12000);
-  const ta = await bodyText(a.page);
-  const tb = await bodyText(b.page);
-  const ia = ta.indexOf(`E2E-W2-13a-${stamp}`), ib = ta.indexOf(`E2E-W2-13b-${stamp}`);
-  const ja = tb.indexOf(`E2E-W2-13a-${stamp}`), jb = tb.indexOf(`E2E-W2-13b-${stamp}`);
+  // Read the TRANSCRIPT order (the [data-message-id] rows), not the whole body
+  // text: the session-list preview also carries the message text earlier in
+  // document.body.innerText, so indexOf(bodyText) measured the sidebar, not the
+  // conversation. Each page returns the transcript row index of a and b under
+  // the unique stamp.
+  const stampOrder = (page) => page.evaluate((s) => {
+    const txt = Array.from(document.querySelectorAll('[data-message-id]')).map((e) => e.innerText || '');
+    return [
+      txt.findIndex((t) => t.includes(`E2E-W2-13a-${s}`)),
+      txt.findIndex((t) => t.includes(`E2E-W2-13b-${s}`)),
+    ];
+  }, stamp);
+  const [ia, ib] = await stampOrder(a.page);
+  const [ja, jb] = await stampOrder(b.page);
   await a.ctx.close(); await b.ctx.close();
-  // Fails if: clients show different orders (client timestamps winning).
+  // Fails if: either client drops a message (a fanout merge swallowed it), or
+  // the two clients render them in different orders (client timestamps winning).
   const both = [ia, ib, ja, jb].every((v) => v >= 0);
   const sameOrder = (ia < ib) === (ja < jb);
   record('W2-13 two clients converge to the same order under interleave', both && sameOrder,

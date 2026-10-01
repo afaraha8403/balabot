@@ -191,6 +191,13 @@ function findLocalEcho(result: ChatMessage[], sm: ServerMessage): number {
   for (let i = result.length - 1; i >= 0; i--) {
     const m = result[i];
     if (m.role !== sm.role || m.seq !== undefined) continue;
+    // A local turn that carries its own stable id is a user message whose
+    // client-sent `message_id` the server echoes verbatim. If this server row
+    // carries a DIFFERENT id it is another client's turn (a fanout), not this
+    // local one — adopting it here would swallow the other client's message
+    // and duplicate this local turn once its own echo lands (W2-13). Only a
+    // local with no id (the transformed assistant copy) is adoption-eligible.
+    if (m.id && sm.message_id && m.id !== sm.message_id) continue;
     // A later server-sequenced message means this local is not the turn tail.
     let shadowed = false;
     for (let j = i + 1; j < result.length; j++) {
