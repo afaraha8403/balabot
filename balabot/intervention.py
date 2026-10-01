@@ -226,6 +226,23 @@ def _db_get_record(token: str) -> dict | None:
     return None
 
 
+def _db_expire_if_pending(token: str) -> None:
+    """Flip a still-pending record to expired, atomically.
+
+    Conditional on `state = 'pending'` in the WHERE clause, so it can never
+    overwrite a decision (accepted/rejected) committed in the meantime by
+    another process or thread — the failure mode a read-then-write causes.
+    """
+    try:
+        with _get_conn() as conn:
+            conn.execute(
+                "UPDATE interventions SET state = 'expired' "
+                "WHERE resume_token = ? AND state = 'pending'",
+                (token,))
+    except Exception:
+        pass
+
+
 def _db_list_records() -> list[dict]:
     try:
         with _get_conn() as conn:
@@ -283,10 +300,25 @@ def state(token: str, *, now: datetime | None = None) -> dict:
         record = _records.get(clean_tok)
     if record is None:
         raise InterventionError("unknown intervention token")
-    record = _tick(record, now)
-    _records[clean_tok] = dict(record)
-    _db_save_record(record)
-    return dict(record)
+    ticked = _tick(record, now)
+    if ticked["state"] != record["state"]:
+        # The tick changed the state (pending -> expired). Persist ONLY that
+        # transition, as a conditional UPDATE. Writing the whole record back
+        # would be a lost update: an owner resolve that landed between our
+        # read and this write gets reverted, and the paused bot then waits
+        # out its timeout as if the owner had never answered.
+        _db_expire_if_pending(clean_tok)
+        live = _db_get_record(clean_tok)
+        if live is not None:
+            _records[clean_tok] = dict(live)
+            return dict(live)
+        _records[clean_tok] = dict(ticked)
+        return dict(ticked)
+    # No transition: this poll observes, it does not mutate. Touching the
+    # store (or the in-memory copy) here is what clobbered concurrent
+    # decisions. In-memory state is refreshed only when the store agrees.
+    live = _db_get_record(clean_tok)
+    return dict(live if live is not None else ticked)
 
 
 def _tick(record: dict, now: datetime | None = None) -> dict:
@@ -296,7 +328,9 @@ def _tick(record: dict, now: datetime | None = None) -> dict:
         return record
     exp = _parse(record["expires_at"])
     if exp is not None and (now or _now()) >= exp:
-        record["state"] = "expired"
+        ticked = dict(record)
+        ticked["state"] = "expired"
+        return ticked
     return record
 
 
@@ -382,11 +416,12 @@ def active_for_bot(bot_id: str, *, now: datetime | None = None) -> dict | None:
             all_recs.append(r)
     for record in all_recs:
         if record and record["bot"] == bot:
-            record = _tick(record, now)
-            _db_save_record(record)
-            _records[record["resume_token"]] = dict(record)
-            if record["state"] == "pending" and not record.get("turn_ended"):
-                return dict(record)
+            ticked = _tick(record, now)
+            if ticked["state"] != record["state"]:
+                _db_expire_if_pending(record["resume_token"])
+                _records[record["resume_token"]] = dict(ticked)
+            if ticked["state"] == "pending" and not ticked.get("turn_ended"):
+                return dict(ticked)
     return None
 
 
@@ -399,10 +434,11 @@ def list_interventions(*, now: datetime | None = None) -> list[dict]:
             all_recs.append(r)
     out = []
     for record in all_recs:
-        record = _tick(record, now)
-        _db_save_record(record)
-        _records[record["resume_token"]] = dict(record)
-        out.append(dict(record))
+        ticked = _tick(record, now)
+        if ticked["state"] != record["state"]:
+            _db_expire_if_pending(record["resume_token"])
+            _records[record["resume_token"]] = dict(ticked)
+        out.append(dict(ticked))
     return out
 
 

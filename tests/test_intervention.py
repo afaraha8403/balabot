@@ -287,6 +287,66 @@ def test_bot_tools_request_intervention_waits_and_resolves():
     assert out["note"] == "unblocked"
 
 
+def test_state_poll_never_clobbers_a_concurrent_decision(monkeypatch):
+    """A poll that read the record BEFORE the owner approved must not write
+    its stale copy back.
+
+    Lazy expiry used to persist the whole record it had just read. A poll
+    interleaved with an owner resolve therefore reverted `accepted` to
+    `pending` (lost update): the paused bot never saw the approval and waited
+    out its full timeout as if nobody had answered. The poll must observe
+    only; a real pending -> expired transition is persisted conditionally.
+    """
+    from balabot import intervention
+
+    rec = request_intervention("principal", "captcha wall", timeout=60)
+    token = rec["resume_token"]
+    stale = dict(rec)  # exactly what an in-flight poll read a moment ago
+    assert stale["state"] == "pending"
+
+    orig_get = intervention._db_get_record
+
+    def stale_read(tok):
+        if tok == token:
+            return dict(stale)
+        return orig_get(tok)
+
+    # Owner approves first ...
+    resolve_intervention(token, "approve", note="unblocked", by="owner")
+    assert orig_get(token)["state"] == "accepted"
+
+    # ... then the earlier poll lands. It may not undo the decision.
+    monkeypatch.setattr(intervention, "_db_get_record", stale_read)
+    stale_view = intervention.state(token)  # the late, stale poll
+    assert stale_view["state"] == "pending"  # it may report what it read ...
+    monkeypatch.setattr(intervention, "_db_get_record", orig_get)
+
+    assert intervention._db_get_record(token)["state"] == "accepted"
+    assert intervention._records[token]["state"] == "accepted"
+    assert state(token)["state"] == "accepted"
+    assert what_the_bot_was_told(token) == {
+        "resolved": True, "outcome": "accepted", "note": "unblocked"}
+
+
+def test_expired_poll_still_persists_the_timeout(monkeypatch):
+    """The guard must not break honest expiry: a genuinely lapsed pause is
+    still flipped to `expired` and persisted, without touching a decided row.
+    """
+    from balabot import intervention
+
+    stale_now = datetime.now(timezone.utc).replace(microsecond=0)
+    rec = request_intervention("principal", "captcha wall", timeout=5, now=stale_now)
+    token = rec["resume_token"]
+    later = stale_now + timedelta(seconds=30)
+    assert state(token, now=later)["state"] == "expired"
+    assert intervention._db_get_record(token)["state"] == "expired"
+
+    # A decided record is never re-expired or re-opened by a later poll.
+    ok = request_intervention("principal", "login needed", timeout=5, now=stale_now)
+    resolve_intervention(ok["resume_token"], "approve", by="owner", now=stale_now)
+    assert state(ok["resume_token"], now=later)["state"] == "accepted"
+
+
 def test_intervention_http_routes(monkeypatch):
     from fastapi.testclient import TestClient
     from ui import server
