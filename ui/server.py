@@ -712,6 +712,69 @@ def _attachments_dir() -> pathlib.Path:
 
 ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024  # 10 MiB limit per Polaris specification
 
+# Per-turn budget on the *total* attachment payload assembled by /api/chat
+# before it is forwarded upstream. The per-file cap above bounds one upload;
+# this bounds the sum, so N attachments cannot forward unbounded. Configurable
+# so an operator can tighten it without a code change.
+CHAT_ATTACHMENT_PAYLOAD_MAX_BYTES = int(
+    os.environ.get("BALABOT_CHAT_ATTACHMENT_MAX_BYTES", 8 * 1024 * 1024)
+)
+
+
+def _attachment_byte_size(att: dict) -> int:
+    """Raw byte size of one chat attachment, matching what assembly forwards.
+
+    Prefers an inline `content` payload, then an on-disk `path`, then a stored
+    `/api/attachments/...` URL; a metadata-only reference contributes 0.
+    """
+    content = att.get("content")
+    if isinstance(content, str) and content:
+        raw = content
+        if content.startswith("data:") and "," in content:
+            raw = content.split(",", 1)[1]
+        try:
+            return len(base64.b64decode(raw, validate=True))
+        except Exception:
+            return len(raw.encode("utf-8"))
+
+    p = att.get("path")
+    if p and pathlib.Path(p).is_file():
+        try:
+            return pathlib.Path(p).stat().st_size
+        except OSError:
+            return 0
+
+    url = att.get("url") or ""
+    if "/api/attachments/" in url:
+        url_parts = url.split("/api/attachments/", 1)[1].split("/")
+        if len(url_parts) >= 2:
+            cand = _attachments_dir() / f"{url_parts[0]}_{url_parts[1]}"
+            if cand.is_file():
+                try:
+                    return cand.stat().st_size
+                except OSError:
+                    return 0
+    return 0
+
+
+def _enforce_chat_attachment_cap(attachments: list) -> None:
+    """Refuse a turn whose total attachment payload exceeds the per-turn cap.
+
+    Raises an explicit 4xx naming the limit and the offending total. It never
+    truncates or drops: silent data loss on a user's attachment is worse than a
+    clear refusal.
+    """
+    total = sum(_attachment_byte_size(a) for a in attachments if isinstance(a, dict))
+    if total > CHAT_ATTACHMENT_PAYLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "error": "attachment_payload_exceeds_limit",
+                "limit_bytes": CHAT_ATTACHMENT_PAYLOAD_MAX_BYTES,
+                "attachment_bytes": total,
+            },
+        )
+
 
 @app.post("/api/attachments")
 async def upload_attachment(request: Request):
@@ -3056,6 +3119,9 @@ async def chat(request: Request):
 
     IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
     attachments = body.get("attachments") or []
+    # W6-12: refuse the turn before assembly/forwarding if the summed attachment
+    # payload exceeds the per-turn cap. Explicit 4xx — never truncate or drop.
+    _enforce_chat_attachment_cap(attachments)
     if attachments:
         att_lines = []
         image_parts = []
