@@ -443,8 +443,8 @@ honest `409`, an unknown routine a `404`.
 
 **Where.** `ui/server.py`: `register_routine_handler` (`ui/server.py:1175`),
 `_execute_routine` (guarded task, `ui/server.py:1191`), trigger
-`POST /api/bots/{bot_id}/routines/{routine_id}/run` (`ui/server.py:1221`), run
-log `GET /api/bots/{bot_id}/routines/runs` (`ui/server.py:1236`). Sync handlers
+`POST /api/bots/{bot_id}/routines/{routine_id}/run` (`ui/server.py:1218`), run
+log `GET /api/bots/{bot_id}/routines/runs` (`ui/server.py:1233`). Sync handlers
 run through `asyncio.to_thread`; in-flight tasks are retained in `_routine_tasks`
 so asyncio's weak-reference GC cannot silently drop a running routine.
 
