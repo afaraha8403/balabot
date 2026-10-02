@@ -27,6 +27,17 @@ const AUTH = 'Basic ' + Buffer.from(`ali:${PASSWORD}`).toString('base64');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const CANARY = 'CANARY_REASONING_ZZTOP_9f3a the private ledger note';
+/** A known reasoning delta appended to the real live SSE body. The disclosure
+ *  assertions must not depend on the model being verbose (a live turn can carry
+ *  as little as "Answer: 391."), so a distinctive canary rides the same
+ *  `delta.reasoning_content` channel; the product must parse it, buffer it, and
+ *  reveal it behind the live disclosure exactly like the model's own tokens. */
+const LIVE_CANARY = 'CANARY_LIVE_REASONING_5e7b the live-stream private note';
+/** Per-run session id. The app persists every live turn to the server-backed
+ *  session of the same id, so a fixed id makes repeated runs non-independent:
+ *  the next run replays the prior run's whole transcript over SSE and the
+ *  fixture is measured underneath it. A unique id keeps each run hermetic. */
+const SEED_ID = `s_seed_${Date.now().toString(36)}`;
 const results = [];
 const record = (name, ok, detail = '') => {
   results.push({ name, ok, detail: String(detail).slice(0, 300) });
@@ -36,7 +47,7 @@ const record = (name, ok, detail = '') => {
 const seed = (showThinking) => `
   localStorage.clear();
   localStorage.setItem('balabot.sessions.v1', JSON.stringify([{
-    id: 's_seed', botId: 'principal', title: 'Seed', createdAt: 1, handoffs: [],
+    id: ${JSON.stringify(SEED_ID)}, botId: 'principal', title: 'Seed', createdAt: 1, handoffs: [],
     messages: [
       {role: 'user', content: 'Seed question', at: 1},
       {role: 'assistant', content: 'CANARY_ANSWER_123', at: 2, thinking: ${JSON.stringify(CANARY)}}
@@ -51,7 +62,7 @@ const seed = (showThinking) => `
  *  while leaving the user's showThinking choice (set by the toggle) untouched. */
 const seedSessions = () => `
   localStorage.setItem('balabot.sessions.v1', JSON.stringify([{
-    id: 's_seed', botId: 'principal', title: 'Seed', createdAt: 1, handoffs: [],
+    id: ${JSON.stringify(SEED_ID)}, botId: 'principal', title: 'Seed', createdAt: 1, handoffs: [],
     messages: [
       {role: 'user', content: 'Seed question', at: 1},
       {role: 'assistant', content: 'CANARY_ANSWER_123', at: 2, thinking: ${JSON.stringify(CANARY)}}
@@ -126,6 +137,27 @@ const collapsedOpen = (page) => page.evaluate(() => {
   if (!btn) return null;
   return btn.getAttribute('aria-expanded');
 });
+/** Wait until the live turn's real in-flight affordance has appeared AND settled:
+ *  the streaming bubble / Stop control is gone and the final message's own
+ *  "Thinking" disclosure has rendered (seeded 1 -> live 2). A body-text-length
+ *  stability loop exits during the pre-first-token window — before the turn's
+ *  response is delivered — and then measures an empty live stream (`segs=0`). */
+const waitForLiveTurn = async (page, timeoutMs = 120000) => {
+  const start = Date.now();
+  let streamingSeen = false;
+  for (;;) {
+    const st = await page.evaluate(() => ({
+      live: Boolean(document.querySelector('[data-message-id="progress:live"]')) ||
+        Boolean(document.querySelector('button[aria-label="Stop"], .polaris-composer-btn-stop')),
+      thinking: [...document.querySelectorAll('button, [role="button"]')]
+        .filter(b => /^Thinking$/.test((b.innerText || '').trim())).length,
+    }));
+    if (st.live) streamingSeen = true;
+    if (streamingSeen && !st.live && st.thinking >= 2) return true;
+    if (Date.now() - start > timeoutMs) return false;
+    await sleep(300);
+  }
+};
 const sendPrompt = async (page, text) => {
   await page.evaluate(() => {
     const el = document.querySelector('[data-testid="composer-fieldset"] textarea')
@@ -138,13 +170,7 @@ const sendPrompt = async (page, text) => {
     const b = [...document.querySelectorAll('button')].find(x => /^Send$/.test((x.getAttribute('aria-label') || x.innerText || '').trim()));
     if (b) b.click();
   });
-  let last = -1, stable = 0;
-  for (let i = 0; i < 150; i++) {
-    await sleep(2000);
-    const len = await page.evaluate(() => (document.body.innerText || '').length);
-    if (len === last) { stable++; if (stable >= 3) break; } else { stable = 0; }
-    last = len;
-  }
+  return waitForLiveTurn(page);
 };
 
 const browser = await launch({ headless: true, humanize: true });
@@ -163,7 +189,11 @@ await page.route('**/api/chat', async (route) => {
     try { const p = JSON.parse(d); r += p.choices?.[0]?.delta?.reasoning_content || ''; } catch {}
   }
   if (r) lastReasoning = r;
-  await route.fulfill({ response: resp, body });
+  // Append the known reasoning delta so the live-disclosure checks have a
+  // deterministic needle regardless of how terse the model's own reasoning is.
+  const injected = body.replace(/\s*$/, '') + '\n\n' +
+    'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: ' ' + LIVE_CANARY } }] }) + '\n\n';
+  await route.fulfill({ response: resp, body: injected });
 });
 
 try {
@@ -214,10 +244,12 @@ try {
   await sendPrompt(page, 'What is 17*23? Think step by step, then answer.');
   const live = lastReasoning;
   record('t14 live stream carried reasoning_content', live.trim().length > 0, `reasoningChars=${live.length}`);
-  const segs = live.split(/[.\n]/).map(s => s.trim()).filter(s => s.length > 15);
+  // The known live-reasoning canary (injected into the real SSE body above) is
+  // the deterministic needle: hidden while collapsed, revealed on expanding the
+  // newest disclosure. The model's own reasoning length cannot be relied on.
   const domNow = await bodyText(page);
-  const collapsedLeak = segs.filter(s => domNow.includes(s));
-  record('t15 live reasoning not shown while collapsed', collapsedLeak.length === 0, `leaked=${collapsedLeak.length}`);
+  record('t15 live reasoning not shown while collapsed',
+    !domNow.includes(LIVE_CANARY), `canaryVisible=${domNow.includes(LIVE_CANARY)}`);
   // expand the newest Thinking disclosure (last one) and confirm it reveals the live text
   await page.evaluate(() => {
     const btns = [...document.querySelectorAll('button, [role="button"]')].filter(b => /^Thinking(…|\.\.\.)?$/.test((b.innerText || '').trim()));
@@ -225,7 +257,8 @@ try {
   });
   await sleep(700);
   const domAfter = await bodyText(page);
-  record('t16 expanding live thinking reveals the reasoning', segs.some(s => domAfter.includes(s)), `segs=${segs.length}`);
+  record('t16 expanding live thinking reveals the reasoning',
+    domAfter.includes(LIVE_CANARY), `canaryVisible=${domAfter.includes(LIVE_CANARY)}`);
 
   // ---- 5. turn OFF again → everything hidden again ----
   await openBotSettings(page);
