@@ -247,4 +247,31 @@ Closing the two honest gaps recorded in Phase 5:
 | Console error clean | 0 uncaught exceptions or unhandled rejections | **PASS** |
 | Regression test suite | `pytest tests -q` (426 passed) | **PASS** |
 
+---
+
+## Remainder vs Polaris — verified inventory (2026-10-02, at `22d8540`)
+
+The 51/51 scoreboard above is scored against the **behavioural** GrokBot spec
+(`docs/kb/reference/grok-bot-interface.md`), where BalaBot implements each surface under its own
+filenames. Measured against the stricter **Polaris** component target
+(`docs/reference/polaris-ui-reference.md`, sources vendored read-only at
+`docs/reference/polaris-vendor/`), the genuine remainder is **four surfaces** — everything else in the
+Polaris inventory already exists in `ui/src` **and is reachable from a real call site** (verified by
+import-grep, not by file existence):
+
+| # | Surface | Polaris ref | State in BalaBot | Evidence |
+|---|---|---|---|---|
+| R-1 | **Skill draft card — unwired** | `components/teach/SkillDraftCard.tsx` | Built, **0 consumers**. Exported from `ui/src/cards/index.ts` but never rendered. | `App.tsx:1782-1785` renders `ask` / `mcp_approval` block kinds; there is **no `skill_draft` branch**. |
+| R-2 | **Messaging settings** | `pages/MessagingSettingsOverlay.tsx` | **Absent.** No messaging/notification settings surface anywhere. | `grep -rln "Messaging\|Notification" ui/src --include=*.tsx` → empty. Settings nav has General/Models/Memory/Voice/Usage/Computer/Updates only (`SettingsOverlay.tsx:49-55`). |
+| R-3 | **Approval rules settings** | `components/ApprovalRulesSettings.tsx` | **Absent** as a settings panel. Approval *cards* exist (`cards/McpApprovalCard.tsx`, `cards/AskCard.tsx`), but no rules configuration surface. | No `ApprovalRulesSettings` file; no approvals tab in the settings nav. |
+| R-4 | **Routine schedule + activity list** | `pages/RoutineSchedule.tsx`, `pages/ActivityList.tsx` | **Absent.** `RoutinesList.tsx` provides list + editor only. | `grep -rn "RoutineSchedule\|ActivityList" ui/src` → no hits. |
+
+**Stale-claim corrections made this pass:** the earlier working note naming the teach/recording chrome
+(`TeachCaptureOverlay`, `TeachRecordingChrome`), the artifact viewers (`PdfViewer`,
+`SandboxedHtmlViewer`, `ArtifactFileCard`) and the settings overlays (Model/Memory/Plugins/MCP) as
+*absent* is **wrong as of `22d8540`** — all of those files exist and each has a real caller
+(`AgentComputerDialog.tsx`, `ArtifactFileCard.tsx`/`ArtifactsPage.tsx`, `SettingsOverlay.tsx`/`App.tsx`
+respectively). Parity work on them is done; the remainder is R-1..R-4.
+
+
 

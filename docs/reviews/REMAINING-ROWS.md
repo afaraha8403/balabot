@@ -377,6 +377,14 @@ one of the 7.
 
 ## Rows not landed — honest blockers
 
+> **CORRECTION (2026-10-02, verified at `22d8540`).** Every row below has since landed or been
+> retired, and its landed section appears later in this same file: **W3-15** (screen-lease audit
+> trail), **W7-6/W7-14** (display cap, eviction, sub-agent refusal), **W8-11** (routine runner + a
+> real production call site), **W6-12** (per-turn attachment cap) are all LANDED; **W8-1** and
+> **W8-9** are RETIRED (see their sections). The bullets below are retained only as the historical
+> blocker record and must **not** be cited as current status. Current truth lives in
+> `docs/STATUS.md` and the landed sections at the end of this file.
+
 These remain registered `pending` in `tests/e2e/bridge_api_e2e.py`. Each needs a
 product feature that does not exist in the repo, or a test hook that would
 violate the "no fixture logic in product code" rule. Building them now would be
