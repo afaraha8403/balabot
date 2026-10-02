@@ -41,7 +41,6 @@ import {BotSettings} from './BotSettings';
 import {CreateBotForm} from './CreateBotForm';
 import {ClearConversationDialog} from './ClearConversationDialog';
 import {BotDeleteDialog} from './BotDeleteDialog';
-import {OrphansDialog} from './OrphansDialog';
 import {SettingsOverlay, type SettingsSection} from './SettingsOverlay';
 import {useMediaQuery} from '@astryxdesign/core/hooks';
 import {Divider} from '@astryxdesign/core/Divider';
@@ -249,7 +248,6 @@ export default function App() {
   const [showGroups, setShowGroups] = useState(false);
   const [deleteBotTarget, setDeleteBotTarget] = useState<Bot | null>(null);
   const [clearTarget, setClearTarget] = useState<Bot | null>(null);
-  const [showOrphans, setShowOrphans] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showCallView, setShowCallView] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
@@ -2299,12 +2297,6 @@ export default function App() {
             bot={deleteBotTarget}
             onClose={() => setDeleteBotTarget(null)}
             onDeleted={onBotDeleted}
-          />
-        ) : null}
-        {showOrphans ? (
-          <OrphansDialog
-            onClose={() => setShowOrphans(false)}
-            onFleetChanged={() => void reloadBots()}
           />
         ) : null}
         {showSettings ? (

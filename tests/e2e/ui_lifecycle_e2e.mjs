@@ -93,7 +93,8 @@ const REAL_ORPHAN_2 = 'zz-lc-real2';    // second real orphan, reap survivor
 const ART_ORPHAN = 'zz-lc-art';         // subagent-artifact: empty dir
 const REAP_ARTIFACT = 'zz-lc-reap';     // empty dir created for the reap test
 const CREATED_BOT = 'zz-lc-bot';        // created via the consent flow
-const SUITE_FIXTURES = [REAL_ORPHAN, REAL_ORPHAN_2, ART_ORPHAN, REAP_ARTIFACT, CREATED_BOT];
+const CONTROL_BOT = 'zz-lc-ctl';        // s04 positive control: unlocked, editable
+const SUITE_FIXTURES = [REAL_ORPHAN, REAL_ORPHAN_2, ART_ORPHAN, REAP_ARTIFACT, CREATED_BOT, CONTROL_BOT];
 
 function shInContainer(script) {
   return execFileSync('docker', ['exec', CONTAINER, 'sh', '-c', script],
@@ -271,7 +272,7 @@ async function clickMenuItem(page, itemLabel) {
 
 async function dialogOpen(page) {
   return page.evaluate(() => {
-    const d = document.querySelector('dialog[aria-modal="true"]');
+    const d = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
     return d ? {open: true, title: (d.querySelector('h1,h2,h3,[class*="title"]')?.textContent || '').trim()} : {open: false};
   });
 }
@@ -291,9 +292,8 @@ async function dialogOpen(page) {
  * suite shipped with.
  */
 async function openOrphansSurface(page) {
-  // In the post-re-base UI the unregistered-profiles surface is the
-  // "Unregistered Profiles & Debris Reconciliation" panel inside
-  // Settings → General (it is no longer a top-level dialog trigger).
+  // The unregistered-profiles surface is the orphan-reconciliation section
+  // inside Settings → Computer (it is no longer a top-level dialog trigger).
   for (let attempt = 0; attempt < 6; attempt++) {
     await page.waitForSelector('[data-testid="user-menu-trigger"]', {timeout: 20000}).catch(() => {});
     await page.click('[data-testid="user-menu-trigger"]').catch(() => {});
@@ -309,17 +309,15 @@ async function openOrphansSurface(page) {
       continue;
     }
     for (let i = 0; i < 10; i++) {
-      await sleep(750);
-      if (!(await dialogOpen(page)).open) continue;
+      await sleep(700);
       await page.evaluate(() => {
-        const n = document.querySelector('[data-testid="settings-nav-general"]');
+        const n = document.querySelector('[data-testid="settings-nav-computer"]');
         if (n) n.click();
       }).catch(() => {});
-      await sleep(500);
-      const has = await page.evaluate(
-        () => (document.body.innerText || '').includes('Unregistered Profiles'),
-      );
-      if (has) return true;
+      await sleep(450);
+      const there = await page.evaluate(() =>
+        Boolean(document.querySelector('[data-testid="orphan-reconciliation-section"]')));
+      if (there) return true;
     }
   }
   return false;
@@ -333,7 +331,7 @@ async function closeDialog(page) {
   }
   // fall back to the header's close affordance
   await page.evaluate(() => {
-    const d = document.querySelector('dialog[aria-modal="true"]');
+    const d = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
     if (!d) return;
     const btn = Array.from(d.querySelectorAll('button')).find((b) => /close|dismiss/i.test(b.getAttribute('aria-label') || ''));
     if (btn) btn.click();
@@ -392,7 +390,7 @@ async function setInputValue(page, labelText, value) {
 
 async function clickButtonInDialog(page, text) {
   return page.evaluate((t) => {
-    const d = document.querySelector('dialog[aria-modal="true"]');
+    const d = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
     if (!d) return false;
     const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
     const btn = Array.from(d.querySelectorAll('button'))
@@ -422,7 +420,7 @@ async function findRowWithText(page, name) {
  */
 async function findRowInDialog(page, name) {
   return page.evaluate((n) => {
-    const d = document.querySelector('dialog[aria-modal="true"]');
+    const d = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
     if (!d) return {found: false, why: 'no dialog'};
     const all = Array.from(d.querySelectorAll('li, [role="listitem"]'));
     const rows = all.filter((r) => (r.textContent || '').includes(n) && r.getClientRects().length > 0);
@@ -443,7 +441,7 @@ async function waitForRowGoneInDialog(page, name, timeoutMs = 25000) {
   let consecutive = 0;
   while (Date.now() < deadline) {
     const st = await page.evaluate((n) => {
-      const d = document.querySelector('dialog[aria-modal="true"]');
+      const d = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
       if (!d) return {loading: false, found: false};
       const loading = /Checking the disk/i.test(d.innerText || '');
       const found = Array.from(d.querySelectorAll('li, [role="listitem"]'))
@@ -515,16 +513,14 @@ async function s02_roster_renders(browser) {
   const {ctx, page} = await openPage(browser);
   await bootApp(page);
   const names = await page.evaluate(() => {
-    const t = document.body.innerText || '';
-    return {
-      principal: /principal/i.test(t),
-      governor: /governor/i.test(t),
-      scout: /scout/i.test(t),
-    };
+    const triggers = Array.from(document.querySelectorAll('button[aria-label^="Actions for "]'))
+      .map((b) => (b.getAttribute('aria-label') || '').replace(/^Actions for /, '').toLowerCase());
+    const has = (n) => triggers.some((x) => x.includes(n));
+    return {principal: has('principal'), governor: has('governor'), triggers};
   });
   await ctx.close();
-  record('s02 roster lists principal, governor and scout',
-    names.principal && names.governor && names.scout,
+  record('s02 roster renders both shipped agents (principal + governor)',
+    names.principal && names.governor,
     JSON.stringify(names));
 }
 
@@ -548,35 +544,46 @@ async function s03_shipped_locked_indicator(browser) {
  * and the absence on shipped rows is meaningful, not a selector bug.
  */
 async function s04_shipped_no_edit_delete(browser) {
+  // The shipped agents may still carry a row menu (pin / hide / etc.); what
+  // must never be offered is an edit or delete affordance. The unlocked
+  // positive control is created here so the scenario does not depend on
+  // whatever else happens to be in the fleet.
+  let controlErr = null;
+  try {
+    await createBotViaConsentFlow(CONTROL_BOT);
+  } catch (e) {
+    controlErr = e.message;
+  }
+
   const {ctx, page} = await openPage(browser);
   await bootApp(page);
-  const shipped = await page.evaluate(() => {
-    // case-insensitive: the label carries the display name (Principal…)
-    const has = (n) =>
-      Array.from(document.querySelectorAll('button[aria-label^="Actions for "]'))
-        .some((b) => (b.getAttribute('aria-label') || '').toLowerCase() === `actions for ${n}`.toLowerCase());
-    return {principal: has('principal'), governor: has('governor')};
-  });
-  // positive control on the unlocked bot
-  await openBotMenu(page, 'scout');
-  await sleep(1200);
-  const menu = {
-    expanded: await page.evaluate(() =>
-      Array.from(document.querySelectorAll('button[aria-haspopup]'))
-        .filter((b) => (b.getAttribute('aria-label') || '').toLowerCase() === 'actions for scout'
-          && b.getAttribute('aria-expanded') === 'true').length),
-    edit: await page.evaluate(() =>
+
+  const readMenu = async (name) => {
+    await page.keyboard.press('Escape').catch(() => {});
+    await sleep(400);
+    const r = await openBotMenu(page, name);
+    await sleep(1100);
+    const items = await page.evaluate(() =>
       Array.from(document.querySelectorAll('[role="menuitem"]'))
-        .some((el) => el.getClientRects().length > 0 && (el.textContent || '').trim().includes('Edit'))),
-    del: await page.evaluate(() =>
-      Array.from(document.querySelectorAll('[role="menuitem"]'))
-        .some((el) => el.getClientRects().length > 0 && (el.textContent || '').trim().includes('Delete'))),
+        .filter((el) => el.getClientRects().length > 0)
+        .map((el) => (el.textContent || '').trim()));
+    await page.keyboard.press('Escape').catch(() => {});
+    await sleep(400);
+    return {opened: r.opened, items};
   };
-  await page.keyboard.press('Escape');
+
+  const principal = await readMenu('principal');
+  const governor = await readMenu('governor');
+  const control = controlErr ? {opened: false, items: []} : await readMenu(CONTROL_BOT);
+
+  const offers = (m, re) => m.items.some((t) => re.test(t));
+  const shippedClean = !offers(principal, /edit|delete/i) && !offers(governor, /edit|delete/i);
+  const controlWorks = control.opened && offers(control, /edit/i) && offers(control, /delete/i);
+
   await ctx.close();
-  record('s04 shipped rows expose NO edit/delete affordance (scout menu is the positive control)',
-    !shipped.principal && !shipped.governor && menu.expanded === 1 && menu.edit && menu.del,
-    `managePrincipal=${shipped.principal} manageGovernor=${shipped.governor} scoutMenuExpanded=${menu.expanded} scoutEdit=${menu.edit} scoutDelete=${menu.del}`);
+  record('s04 shipped agents offer no edit/delete in their row menu (unlocked control is the positive control)',
+    shippedClean && controlWorks,
+    `principal=[${principal.items}] governor=[${governor.items}] control=[${control.items}] controlOpened=${control.opened} controlErr=${controlErr}`);
 }
 
 /**
@@ -722,13 +729,13 @@ async function s11_delete_through_ui(browser) {
     if (!dlg.open) throw new Error('delete dialog did not open');
     // guard 1: the destructive button is locked while the confirm fields are empty
     const lockedBefore = await page.evaluate((n) => {
-      const d = document.querySelector('dialog[aria-modal="true"]');
+      const d = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
       const btn = Array.from(d.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === `Delete ${n}`);
       return btn ? btn.disabled || btn.getAttribute('aria-disabled') === 'true' : null;
     }, CREATED_BOT);
     // guard 2: the org-acknowledgement checkbox
     const cb = await page.evaluate(() => {
-      const d = document.querySelector('dialog[aria-modal="true"]');
+      const d = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
       const input = d.querySelector('input[type="checkbox"]');
       if (!input) return false;
       input.click();
@@ -739,7 +746,7 @@ async function s11_delete_through_ui(browser) {
     if (!(await findInputByLabel(page, `Type "${CREATED_BOT}" to confirm`)).found) {
       // the label embeds the name; fall back to placeholder match
       await page.evaluate((n) => {
-        const d = document.querySelector('dialog[aria-modal="true"]');
+        const d = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
         const input = Array.from(d.querySelectorAll('input')).find((i) => i.getAttribute('placeholder') === n);
         if (input) input.setAttribute('data-e2e-found', '1');
       }, CREATED_BOT);
@@ -747,7 +754,7 @@ async function s11_delete_through_ui(browser) {
     await setInputValue(page, `Type "${CREATED_BOT}" to confirm`, CREATED_BOT);
     await sleep(300);
     const armed = await page.evaluate((n) => {
-      const d = document.querySelector('dialog[aria-modal="true"]');
+      const d = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
       const btn = Array.from(d.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === `Delete ${n}`);
       return btn ? !btn.disabled && btn.getAttribute('aria-disabled') !== 'true' : false;
     }, CREATED_BOT);
@@ -842,7 +849,7 @@ async function s15_shapes_render_distinctly(browser) {
   try {
     if (!(await openOrphansSurface(page))) throw new Error('orphan dialog did not open');
     const diag = await page.evaluate(async ({realName, artName}) => {
-      const dlg = document.querySelector('dialog[aria-modal="true"]');
+      const dlg = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
       let ids = [];
       try { ids = ((await (await fetch('/api/orphans')).json()).profiles || []).map((p) => p.id); } catch { /* diag only */ }
       const all = Array.from(document.querySelectorAll('li, [role="listitem"]'))
@@ -881,7 +888,7 @@ async function s16_adopt_through_ui(browser) {
   try {
     if (!(await openOrphansSurface(page))) throw new Error('orphan dialog did not open');
     const where = await page.evaluate(async () => {
-      const dlg = document.querySelector('dialog[aria-modal="true"]');
+      const dlg = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
       const rows = Array.from(document.querySelectorAll('li, [role="listitem"]'))
         .filter((r) => r.getClientRects().length > 0)
         .map((r) => (r.textContent || '').trim().slice(0, 40));
@@ -923,7 +930,7 @@ async function s17_purge_through_ui(browser) {
   try {
     if (!(await openOrphansSurface(page))) throw new Error('orphan dialog did not open');
     const where = await page.evaluate(async () => {
-      const dlg = document.querySelector('dialog[aria-modal="true"]');
+      const dlg = (Array.from(document.querySelectorAll('dialog[aria-modal="true"]')).find((x) => x.getClientRects().length > 0) || null);
       const rows = Array.from(document.querySelectorAll('li, [role="listitem"]'))
         .filter((r) => r.getClientRects().length > 0)
         .map((r) => (r.textContent || '').trim().slice(0, 40));
