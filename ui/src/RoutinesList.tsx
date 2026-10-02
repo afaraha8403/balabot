@@ -7,6 +7,8 @@ import {
   bindRoutineHandler,
   type Routine,
 } from './api';
+import {RoutineSchedule} from './RoutineSchedule';
+import {ActivityList} from './ActivityList';
 
 export function RoutineListHeader({onCreate}: {onCreate: () => void}) {
   return (
@@ -196,6 +198,7 @@ export function RoutineEditor({
   const [enabled, setEnabled] = useState(routine?.enabled ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'edit' | 'schedule' | 'activity'>('edit');
 
   const handleSave = async () => {
     if (!title.trim()) return;
@@ -290,13 +293,80 @@ export function RoutineEditor({
         </div>
       </div>
 
-      {error ? (
-        <div style={{padding: '8px 12px', borderRadius: 'var(--radius-md)', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--destructive)', fontSize: '13px'}}>
-          {error}
+      {/* Tabs (only show for editing existing routines) */}
+      {isEditing && routine ? (
+        <div style={{display: 'flex', gap: '8px', borderBottom: '1px solid var(--border)', paddingBottom: '2px'}}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('edit')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 'var(--radius-sm)',
+              border: 'none',
+              backgroundColor: activeTab === 'edit' ? 'var(--accent)' : 'transparent',
+              color: activeTab === 'edit' ? 'var(--foreground)' : 'var(--muted-foreground)',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('schedule')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 'var(--radius-sm)',
+              border: 'none',
+              backgroundColor: activeTab === 'schedule' ? 'var(--accent)' : 'transparent',
+              color: activeTab === 'schedule' ? 'var(--foreground)' : 'var(--muted-foreground)',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Schedule
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('activity')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 'var(--radius-sm)',
+              border: 'none',
+              backgroundColor: activeTab === 'activity' ? 'var(--accent)' : 'transparent',
+              color: activeTab === 'activity' ? 'var(--foreground)' : 'var(--muted-foreground)',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Activity
+          </button>
         </div>
       ) : null}
 
-      <div>
+      {/* Schedule tab content */}
+      {isEditing && routine && activeTab === 'schedule' ? (
+        <RoutineSchedule routine={routine} />
+      ) : null}
+
+      {/* Activity tab content */}
+      {isEditing && routine && activeTab === 'activity' ? (
+        <ActivityList botId={botId} />
+      ) : null}
+
+      {/* Edit tab content */}
+      {activeTab === 'edit' ? (
+        <>
+          {error ? (
+            <div style={{padding: '8px 12px', borderRadius: 'var(--radius-md)', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--destructive)', fontSize: '13px'}}>
+              {error}
+            </div>
+          ) : null}
+
+          <div>
         <label htmlFor="routine-title" style={{display: 'block', fontSize: '13px', color: 'var(--muted-foreground)', marginBottom: '4px'}}>
           Name
         </label>
@@ -436,6 +506,8 @@ export function RoutineEditor({
           </button>
         </div>
       </div>
+        </>
+      ) : null}
     </div>
   );
 }
