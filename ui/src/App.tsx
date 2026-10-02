@@ -1921,6 +1921,15 @@ export default function App() {
                                       state={orbStateForTool(activeTool(toolCalls)?.tool)}
                                       size={32}
                                       theme={themeMode}
+                                      aria-label={
+                                        activeTool(toolCalls)
+                                          ? `${activeBot.name} is running ${activeTool(toolCalls)!.tool}${
+                                              activeTool(toolCalls)!.label
+                                                ? `: ${activeTool(toolCalls)!.label}`
+                                                : ''
+                                            }`
+                                          : undefined
+                                      }
                                     />
                                     <Text type="supporting" color="secondary">
                                       {activeTool(toolCalls)?.label ?? 'Working…'}
