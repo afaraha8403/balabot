@@ -72,7 +72,7 @@
   {
     "name": "t14 live stream carried reasoning_content",
     "ok": true,
-    "detail": "reasoningChars=692"
+    "detail": "reasoningChars=203"
   },
   {
     "name": "t15 live reasoning not shown while collapsed",

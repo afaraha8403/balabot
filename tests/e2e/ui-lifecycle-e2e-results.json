@@ -1,15 +1,15 @@
 {
   "base": "http://127.0.0.1:9119",
   "container": "balabot-balabot-1",
-  "when": "2026-09-27T19:38:20.169Z",
-  "passed": 19,
+  "when": "2026-10-02T14:36:59.765Z",
+  "passed": 7,
   "total": 19,
   "mutationCheck": "remove `if (isShippedBot(bot))` early return in ui/src/BotRowMenu.tsx -> caught by s03/s04/s06",
   "results": [
     {
       "name": "s01 /api/orphans classifies both fixture shapes",
       "ok": true,
-      "detail": "orphan list now: zz-lc-art, zz-lc-real"
+      "detail": "orphan list now: zz-lc-art, zz-lc-real, zz-w5-cls-8cd28867, zz-w5-cls-e7403edd, zz-w5-conc-007b02fe, zz-w5-conc-0183db34, zz-w5-conc-033bcc69, zz-w5-conc-045eeac1, zz-w5-conc-05e4c8f2, zz-w5-conc-07fff16c, zz-w5-conc-0a060fcd, zz-w5-conc-0e9069f2, zz-w5-conc-12ef7ae2, zz-w5-conc-145cb1c5, zz-w5-conc-15487504, zz-w5-conc-19646a06, zz-w5-conc-19d76416, zz-w5-conc-1f87171d, zz-w5-conc-1fe2d575, zz-w5"
     },
     {
       "name": "s02 roster lists principal, governor and scout",
@@ -18,13 +18,13 @@
     },
     {
       "name": "s03 shipped rows show the locked indicator (2x, aria-label)",
-      "ok": true,
-      "detail": "ariaLabelCount=2 (innerText sees it: false — the label lives in the attribute, not the text)"
+      "ok": false,
+      "detail": "ariaLabelCount=0 (innerText sees it: false — the label lives in the attribute, not the text)"
     },
     {
       "name": "s04 shipped rows expose NO edit/delete affordance (scout menu is the positive control)",
-      "ok": true,
-      "detail": "managePrincipal=false manageGovernor=false scoutMenuExpanded=1 scoutEdit=true scoutDelete=true"
+      "ok": false,
+      "detail": "managePrincipal=false manageGovernor=false scoutMenuExpanded=0 scoutEdit=false scoutDelete=false"
     },
     {
       "name": "s05 PATCH /api/bots/principal refused 409 with backend detail (API layer in page context)",
@@ -43,13 +43,13 @@
     },
     {
       "name": "s08 edit a created bot title through the UI dialog",
-      "ok": true,
-      "detail": "title=zz-lc-title-k7ztr1 visibleAfterSelect=true"
+      "ok": false,
+      "detail": "no Manage button for zz-lc-bot"
     },
     {
       "name": "s09 edited title persists across reload (fleet row + rendered roster)",
-      "ok": true,
-      "detail": "fleetTitle=zz-lc-title-k7ztr1 rendered=true"
+      "ok": false,
+      "detail": "fleetTitle=zz-lc-bot — zz-lc-bot e2e lifecycle role rendered=false"
     },
     {
       "name": "s10 DELETE unknown bot refused 404 with backend detail (API layer)",
@@ -58,48 +58,48 @@
     },
     {
       "name": "s11 delete a created bot through the UI confirm flow",
-      "ok": true,
-      "detail": "checkbox=true armed=true rowGone=true"
+      "ok": false,
+      "detail": "Delete… menuitem not present"
     },
     {
       "name": "s12 deleted bot vanishes: roster, profile dir, gateway dir, launcher alias",
-      "ok": true,
-      "detail": "inRoster=false fleetRow=false profileGone=true gatewayGone=true aliasGone=true"
+      "ok": false,
+      "detail": "inRoster=true fleetRow=true profileGone=false gatewayGone=true aliasGone=true"
     },
     {
       "name": "s13 shipped personas never appear in the orphan list",
       "ok": true,
-      "detail": "shipped=principal,governor orphans=zz-lc-art,zz-lc-real leaked=none"
+      "detail": "shipped=principal,governor orphans=zz-lc-art,zz-lc-real,zz-w5-cls-8cd28867,zz-w5-cls-e7403edd,zz-w5-conc-007b02fe,zz-w5-conc-0183db34,zz-w5-conc-033bcc69,zz-w5-conc-045eeac1,zz-w5-conc-05e4c8f2,zz-w5-conc-07fff16c,zz-w5-conc-0a060fcd,zz-w5-conc-0e9069f2,zz-w5-conc-12ef7ae2,zz-w5-conc-145cb1c5,zz-w5-conc-15487504,zz-w5-conc-19646a06,zz-w5-conc-19d76416,zz-w5-conc-1f87171d,zz-w5-conc-1fe2d575,zz-w5-"
     },
     {
       "name": "s14 unregistered-profiles surface opens and lists both fixture orphans",
-      "ok": true,
-      "detail": "realRow=true artRow=true pathsShown=true"
+      "ok": false,
+      "detail": "orphan dialog did not open"
     },
     {
       "name": "s15 orphan-profile renders distinctly from subagent-artifact",
-      "ok": true,
-      "detail": "dlg=true apiIds=zz-lc-art,zz-lc-real real=\"Real profile\" art=\"Sub-agent artifact\""
+      "ok": false,
+      "detail": "orphan dialog did not open"
     },
     {
       "name": "s16 adopt an orphan through the UI -> appears in the roster",
-      "ok": true,
-      "detail": "rowGone=true inRoster=true"
+      "ok": false,
+      "detail": "orphan dialog did not open"
     },
     {
       "name": "s17 purge an orphan through the UI inline confirm -> dir gone",
-      "ok": true,
-      "detail": "rowGone=true dirGone=true"
+      "ok": false,
+      "detail": "orphan dialog did not open"
     },
     {
       "name": "s18 Reap debris removes artifacts but spares real orphan profiles",
-      "ok": true,
-      "detail": "artifactGone=true dirGone=true realSurvived=true realDirExists=true"
+      "ok": false,
+      "detail": "orphan dialog did not open"
     },
     {
       "name": "s19 empty state renders when there are no orphans",
-      "ok": true,
-      "detail": "emptyState=true orphanRows=0"
+      "ok": false,
+      "detail": "orphan dialog did not open"
     }
   ]
 }
