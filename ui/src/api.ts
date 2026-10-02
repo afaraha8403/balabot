@@ -71,6 +71,17 @@ export type Routine = {
   prompt: string;
 };
 
+export type RoutineRun = {
+  id: string;
+  botId: string;
+  routineId: string;
+  startedAt: number;
+  finishedAt?: number;
+  status: 'running' | 'completed' | 'failed';
+  result?: unknown;
+  error?: string;
+};
+
 export type DraftCardData = {
   id: string;
   kind: 'email' | 'slack';
@@ -859,6 +870,13 @@ export async function bindRoutineHandler(
   return api<{ok: boolean; routineId: string; handler: string}>(
     `/api/bots/${encodeURIComponent(botId)}/routines/${encodeURIComponent(routineId)}/handler`,
     {method: 'POST', body: JSON.stringify({handler})},
+  );
+}
+
+/** GET /api/bots/{botId}/routines/runs — fetch routine execution history. */
+export async function getRoutineRuns(botId: string): Promise<{ok: boolean; runs: RoutineRun[]}> {
+  return api<{ok: boolean; runs: RoutineRun[]}>(
+    `/api/bots/${encodeURIComponent(botId)}/routines/runs`,
   );
 }
 
