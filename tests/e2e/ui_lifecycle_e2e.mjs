@@ -223,16 +223,16 @@ async function clickButtonByText(page, text, {exact = true} = {}) {
  */
 function manageButtonExists(page, botName) {
   return page.evaluate((name) => {
-    const want = `manage ${name}`.toLowerCase();
-    return Array.from(document.querySelectorAll('button[aria-label^="Manage "]'))
+    const want = `actions for ${name}`.toLowerCase();
+    return Array.from(document.querySelectorAll('button[aria-label^="Actions for "]'))
       .some((b) => (b.getAttribute('aria-label') || '').toLowerCase() === want);
   }, botName);
 }
 
 async function openBotMenu(page, botName) {
   return page.evaluate((name) => {
-    const want = `manage ${name}`.toLowerCase();
-    const btn = Array.from(document.querySelectorAll('button[aria-label^="Manage "]'))
+    const want = `actions for ${name}`.toLowerCase();
+    const btn = Array.from(document.querySelectorAll('button[aria-label^="Actions for "]'))
       .find((b) => (b.getAttribute('aria-label') || '').toLowerCase() === want);
     if (!btn) return {opened: false, reason: 'no Manage button'};
     btn.click();
@@ -291,21 +291,35 @@ async function dialogOpen(page) {
  * suite shipped with.
  */
 async function openOrphansSurface(page) {
+  // In the post-re-base UI the unregistered-profiles surface is the
+  // "Unregistered Profiles & Debris Reconciliation" panel inside
+  // Settings → General (it is no longer a top-level dialog trigger).
   for (let attempt = 0; attempt < 6; attempt++) {
-    await page.waitForFunction(
-      () => Array.from(document.querySelectorAll('button'))
-        .some((b) => (b.textContent || '').trim() === 'Unregistered profiles'),
-      undefined,
-      {timeout: 20000},
-    ).catch(() => {});
-    const clicked = await clickButtonByText(page, 'Unregistered profiles');
-    if (clicked.clicked) {
-      for (let i = 0; i < 8; i++) {
-        await sleep(750);
-        if ((await dialogOpen(page)).open) return true;
-      }
-    } else {
-      await sleep(1000);
+    await page.waitForSelector('[data-testid="user-menu-trigger"]', {timeout: 20000}).catch(() => {});
+    await page.click('[data-testid="user-menu-trigger"]').catch(() => {});
+    await sleep(700);
+    const clicked = await page.evaluate(() => {
+      const b = document.querySelector('[data-testid="user-menu-settings"]');
+      if (!b) return false;
+      b.click();
+      return true;
+    });
+    if (!clicked) {
+      await sleep(900);
+      continue;
+    }
+    for (let i = 0; i < 10; i++) {
+      await sleep(750);
+      if (!(await dialogOpen(page)).open) continue;
+      await page.evaluate(() => {
+        const n = document.querySelector('[data-testid="settings-nav-general"]');
+        if (n) n.click();
+      }).catch(() => {});
+      await sleep(500);
+      const has = await page.evaluate(
+        () => (document.body.innerText || '').includes('Unregistered Profiles'),
+      );
+      if (has) return true;
     }
   }
   return false;
@@ -539,8 +553,8 @@ async function s04_shipped_no_edit_delete(browser) {
   const shipped = await page.evaluate(() => {
     // case-insensitive: the label carries the display name (Principal…)
     const has = (n) =>
-      Array.from(document.querySelectorAll('button[aria-label^="Manage "]'))
-        .some((b) => (b.getAttribute('aria-label') || '').toLowerCase() === `manage ${n}`.toLowerCase());
+      Array.from(document.querySelectorAll('button[aria-label^="Actions for "]'))
+        .some((b) => (b.getAttribute('aria-label') || '').toLowerCase() === `actions for ${n}`.toLowerCase());
     return {principal: has('principal'), governor: has('governor')};
   });
   // positive control on the unlocked bot
@@ -549,7 +563,7 @@ async function s04_shipped_no_edit_delete(browser) {
   const menu = {
     expanded: await page.evaluate(() =>
       Array.from(document.querySelectorAll('button[aria-haspopup]'))
-        .filter((b) => (b.getAttribute('aria-label') || '').toLowerCase() === 'manage scout'
+        .filter((b) => (b.getAttribute('aria-label') || '').toLowerCase() === 'actions for scout'
           && b.getAttribute('aria-expanded') === 'true').length),
     edit: await page.evaluate(() =>
       Array.from(document.querySelectorAll('[role="menuitem"]'))

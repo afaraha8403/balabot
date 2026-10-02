@@ -15,6 +15,7 @@ import {BotAvatar} from '../BotAvatar';
 import {GroupAvatar} from '../GroupAvatar';
 import {IconConceal, IconGroupChat, IconPin} from '../icons';
 import type {Bot, Group, Session, SubAgent} from '../api';
+import {isShippedBot} from '../api';
 import {type BotSection, DEFAULT_BOT_SECTIONS} from '../sections';
 
 export type RosterEntry = {
@@ -219,6 +220,17 @@ export function BotRoster({
             >
               {e.preview}
             </Text>
+            {isShippedBot(e.bot) ? (
+              <Text
+                type="supporting"
+                size="xsm"
+                color="secondary"
+                aria-label="Shipped · locked"
+                role="status"
+              >
+                Shipped · locked
+              </Text>
+            ) : null}
             {(subagents ?? [])
               .filter(s => s.parent === e.bot.id)
               .map(s => (

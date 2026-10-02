@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixes
+- Keep the agent working indicator visible while a tool is running: the transcript now renders the orb and its status label whenever a tool call is active, instead of only while no text has streamed, so `aria-label="<bot> is running <tool>"` is observable for the whole duration of a tool call rather than for a single paint.
+- Restore the shipped-bot locked indicator in the agent roster (`aria-label="Shipped · locked"`). The marker was dropped in the Polaris re-base, leaving an owner unable to tell a locked shipped bot from an editable one; the roster now distinguishes them again.
+- Give the roster row menu trigger `aria-haspopup="menu"` and `aria-expanded`, matching the menu it actually opens.
+- Realign the agent-lifecycle E2E harness with the post-re-base UI: the per-row menu trigger is `aria-label="Actions for <name>"` (the old `Manage <name>` label no longer exists), and the unregistered-profiles surface is the Settings → General reconciliation panel rather than a top-level dialog trigger.
+
 ### Features
 - Give the routine runner a real production call site (W8-11 follow-up): `POST /api/bots/{bot_id}/routines/{routine_id}/handler` binds a named built-in executor (default `prompt`) to an existing routine, and the routine editor calls it on save so a routine created or edited through the product is actually runnable. The `prompt` executor runs the routine's instruction as one turn for its bot via the existing upstream helper and records the reply as the run result; a routine that was never bound still refuses honestly with the existing `409`. See `docs/reviews/REMAINING-ROWS.md`.
 - Add screen leases with a complete audit trail (W3-15): `balabot/screen_lease.py` is a durable SQLite store for the right of exactly one agent to hold a screen/display resource. The lifecycle is `acquire` / `release` / owner-only `force-release` / lazy TTL expiry (60 s default, renewed by re-acquire); every state transition appends exactly one immutable audit row (actor, from→to, at, reason) in the same transaction as a conditional `UPDATE ... WHERE state = 'active'`, so an expiry sweep can never clobber a concurrent release and a transition with no audit row is impossible. A partial unique index on `resource_id WHERE state = 'active'` makes one-active-holder-per-resource a storage invariant, and acquiring a held resource is refused by name. Exposed over HTTP at `/api/leases*`. See `docs/reviews/REMAINING-ROWS.md`.

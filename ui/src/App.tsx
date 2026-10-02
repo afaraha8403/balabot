@@ -1915,7 +1915,8 @@ export default function App() {
                                 ) : null}
                                 {displayed ? (
                                   <ChatMarkdown streaming>{displayed}</ChatMarkdown>
-                                ) : (
+                                ) : null}
+                                {!displayed || activeTool(toolCalls) ? (
                                   <HStack gap={2} vAlign="center">
                                     <ThinkingOrb
                                       state={orbStateForTool(activeTool(toolCalls)?.tool)}
@@ -1935,7 +1936,7 @@ export default function App() {
                                       {activeTool(toolCalls)?.label ?? 'Working…'}
                                     </Text>
                                   </HStack>
-                                )}
+                                ) : null}
                                 {toolCalls.length > 0 ? (
                                   <ChatToolCalls
                                     calls={toolCalls.map(t => ({

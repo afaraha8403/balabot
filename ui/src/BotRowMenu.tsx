@@ -51,6 +51,8 @@ export function BotRowMenu({
       <button
         type="button"
         aria-label={`Actions for ${bot.name}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
         data-testid="bot-menu-trigger"
         style={{
           display: 'inline-flex',
