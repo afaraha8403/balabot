@@ -1,8 +1,10 @@
 import {type ComponentType, useEffect, useRef, useState} from 'react';
-import {Brain, CloudDownload, Cpu, Gauge, Monitor, Settings, Volume2, X} from 'lucide-react';
+import {Brain, CloudDownload, Cpu, Gauge, Monitor, Settings, Volume2, MessageSquare, ShieldCheck, X} from 'lucide-react';
 import {ModelSettingsOverlay} from './ModelSettingsOverlay';
 import {MemorySettingsOverlay} from './MemorySettingsOverlay';
 import {VoiceSettingsOverlay} from './VoiceSettingsOverlay';
+import {MessagingSettingsOverlay} from './MessagingSettingsOverlay';
+import {ApprovalRulesSettings} from './ApprovalRulesSettings';
 import {
   GeneralSettingsPanel,
   UsageSettingsPanel,
@@ -17,7 +19,9 @@ export type SettingsSection =
   | 'voice'
   | 'usage'
   | 'computer'
-  | 'updates';
+  | 'updates'
+  | 'messaging'
+  | 'approvals';
 
 type NavItem = {
   id: SettingsSection;
@@ -43,6 +47,8 @@ export type SettingsOverlayProps = {
   renderUsage?: () => React.ReactNode;
   renderComputer?: () => React.ReactNode;
   renderUpdates?: () => React.ReactNode;
+  renderMessaging?: () => React.ReactNode;
+  renderApprovals?: () => React.ReactNode;
 };
 
 const NAV_ITEMS: NavItem[] = [
@@ -53,11 +59,13 @@ const NAV_ITEMS: NavItem[] = [
   {id: 'usage', label: 'Usage', icon: Gauge},
   {id: 'computer', label: 'Computer', icon: Monitor},
   {id: 'updates', label: 'Updates', icon: CloudDownload},
+  {id: 'messaging', label: 'Messaging', icon: MessageSquare},
+  {id: 'approvals', label: 'Approvals', icon: ShieldCheck},
 ];
 
 /**
  * Polaris SettingsOverlay:
- * Unified modal dialog with 7 tabs (General, Models, Memory, Voice, Usage, Computer, Updates).
+ * Unified modal dialog with 9 tabs (General, Models, Memory, Voice, Usage, Computer, Updates, Messaging, Approvals).
  */
 export function SettingsOverlay({
   initialSection = 'general',
@@ -74,6 +82,8 @@ export function SettingsOverlay({
   renderUsage,
   renderComputer,
   renderUpdates,
+  renderMessaging,
+  renderApprovals,
 }: SettingsOverlayProps) {
   const [section, setSection] = useState<SettingsSection>(initialSection);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -289,6 +299,14 @@ export function SettingsOverlay({
 
               {section === 'updates' && (renderUpdates ? renderUpdates() : (
                 <UpdatesSettingsPanel />
+              ))}
+
+              {section === 'messaging' && (renderMessaging ? renderMessaging() : (
+                <MessagingSettingsOverlay embedded onClose={onClose} />
+              ))}
+
+              {section === 'approvals' && (renderApprovals ? renderApprovals() : (
+                <ApprovalRulesSettings embedded onClose={onClose} />
               ))}
             </div>
           </div>
