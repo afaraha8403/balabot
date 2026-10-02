@@ -119,13 +119,14 @@ export type ChatMessage = {
   voiceMemos?: VoiceMemoData[];
   /** Emoji reactions on this message: emoji -> count. */
   reactions?: Record<string, number>;
-  /** Polaris message card blocks (ask, choice, app_connect, mcp_approval, chart). */
+  /** Polaris message card blocks (ask, choice, app_connect, mcp_approval, chart, skill_draft). */
   blocks?: Array<
     | import('./cards').AskBlock
     | import('./cards').ChoiceBlock
     | import('./cards').AppConnectBlock
     | import('./cards').McpApprovalBlock
     | import('./cards').ChartBlock
+    | import('./cards').SkillDraftBlock
   >;
   /** Reference to replied message if this message is a thread reply. */
   replyTo?: {sender: string; text: string};

@@ -77,7 +77,7 @@ import {VoiceMemoCard} from './VoiceMemoCard';
 import {HoldEverythingControl} from './HoldEverythingControl';
 import {RoutinesList, RoutineEditor} from './RoutinesList';
 import {FilePreviewCard} from './FilePreviewCard';
-import {AskCard, ChoiceCard, AppConnectCard, McpApprovalCard, ChartBlockView} from './cards';
+import {AskCard, ChoiceCard, AppConnectCard, McpApprovalCard, ChartBlockView, SkillDraftCard} from './cards';
 import {MessageHoverMetadata, MessageHoverActions} from './MessageHoverMetadata';
 import {WindowChrome} from './WindowChrome';
 import {ShellSkeleton} from './ShellSkeleton';
@@ -1784,6 +1784,7 @@ export default function App() {
                                           if (block.kind === 'app_connect') return <AppConnectCard key={idx} block={block} />;
                                           if (block.kind === 'mcp_approval') return <McpApprovalCard key={idx} block={block} />;
                                           if (block.kind === 'chart') return <ChartBlockView key={idx} name={block.name} spec={block.spec} data={block.data} />;
+                                          if (block.kind === 'skill_draft') return <SkillDraftCard key={idx} block={block} />;
                                           return null;
                                         })}
                                       </VStack>
