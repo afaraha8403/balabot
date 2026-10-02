@@ -123,8 +123,14 @@ def new_bot_id(name: str) -> str:
     return slug[:32]
 
 
-def propose_bot(*, name: str, role: str, proposed_by: str,
-                model: str | None = None, reason: str = "") -> dict:
+def propose_bot(
+    *,
+    name: str,
+    role: str,
+    proposed_by: str,
+    model: str | None = None,
+    reason: str = "",
+) -> dict:
     """File a bot-creation proposal. Metadata only; nothing is provisioned."""
     if not name or not isinstance(name, str) or len(name.strip()) > 60:
         raise CreationError("bot name must be a non-empty string (max 60 chars)")
@@ -139,7 +145,8 @@ def propose_bot(*, name: str, role: str, proposed_by: str,
     for pr in data["proposals"]:
         if pr["bot_id"] == bot_id and pr["status"] in ("proposed", "approved"):
             raise CreationError(
-                f"a {pr['status']} proposal for bot id {bot_id!r} already exists")
+                f"a {pr['status']} proposal for bot id {bot_id!r} already exists"
+            )
     proposal = {
         "id": f"bp_{uuid.uuid4().hex[:10]}",
         "bot_id": bot_id,
@@ -160,8 +167,14 @@ def propose_bot(*, name: str, role: str, proposed_by: str,
     return proposal
 
 
-def spool_proposal(*, name: str, role: str, proposed_by: str,
-                   reason: str = "", model: str | None = None) -> dict:
+def spool_proposal(
+    *,
+    name: str,
+    role: str,
+    proposed_by: str,
+    reason: str = "",
+    model: str | None = None,
+) -> dict:
     """Spool a bot proposal into the agent-writable spool.
 
     Validates input without touching root-owned proposals.json.
@@ -210,20 +223,27 @@ def spool_proposal(*, name: str, role: str, proposed_by: str,
     return record
 
 
-def drain_spool() -> list[dict]:
+def drain_spool() -> dict:
     """Drain spooled proposals into real proposals.json records.
 
-    Safe to call concurrently or repeatedly. Returns list of newly created
-    proposals.
+    Safe to call concurrently or repeatedly. Returns a dict with:
+    - 'drained': list of successfully created proposals
+    - 'discarded': list of items that were deliberately discarded (CreationError)
+      with a 'reason' field explaining why
+
+    If an UNEXPECTED error occurs (not CreationError), the spool file is left
+    in place and the error propagates.
     """
     sdir = _spool_dir()
     if not sdir.exists():
-        return []
+        return {"drained": [], "discarded": []}
     drained: list[dict] = []
+    discarded: list[dict] = []
     for p in sorted(sdir.glob("sp_*.json")):
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
+            # Malformed spool file — discard it so it doesn't loop
             try:
                 p.unlink(missing_ok=True)
             except OSError:
@@ -238,15 +258,30 @@ def drain_spool() -> list[dict]:
                 reason=data.get("reason") or "",
             )
             drained.append(res)
-        except CreationError:
-            # Duplicate conflict or bad input — discard spool so it doesn't loop
-            pass
-        finally:
+            # Success: remove the spool file
             try:
                 p.unlink(missing_ok=True)
             except OSError:
                 pass
-    return drained
+        except CreationError as exc:
+            # Duplicate conflict or bad input — discard spool so it doesn't loop
+            discarded.append(
+                {
+                    "bot_id": new_bot_id(data.get("name", "")),
+                    "name": data.get("name", ""),
+                    "reason": str(exc),
+                    "spool_id": data.get("id", ""),
+                }
+            )
+            # Remove the discarded spool file
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                pass
+        # REMOVED the 'finally:' that unconditionally deleted the spool file.
+        # Now, if an UNEXPECTED exception (not CreationError) is raised,
+        # the spool file remains and the error propagates.
+    return {"drained": drained, "discarded": discarded}
 
 
 def get_proposal(pid: str) -> dict:
@@ -272,7 +307,8 @@ def _set_status(pid: str, status: str, *, approved_by: str | None = None) -> dic
     if row["status"] != expected:
         raise CreationError(
             f"proposal {pid} is {row['status']!r}, cannot move to {status!r} "
-            f"(must be {expected!r})")
+            f"(must be {expected!r})"
+        )
     if status == "approved":
         # THE CONSENT GATE: only a human may approve, and the approver must
         # not be the proposing bot itself (self-approval is not consent).
@@ -283,7 +319,8 @@ def _set_status(pid: str, status: str, *, approved_by: str | None = None) -> dic
         if approved_by == row["proposed_by"] and approved_by != HUMAN_APPROVER:
             raise CreationError(
                 "self-approval is not consent: a bot cannot approve its own "
-                "proposal — the human operator must approve")
+                "proposal — the human operator must approve"
+            )
     row["status"] = status
     row["approved_by"] = approved_by
     row["approved_at"] = _now() if status == "approved" else row["approved_at"]
@@ -296,7 +333,8 @@ def approve_proposal(pid: str, *, approved_by: str) -> dict:
     """Record the HUMAN's approval. The bot still does not exist."""
     if approved_by != HUMAN_APPROVER:
         raise CreationError(
-            "only the human operator ('user') may approve a bot proposal")
+            "only the human operator ('user') may approve a bot proposal"
+        )
     return _set_status(pid, "approved", approved_by=approved_by)
 
 
@@ -316,34 +354,43 @@ def create_approved_bot(pid: str, *, fleet_bots: dict | None = None) -> dict:
     if proposal["status"] != "approved":
         raise CreationError(
             f"proposal {pid} is {proposal['status']!r} — a bot is created only "
-            "after explicit human approval")
+            "after explicit human approval"
+        )
     bot_id = proposal["bot_id"]
     if fleet_bots is not None and bot_id in fleet_bots:
         raise CreationError(f"a bot with id {bot_id!r} already exists in the fleet")
 
     from . import bootstrap as bootstrap_mod
+
     actions: list[str] = []
     # A newly approved bot has no personas/<bot_id>/ of its own — it is
     # provisioned from the first SHIPPED persona template. Identity stays the
     # new bot's; only the template/rules files are borrowed.
     template_persona = bootstrap_mod.PERSONAS[0] if bootstrap_mod.PERSONAS else None
-    actions.extend(bootstrap_mod.provision_persona(
-        bot_id, template_persona=template_persona)["actions"])
+    actions.extend(
+        bootstrap_mod.provision_persona(bot_id, template_persona=template_persona)[
+            "actions"
+        ]
+    )
     # Deliverable 2: a created worker gets the SCOPED worker set, not the
     # skills/ dump. Worker bots must not carry operator/ledger tooling
     # (owner-onboarding, contradiction-audit, agent-liveness-recovery,
     # agent-growth-review). Scout's original creation wrongly installed all
     # four of those; DEFAULT_WORKER_SKILLS is the corrected scope.
-    actions.extend(bootstrap_mod.install_skills(bot_id, skills=bootstrap_mod.DEFAULT_WORKER_SKILLS))
+    actions.extend(
+        bootstrap_mod.install_skills(bot_id, skills=bootstrap_mod.DEFAULT_WORKER_SKILLS)
+    )
     actions.extend(bootstrap_mod.init_ledger(bot_id))
 
     from . import orgs
+
     org = orgs.show_org(bootstrap_mod.DEFAULT_ORG)
     if org is None:
         # First-boot normally registers the default org; a deployment that
         # skipped it must not get a half-registered bot — finish the setup.
-        orgs.add_org(bootstrap_mod.DEFAULT_ORG, bootstrap_mod.DEFAULT_ORG_NAME,
-                     members=[bot_id])
+        orgs.add_org(
+            bootstrap_mod.DEFAULT_ORG, bootstrap_mod.DEFAULT_ORG_NAME, members=[bot_id]
+        )
     else:
         orgs.add_bot(bootstrap_mod.DEFAULT_ORG, bot_id)
 

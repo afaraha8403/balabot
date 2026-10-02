@@ -2509,21 +2509,30 @@ async def _upstream_turn(profile: str, messages: list[dict]) -> str:
 
 _PROPOSALS_LIST_SNIPPET = """\
 from balabot import bot_creation
+import sys
+drain_result = None
 try:
-    bot_creation.drain_spool()
-except Exception:
-    pass
-print(json.dumps({'proposals': bot_creation.list_proposals()}))
+    drain_result = bot_creation.drain_spool()
+except Exception as exc:
+    print(json.dumps({'ok': False, 'error': 'drain_failed',
+                      'detail': str(exc)}), file=sys.stderr)
+    raise SystemExit(1)
+print(json.dumps({'proposals': bot_creation.list_proposals(),
+                  'drain_result': drain_result}))
 """
 
 _PROPOSALS_DRAIN_SNIPPET = """\
 from balabot import bot_creation
-drained = []
+import sys
 try:
-    drained = bot_creation.drain_spool()
-except Exception:
-    pass
-print(json.dumps({'drained': drained, 'proposals': bot_creation.list_proposals()}))
+    result = bot_creation.drain_spool()
+except Exception as exc:
+    print(json.dumps({'ok': False, 'error': 'drain_failed',
+                      'detail': str(exc)}), file=sys.stderr)
+    raise SystemExit(1)
+print(json.dumps({'drained': result['drained'],
+                  'discarded': result['discarded'],
+                  'proposals': bot_creation.list_proposals()}))
 """
 
 _PROPOSE_SNIPPET = """\
@@ -2661,6 +2670,7 @@ def bot_proposals_drain():
     return {
         "available": True,
         "drained": res.get("drained", []),
+        "discarded": res.get("discarded", []),
         "proposals": res.get("proposals", []),
     }
 

@@ -31,10 +31,14 @@ def org_env(tmp_path, monkeypatch):
     orgs.add_org("acme", "Acme", members=["oscar"])
     orgs.store_secret("STRIPE_SECRET_KEY", "balacode", SECRET_VALUE)
     orgs.register_secret("AWS_KEY", "balacode", description="aws key")
-    orgs.grant("steve", {"kind": "secret", "name": "STRIPE_SECRET_KEY"},
-               subject_org="balacode")
-    orgs.grant("jim", {"kind": "secret", "name": "AWS_KEY", "org": "balacode"},
-               subject_org="acme")  # cross-org grant
+    orgs.grant(
+        "steve", {"kind": "secret", "name": "STRIPE_SECRET_KEY"}, subject_org="balacode"
+    )
+    orgs.grant(
+        "jim",
+        {"kind": "secret", "name": "AWS_KEY", "org": "balacode"},
+        subject_org="acme",
+    )  # cross-org grant
     return {"data_root": data_root, "secret_value": SECRET_VALUE}
 
 
@@ -42,11 +46,13 @@ def org_env(tmp_path, monkeypatch):
 
 
 def test_request_secret_records_pending(org_env):
-    out = bot_tools.request_secret("SLACK_TOKEN", "bot posts to slack",
-                                   bot_id="steve")
-    assert out == {"requested": True, "name": "SLACK_TOKEN",
-                   "description": "bot posts to slack",
-                   "status": "awaiting_user"}
+    out = bot_tools.request_secret("SLACK_TOKEN", "bot posts to slack", bot_id="steve")
+    assert out == {
+        "requested": True,
+        "name": "SLACK_TOKEN",
+        "description": "bot posts to slack",
+        "status": "awaiting_user",
+    }
     pending = bot_tools.list_pending_requests("steve")
     assert len(pending) == 1
     assert pending[0]["kind"] == "secret_request"
@@ -70,8 +76,12 @@ def test_request_secret_requires_name(org_env):
 
 def test_list_org_secrets_metadata_only(org_env):
     rows = bot_tools.list_org_secrets("steve")
-    assert any(r["name"] == "STRIPE_SECRET_KEY" and r["granted"]
-               and r["origin_org"] == "balacode" for r in rows)
+    assert any(
+        r["name"] == "STRIPE_SECRET_KEY"
+        and r["granted"]
+        and r["origin_org"] == "balacode"
+        for r in rows
+    )
     assert any(r["name"] == "AWS_KEY" and not r["granted"] for r in rows)
     # fingerprint shape only: '…' + last 4
     stripe = next(r for r in rows if r["name"] == "STRIPE_SECRET_KEY")
@@ -90,8 +100,9 @@ def test_list_org_secrets_cross_org_labelled(org_env):
 
 def test_request_secret_access_records_no_grant(org_env):
     before = len(orgs.grants_for("oscar", kind="secret"))
-    out = bot_tools.request_secret_access("oscar", "STRIPE_SECRET_KEY",
-                                          "needs payments")
+    out = bot_tools.request_secret_access(
+        "oscar", "STRIPE_SECRET_KEY", "needs payments"
+    )
     assert out["requested"] is True
     assert out["status"] == "awaiting_user"
     assert len(orgs.grants_for("oscar", kind="secret")) == before  # no grant
@@ -113,8 +124,7 @@ def test_list_org_skills_no_registry_is_honest(tmp_path, monkeypatch):
 
 
 def test_list_org_skills_from_grants(org_env, tmp_path):
-    orgs.grant("steve", {"kind": "skill", "name": "demo-skill"},
-               subject_org="balacode")
+    orgs.grant("steve", {"kind": "skill", "name": "demo-skill"}, subject_org="balacode")
     out = bot_tools.list_org_skills("steve")
     assert out == [{"name": "demo-skill", "scope": "bot", "origin": "balacode"}]
 
@@ -170,18 +180,29 @@ def test_no_tool_ever_returns_secret_value(org_env):
 
 def test_cli_json_stdout(org_env, tmp_path, capsys):
     from balabot import bot_tools as bt
+
     assert bt.main(["list_org_secrets", "--bot", "steve"]) == 0
     rows = json.loads(capsys.readouterr().out)
     assert isinstance(rows, list) and rows
 
-    assert bt.main(["request_secret", "--name", "FOO_TOKEN",
-                    "--bot", "steve"]) == 0
+    assert bt.main(["request_secret", "--name", "FOO_TOKEN", "--bot", "steve"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["requested"] is True and out["status"] == "awaiting_user"
 
-    assert bt.main(["request_secret_access", "--bot", "oscar",
-                    "--name", "STRIPE_SECRET_KEY",
-                    "--reason", "payments"]) == 0
+    assert (
+        bt.main(
+            [
+                "request_secret_access",
+                "--bot",
+                "oscar",
+                "--name",
+                "STRIPE_SECRET_KEY",
+                "--reason",
+                "payments",
+            ]
+        )
+        == 0
+    )
     out = json.loads(capsys.readouterr().out)
     assert out["requested"] is True
 
@@ -194,20 +215,38 @@ def test_cli_json_stdout(org_env, tmp_path, capsys):
 
     # CLI: a --value flag must be rejected, not silently ignored
     import subprocess
+
     env = {**os.environ, "BALABOT_DATA_ROOT": str(tmp_path / "data")}
     r = subprocess.run(
-        [sys.executable, "-m", "balabot.bot_tools", "request_secret",
-         "--name", "X", "--value", "leaky"],
-        capture_output=True, text=True, env=env, cwd=REPO_ROOT)
+        [
+            sys.executable,
+            "-m",
+            "balabot.bot_tools",
+            "request_secret",
+            "--name",
+            "X",
+            "--value",
+            "leaky",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
+    )
     assert r.returncode == 1
     assert "leaky" not in r.stdout and "value" in r.stderr
 
 
 def test_growth_audit_tools_and_cli(org_env, capsys):
     from balabot import bot_tools as bt
+
     res = bt.record_growth_audit(
-        "promote_skill", "skills_registry", "promoted tool after testing",
-        author="principal", name="principal", rollback_patch="demote skill",
+        "promote_skill",
+        "skills_registry",
+        "promoted tool after testing",
+        author="principal",
+        name="principal",
+        rollback_patch="demote skill",
     )
     assert res["status"] == "applied"
     cid = res["change_id"]
@@ -217,19 +256,27 @@ def test_growth_audit_tools_and_cli(org_env, capsys):
     assert rb["reverses_change_id"] == cid
 
     # CLI test
-    code = bt.main([
-        "record_growth_audit",
-        "--action", "patch_prompt",
-        "--target", "AGENTS.md",
-        "--description", "fix ambiguous rule",
-        "--author", "principal",
-    ])
+    code = bt.main(
+        [
+            "record_growth_audit",
+            "--action",
+            "patch_prompt",
+            "--target",
+            "AGENTS.md",
+            "--description",
+            "fix ambiguous rule",
+            "--author",
+            "principal",
+        ]
+    )
     assert code == 0
     cli_out = json.loads(capsys.readouterr().out)
     assert cli_out["action"] == "patch_prompt"
     cid2 = cli_out["change_id"]
 
-    code2 = bt.main(["rollback_growth_audit", "--change-id", cid2, "--reason", "caused regression"])
+    code2 = bt.main(
+        ["rollback_growth_audit", "--change-id", cid2, "--reason", "caused regression"]
+    )
     assert code2 == 0
     cli_rb = json.loads(capsys.readouterr().out)
     assert cli_rb["status"] == "rolled_back"
@@ -241,6 +288,7 @@ def test_growth_audit_tools_and_cli(org_env, capsys):
 
 def test_propose_bot_spools_and_refuses_junk(org_env):
     from balabot import bot_creation
+
     out = bot_tools.propose_bot(
         bot_id="principal",
         name="Research Analyst",
@@ -276,7 +324,9 @@ def test_propose_bot_spools_and_refuses_junk(org_env):
     with pytest.raises(ValueError, match="usable character"):
         bot_tools.propose_bot(bot_id="principal", name="///", role="Valid role")
     with pytest.raises(ValueError, match="extra kwarg"):
-        bot_tools.propose_bot(bot_id="principal", name="Valid", role="Valid role", rogue="forbidden")
+        bot_tools.propose_bot(
+            bot_id="principal", name="Valid", role="Valid role", rogue="forbidden"
+        )
 
 
 def test_propose_bot_refuses_human_impersonation(org_env):
@@ -290,13 +340,20 @@ def test_propose_bot_refuses_human_impersonation(org_env):
 
 def test_propose_bot_cli(org_env, capsys, tmp_path):
     from balabot import bot_tools as bt
-    code = bt.main([
-        "propose_bot",
-        "--bot", "principal",
-        "--name", "Junior Tester",
-        "--role", "Runs regression tests",
-        "--reason", "Quality assurance",
-    ])
+
+    code = bt.main(
+        [
+            "propose_bot",
+            "--bot",
+            "principal",
+            "--name",
+            "Junior Tester",
+            "--role",
+            "Runs regression tests",
+            "--reason",
+            "Quality assurance",
+        ]
+    )
     assert code == 0
     cli_out = json.loads(capsys.readouterr().out)
     assert cli_out["proposed"] is True
@@ -309,9 +366,22 @@ def test_propose_bot_cli(org_env, capsys, tmp_path):
     # Subprocess execution
     env = {**os.environ, "BALABOT_DATA_ROOT": str(tmp_path / "data")}
     r = subprocess.run(
-        [sys.executable, "-m", "balabot.bot_tools", "propose_bot",
-         "--bot", "principal", "--name", "Subprocess Bot", "--role", "CLI test role"],
-        capture_output=True, text=True, env=env, cwd=REPO_ROOT,
+        [
+            sys.executable,
+            "-m",
+            "balabot.bot_tools",
+            "propose_bot",
+            "--bot",
+            "principal",
+            "--name",
+            "Subprocess Bot",
+            "--role",
+            "CLI test role",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
     )
     assert r.returncode == 0
     data = json.loads(r.stdout)
@@ -321,14 +391,16 @@ def test_propose_bot_cli(org_env, capsys, tmp_path):
 
 def test_spool_drains_to_proposal_store(org_env):
     from balabot import bot_creation
+
     bot_tools.propose_bot(bot_id="principal", name="Bot One", role="First bot role")
     bot_tools.propose_bot(bot_id="governor", name="Bot Two", role="Second bot role")
 
     spool_dir = org_env["data_root"] / "spool" / "bot_proposals"
     assert len(list(spool_dir.glob("sp_*.json"))) == 2
 
-    drained = bot_creation.drain_spool()
-    assert len(drained) == 2
+    result = bot_creation.drain_spool()
+    assert len(result["drained"]) == 2
+    assert len(result["discarded"]) == 0
     # Spool files unlinked
     assert len(list(spool_dir.glob("sp_*.json"))) == 0
 
@@ -338,18 +410,21 @@ def test_spool_drains_to_proposal_store(org_env):
     assert names == {"Bot One", "Bot Two"}
 
     # Repeated drain is a no-op
-    assert bot_creation.drain_spool() == []
+    result2 = bot_creation.drain_spool()
+    assert result2["drained"] == []
+    assert result2["discarded"] == []
 
 
 def test_consent_ladder_intact_no_self_approval(org_env):
     from balabot import bot_creation
+
     bot_tools.propose_bot(
         bot_id="principal",
         name="Auto Bot",
         role="Autonomous worker",
     )
-    drained = bot_creation.drain_spool()
-    pid = drained[0]["id"]
+    result = bot_creation.drain_spool()
+    pid = result["drained"][0]["id"]
 
     # Proposing bot cannot approve its own proposal
     with pytest.raises(bot_creation.CreationError, match="human operator"):
@@ -363,4 +438,3 @@ def test_consent_ladder_intact_no_self_approval(org_env):
     app = bot_creation.approve_proposal(pid, approved_by="user")
     assert app["status"] == "approved"
     assert app["approved_by"] == "user"
-
