@@ -114,10 +114,11 @@ for docs: surface an untruth rather than writing around it.
 ## 12. Git
 
 - Conventional commits; **commit often, sync often** — small, landed, pushed beats one big drop.
-- This clone's local branch is `master` while the remote default is `main`, and it tracks it:
+- One branch only: the local branch is `main` and tracks the remote default `main`, so a plain
+  push lands it — no branch-name mapping:
 
   ```bash
-  git push origin master:main
+  git push
   ```
 
 - Commit only your own paths — never sweep a sibling's in-flight edits into your commit.
