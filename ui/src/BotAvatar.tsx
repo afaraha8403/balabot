@@ -1,4 +1,5 @@
-import {memo, useId, useMemo} from 'react';
+import {memo, useEffect, useId, useMemo, useRef, useState} from 'react';
+import {type MascotState} from './orbState';
 
 export interface GrokColorDef {
   id: string;
@@ -102,50 +103,511 @@ export interface BotAvatarProps {
   color?: string;
   size?: number;
   status?: string;
+  state?: MascotState;
   identity?: string;
+  name?: string;
   className?: string;
+}
+
+export function mapStatusToMascotState(status?: string): MascotState | undefined {
+  if (!status) return undefined;
+  if (status === 'working' || status === 'streaming' || status === 'running') return 'working';
+  if (status === 'paused') return 'needs_you';
+  if (
+    status === 'idle' ||
+    status === 'thinking' ||
+    status === 'working' ||
+    status === 'tool' ||
+    status === 'searching' ||
+    status === 'composing' ||
+    status === 'solving' ||
+    status === 'connecting' ||
+    status === 'needs_you' ||
+    status === 'error' ||
+    status === 'finished' ||
+    status === 'sleeping'
+  ) {
+    return status as MascotState;
+  }
+  return undefined;
+}
+
+export const MASCOT_STATE_LABELS: Record<MascotState, string> = {
+  idle: 'idle',
+  thinking: 'thinking',
+  working: 'working',
+  tool: 'running tool',
+  searching: 'searching',
+  composing: 'composing',
+  solving: 'solving',
+  connecting: 'connecting',
+  needs_you: 'needs your input',
+  error: 'error',
+  finished: 'finished',
+  sleeping: 'sleeping',
+};
+
+function renderMascotGlyph(state: MascotState, size: number) {
+  if (state === 'idle' || state === 'sleeping') return null;
+
+  const glyphSize = Math.max(14, Math.round(size * 0.42));
+
+  if (
+    state === 'working' ||
+    state === 'thinking' ||
+    state === 'tool' ||
+    state === 'searching' ||
+    state === 'composing' ||
+    state === 'solving' ||
+    state === 'connecting'
+  ) {
+    return (
+      <div
+        data-testid="mascot-glyph"
+        data-glyph-type="dots"
+        className="rakazo-mascot-glyph"
+        aria-hidden="true"
+        style={{
+          top: -Math.max(6, Math.round(glyphSize * 0.55)),
+        }}
+      >
+        <svg
+          width={glyphSize * 1.5}
+          height={glyphSize * 0.8}
+          viewBox="0 0 24 12"
+          fill="none"
+          aria-hidden="true"
+        >
+          <rect
+            width="24"
+            height="12"
+            rx="6"
+            fill="var(--card)"
+            stroke="var(--border)"
+            strokeWidth="1.2"
+          />
+          <circle cx="6" cy="6" r="2.2" fill="var(--mascot-state-color)" className="mascot-dot-1" />
+          <circle cx="12" cy="6" r="2.2" fill="var(--mascot-state-color)" className="mascot-dot-2" />
+          <circle cx="18" cy="6" r="2.2" fill="var(--mascot-state-color)" className="mascot-dot-3" />
+        </svg>
+      </div>
+    );
+  }
+
+  if (state === 'needs_you') {
+    return (
+      <div
+        data-testid="mascot-glyph"
+        data-glyph-type="needs_you"
+        className="rakazo-mascot-glyph"
+        aria-hidden="true"
+        style={{
+          top: -Math.max(6, Math.round(glyphSize * 0.55)),
+        }}
+      >
+        <svg
+          width={glyphSize}
+          height={glyphSize}
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <circle
+            cx="8"
+            cy="8"
+            r="7"
+            fill="var(--card)"
+            stroke="var(--warning)"
+            strokeWidth="1.8"
+          />
+          <text
+            x="8"
+            y="11.5"
+            textAnchor="middle"
+            fontSize="10"
+            fontWeight="bold"
+            fontFamily="sans-serif"
+            fill="var(--warning)"
+          >
+            ?
+          </text>
+        </svg>
+      </div>
+    );
+  }
+
+  if (state === 'error') {
+    return (
+      <div
+        data-testid="mascot-glyph"
+        data-glyph-type="error"
+        className="rakazo-mascot-glyph"
+        aria-hidden="true"
+        style={{
+          top: -Math.max(6, Math.round(glyphSize * 0.55)),
+        }}
+      >
+        <svg
+          width={glyphSize}
+          height={glyphSize}
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <circle
+            cx="8"
+            cy="8"
+            r="7"
+            fill="var(--card)"
+            stroke="var(--destructive)"
+            strokeWidth="1.8"
+          />
+          <text
+            x="8"
+            y="11.5"
+            textAnchor="middle"
+            fontSize="10"
+            fontWeight="bold"
+            fontFamily="sans-serif"
+            fill="var(--destructive)"
+          >
+            !
+          </text>
+        </svg>
+      </div>
+    );
+  }
+
+  if (state === 'finished') {
+    return (
+      <div
+        data-testid="mascot-glyph"
+        data-glyph-type="finished"
+        className="rakazo-mascot-glyph"
+        aria-hidden="true"
+        style={{
+          top: -Math.max(6, Math.round(glyphSize * 0.55)),
+        }}
+      >
+        <svg
+          width={glyphSize}
+          height={glyphSize}
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <circle
+            cx="8"
+            cy="8"
+            r="7"
+            fill="var(--card)"
+            stroke="var(--success)"
+            strokeWidth="1.8"
+          />
+          <path
+            d="M4.5 8.2l2.3 2.3 4.7-4.7"
+            stroke="var(--success)"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function renderMascotFace(
+  state: MascotState,
+  isBlinking: boolean,
+  colorDef: GrokColorDef,
+  eyePattern: number,
+) {
+  const eyeColor = colorDef.eyeColor;
+  const lx = SHIPPED_BOT_AVATAR_CENTER - 29;
+  const rx = SHIPPED_BOT_AVATAR_CENTER + 29;
+  const ey = SHIPPED_BOT_AVATAR_CENTER - 8;
+
+  if (state === 'sleeping') {
+    return (
+      <g fill={eyeColor} aria-hidden="true">
+        <path
+          d={`M${lx - 10} ${ey} Q${lx} ${ey + 8} ${lx + 10} ${ey}`}
+          stroke={eyeColor}
+          strokeWidth="3.5"
+          fill="none"
+          strokeLinecap="round"
+        />
+        <path
+          d={`M${rx - 10} ${ey} Q${rx} ${ey + 8} ${rx + 10} ${ey}`}
+          stroke={eyeColor}
+          strokeWidth="3.5"
+          fill="none"
+          strokeLinecap="round"
+        />
+        <circle cx={SHIPPED_BOT_AVATAR_CENTER} cy={ey + 16} r={2.5} fill={eyeColor} />
+      </g>
+    );
+  }
+
+  if (isBlinking) {
+    return (
+      <g fill={eyeColor} aria-hidden="true">
+        <path
+          d={`M${lx - 10} ${ey} Q${lx} ${ey + 6} ${lx + 10} ${ey}`}
+          stroke={eyeColor}
+          strokeWidth="3.5"
+          fill="none"
+          strokeLinecap="round"
+        />
+        <path
+          d={`M${rx - 10} ${ey} Q${rx} ${ey + 6} ${rx + 10} ${ey}`}
+          stroke={eyeColor}
+          strokeWidth="3.5"
+          fill="none"
+          strokeLinecap="round"
+        />
+      </g>
+    );
+  }
+
+  if (state === 'error') {
+    return (
+      <g fill={eyeColor} aria-hidden="true">
+        <g stroke={eyeColor} strokeWidth="3.8" strokeLinecap="round">
+          <line x1={lx - 8} y1={ey - 8} x2={lx + 8} y2={ey + 8} />
+          <line x1={lx + 8} y1={ey - 8} x2={lx - 8} y2={ey + 8} />
+          <line x1={rx - 8} y1={ey - 8} x2={rx + 8} y2={ey + 8} />
+          <line x1={rx + 8} y1={ey - 8} x2={rx - 8} y2={ey + 8} />
+        </g>
+        <path
+          d={`M${SHIPPED_BOT_AVATAR_CENTER - 8} ${ey + 18} Q${SHIPPED_BOT_AVATAR_CENTER - 4} ${ey + 14} ${SHIPPED_BOT_AVATAR_CENTER} ${ey + 18} T${SHIPPED_BOT_AVATAR_CENTER + 8} ${ey + 18}`}
+          stroke={eyeColor}
+          strokeWidth="3"
+          fill="none"
+          strokeLinecap="round"
+        />
+      </g>
+    );
+  }
+
+  if (state === 'finished') {
+    return (
+      <g fill={eyeColor} aria-hidden="true">
+        <path
+          d={`M${lx - 10} ${ey + 3} Q${lx} ${ey - 9} ${lx + 10} ${ey + 3}`}
+          stroke={eyeColor}
+          strokeWidth="4"
+          fill="none"
+          strokeLinecap="round"
+        />
+        <path
+          d={`M${rx - 10} ${ey + 3} Q${rx} ${ey - 9} ${rx + 10} ${ey + 3}`}
+          stroke={eyeColor}
+          strokeWidth="4"
+          fill="none"
+          strokeLinecap="round"
+        />
+        <path
+          d={`M${SHIPPED_BOT_AVATAR_CENTER - 9} ${ey + 13} Q${SHIPPED_BOT_AVATAR_CENTER} ${ey + 23} ${SHIPPED_BOT_AVATAR_CENTER + 9} ${ey + 13} Z`}
+          fill={eyeColor}
+        />
+      </g>
+    );
+  }
+
+  if (state === 'needs_you') {
+    return (
+      <g fill={eyeColor} aria-hidden="true">
+        <circle cx={lx} cy={ey} r={11} fill={eyeColor} />
+        <circle cx={rx} cy={ey} r={11} fill={eyeColor} />
+        <circle cx={lx + 3} cy={ey - 3} r={3.2} fill={colorDef.dark} />
+        <circle cx={rx + 3} cy={ey - 3} r={3.2} fill={colorDef.dark} />
+        <ellipse
+          cx={SHIPPED_BOT_AVATAR_CENTER}
+          cy={ey + 16}
+          rx={4.5}
+          ry={5.5}
+          fill="none"
+          stroke={eyeColor}
+          strokeWidth="2.5"
+        />
+      </g>
+    );
+  }
+
+  if (state === 'thinking') {
+    return (
+      <g fill={eyeColor} aria-hidden="true">
+        <ellipse cx={lx + 2} cy={ey - 6} rx={9.5} ry={8.5} />
+        <ellipse cx={rx + 2} cy={ey - 6} rx={9.5} ry={8.5} />
+        <circle cx={SHIPPED_BOT_AVATAR_CENTER + 2} cy={ey + 15} r={3} fill={eyeColor} />
+      </g>
+    );
+  }
+
+  if (
+    state === 'working' ||
+    state === 'tool' ||
+    state === 'searching' ||
+    state === 'composing' ||
+    state === 'solving' ||
+    state === 'connecting'
+  ) {
+    return (
+      <g fill={eyeColor} aria-hidden="true">
+        <ellipse cx={lx} cy={ey} rx={10} ry={5.8} />
+        <ellipse cx={rx} cy={ey} rx={10} ry={5.8} />
+        <line
+          x1={SHIPPED_BOT_AVATAR_CENTER - 6}
+          y1={ey + 15}
+          x2={SHIPPED_BOT_AVATAR_CENTER + 6}
+          y2={ey + 15}
+          stroke={eyeColor}
+          strokeWidth="2.8"
+          strokeLinecap="round"
+        />
+      </g>
+    );
+  }
+
+  return (
+    <g fill={eyeColor} aria-hidden="true">
+      <g className="grok-character-eyes" data-eye-pattern={eyePattern}>
+        <ellipse cx={lx} cy={ey} rx={10} ry={7} />
+        <ellipse cx={rx} cy={ey} rx={10} ry={7} />
+      </g>
+      <path
+        d={`M${SHIPPED_BOT_AVATAR_CENTER - 7} ${ey + 15} Q${SHIPPED_BOT_AVATAR_CENTER} ${ey + 19} ${SHIPPED_BOT_AVATAR_CENTER + 7} ${ey + 15}`}
+        stroke={eyeColor}
+        strokeWidth="2.5"
+        fill="none"
+        strokeLinecap="round"
+      />
+    </g>
+  );
 }
 
 export const BotAvatar = memo(function BotAvatar({
   color = '#8B5CF6',
   size = 36,
   status,
+  state,
   identity = '',
+  name = '',
   className = '',
 }: BotAvatarProps) {
   const rawId = useId();
   const id = rawId.replace(/[^a-zA-Z0-9-_]/g, '');
-  const isWorking = status === 'working' || status === 'streaming' || status === 'running';
+
+  const effectiveState: MascotState = state ?? mapStatusToMascotState(status) ?? 'idle';
+  const isWorking =
+    effectiveState === 'working' ||
+    effectiveState === 'tool' ||
+    effectiveState === 'thinking' ||
+    effectiveState === 'searching' ||
+    effectiveState === 'composing' ||
+    effectiveState === 'solving' ||
+    effectiveState === 'connecting';
   const effectiveId = identity || color || 'bot';
+  const effectiveName = name || identity || 'Agent';
+  const ariaLabel = `${effectiveName} — ${MASCOT_STATE_LABELS[effectiveState] ?? effectiveState}`;
 
   const isImage = typeof color === 'string' && color.startsWith('data:image/');
   const colorDef = useMemo(() => resolvePersonaColorDef(effectiveId, color), [effectiveId, color]);
   const shapePath = useMemo(() => resolvePersonaShape(effectiveId), [effectiveId]);
   const eyePattern = useMemo(() => (shippedHash(effectiveId) >>> 0) % 4, [effectiveId]);
 
+  const [reducedMotion, setReducedMotion] = useState(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return false;
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onChange = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+    if (mql.addEventListener) {
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    }
+  }, []);
+
+  const [isBlinking, setIsBlinking] = useState(false);
+  useEffect(() => {
+    if (reducedMotion || effectiveState === 'sleeping' || isImage) return;
+
+    let timeoutId: ReturnType<typeof setTimeout>;
+    let blinkTimer: ReturnType<typeof setTimeout>;
+
+    const scheduleNextBlink = () => {
+      const delay = 2000 + Math.random() * 5000;
+      timeoutId = setTimeout(() => {
+        setIsBlinking(true);
+        blinkTimer = setTimeout(() => {
+          setIsBlinking(false);
+          scheduleNextBlink();
+        }, 140);
+      }, delay);
+    };
+
+    scheduleNextBlink();
+
+    return () => {
+      clearTimeout(timeoutId);
+      clearTimeout(blinkTimer);
+    };
+  }, [effectiveState, reducedMotion, isImage]);
+
+  const [isSquashing, setIsSquashing] = useState(false);
+  const prevEffectiveState = useRef(effectiveState);
+
+  useEffect(() => {
+    if (prevEffectiveState.current !== effectiveState) {
+      prevEffectiveState.current = effectiveState;
+      if (!reducedMotion) {
+        setIsSquashing(true);
+        const timer = setTimeout(() => setIsSquashing(false), 420);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [effectiveState, reducedMotion]);
+
+  const ringMode =
+    isWorking
+      ? 'orbit'
+      : effectiveState === 'needs_you' || effectiveState === 'error' || effectiveState === 'finished'
+      ? 'steady'
+      : null;
+
   if (isImage) {
     return (
       <div
-        className={`rakazo-bot-avatar ${className}`}
+        role="img"
+        aria-label={ariaLabel}
+        data-state={effectiveState}
         data-working={isWorking ? 'true' : 'false'}
+        data-reduced-motion={reducedMotion ? 'true' : 'false'}
+        className={`rakazo-bot-avatar ${className}`}
         style={{
           width: size,
           height: size,
           position: 'relative',
-          borderRadius: '9999px',
-          overflow: 'hidden',
-          display: 'flex',
+          display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
-          border: '1px solid var(--border)',
-          backgroundColor: 'var(--secondary)',
-          boxShadow: isWorking ? `0 0 0 2px ${colorDef.light}, 0 0 10px ${colorDef.light}80` : '0 2px 4px rgba(0,0,0,0.3)',
         }}
       >
-        {isWorking ? (
+        <div className="rakazo-mascot-glow" aria-hidden="true" />
+
+        {ringMode ? (
           <svg
-            className="rakazo-bot-avatar-ring"
+            data-testid="mascot-ring"
+            data-mode={ringMode}
+            className="rakazo-bot-avatar-ring rakazo-mascot-ring"
             style={{
               position: 'absolute',
               inset: -4,
@@ -157,18 +619,77 @@ export const BotAvatar = memo(function BotAvatar({
             fill="none"
             aria-hidden="true"
           >
-            <circle cx="24" cy="24" r="22" stroke={colorDef.light} strokeWidth="3.2" strokeLinecap="round" strokeDasharray="45 80" />
+            {ringMode === 'orbit' ? (
+              <>
+                <circle
+                  cx="24"
+                  cy="24"
+                  r="22"
+                  stroke={`url(#${id}-photo-ring)`}
+                  strokeWidth="3.2"
+                  strokeLinecap="round"
+                  strokeDasharray="45 80"
+                />
+                <circle cx="43" cy="24" r="2.8" fill="var(--foreground)" />
+                <defs>
+                  <linearGradient id={`${id}-photo-ring`} x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="var(--foreground)" stopOpacity="1" />
+                    <stop offset="60%" stopColor="var(--mascot-state-color)" stopOpacity="0.9" />
+                    <stop offset="100%" stopColor="var(--mascot-state-color)" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+              </>
+            ) : (
+              <circle
+                cx="24"
+                cy="24"
+                r="22"
+                stroke="var(--mascot-state-color)"
+                strokeWidth="2.8"
+                strokeLinecap="round"
+                opacity="0.9"
+              />
+            )}
           </svg>
         ) : null}
-        <img src={color} alt="" style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+
+        <div
+          className="rakazo-mascot-body"
+          data-squashing={isSquashing ? 'true' : 'false'}
+          style={{
+            borderRadius: '9999px',
+            overflow: 'hidden',
+            border: '1px solid var(--border)',
+            backgroundColor: 'var(--secondary)',
+            boxShadow:
+              effectiveState === 'needs_you'
+                ? '0 0 0 2px var(--warning), 0 0 10px var(--warning)'
+                : isWorking
+                ? `0 0 0 2px ${colorDef.light}, 0 0 10px ${colorDef.light}80`
+                : '0 2px 4px rgba(0,0,0,0.3)',
+          }}
+        >
+          <img
+            src={color}
+            alt=""
+            aria-hidden="true"
+            style={{width: '100%', height: '100%', objectFit: 'cover'}}
+          />
+        </div>
+
+        {renderMascotGlyph(effectiveState, size)}
       </div>
     );
   }
 
   return (
     <div
-      className={`rakazo-bot-avatar ${className}`}
+      role="img"
+      aria-label={ariaLabel}
+      data-state={effectiveState}
       data-working={isWorking ? 'true' : 'false'}
+      data-reduced-motion={reducedMotion ? 'true' : 'false'}
+      className={`rakazo-bot-avatar ${className}`}
       style={{
         width: size,
         height: size,
@@ -180,69 +701,97 @@ export const BotAvatar = memo(function BotAvatar({
         userSelect: 'none',
       }}
     >
-      {/* Working status ring */}
-      <svg
-        className="rakazo-bot-avatar-ring"
-        style={{
-          position: 'absolute',
-          inset: -4,
-          width: size + 8,
-          height: size + 8,
-          pointerEvents: 'none',
-          filter: `drop-shadow(0 0 6px ${colorDef.light}) drop-shadow(0 0 8px #ffffff)`,
-        }}
-        viewBox="0 0 48 48"
-        fill="none"
-        aria-hidden="true"
-      >
-        <circle
-          cx="24"
-          cy="24"
-          r="22"
-          stroke={`url(#${id}-ring)`}
-          strokeWidth="3.2"
-          strokeLinecap="round"
-          strokeDasharray="45 80"
-        />
-        <circle cx="43" cy="24" r="2.8" fill="#ffffff" />
-        <defs>
-          <linearGradient id={`${id}-ring`} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
-            <stop offset="60%" stopColor={colorDef.light} stopOpacity="0.9" />
-            <stop offset="100%" stopColor={colorDef.light} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-      </svg>
+      <div className="rakazo-mascot-glow" aria-hidden="true" />
 
-      {/* Main Avatar SVG */}
-      <svg
-        viewBox={SHIPPED_BOT_AVATAR_VIEWBOX}
-        width={size}
-        height={size}
+      {ringMode ? (
+        <svg
+          data-testid="mascot-ring"
+          data-mode={ringMode}
+          className="rakazo-bot-avatar-ring rakazo-mascot-ring"
+          style={{
+            position: 'absolute',
+            inset: -4,
+            width: size + 8,
+            height: size + 8,
+            pointerEvents: 'none',
+            filter:
+              effectiveState === 'needs_you'
+                ? 'drop-shadow(0 0 6px var(--warning))'
+                : effectiveState === 'error'
+                ? 'drop-shadow(0 0 6px var(--destructive))'
+                : `drop-shadow(0 0 6px ${colorDef.light}) drop-shadow(0 0 8px var(--foreground))`,
+          }}
+          viewBox="0 0 48 48"
+          fill="none"
+          aria-hidden="true"
+        >
+          {ringMode === 'orbit' ? (
+            <>
+              <circle
+                cx="24"
+                cy="24"
+                r="22"
+                stroke={`url(#${id}-ring)`}
+                strokeWidth="3.2"
+                strokeLinecap="round"
+                strokeDasharray="45 80"
+              />
+              <circle cx="43" cy="24" r="2.8" fill="var(--foreground)" />
+              <defs>
+                <linearGradient id={`${id}-ring`} x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="var(--foreground)" stopOpacity="1" />
+                  <stop offset="60%" stopColor="var(--mascot-state-color)" stopOpacity="0.9" />
+                  <stop offset="100%" stopColor="var(--mascot-state-color)" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+            </>
+          ) : (
+            <circle
+              cx="24"
+              cy="24"
+              r="22"
+              stroke="var(--mascot-state-color)"
+              strokeWidth="2.8"
+              strokeLinecap="round"
+              opacity="0.9"
+            />
+          )}
+        </svg>
+      ) : null}
+
+      <div
+        className="rakazo-mascot-body"
+        data-squashing={isSquashing ? 'true' : 'false'}
         aria-hidden="true"
-        style={{
-          overflow: 'visible',
-          transition: 'transform 300ms ease',
-          filter: isWorking
-            ? `drop-shadow(0 0 8px ${colorDef.light}) drop-shadow(0 0 2px #ffffff)`
-            : 'drop-shadow(0 2px 4px rgba(0,0,0,0.45))',
-          transform: isWorking ? 'scale(1.04)' : undefined,
-        }}
       >
-        <defs>
-          <linearGradient id={`grok-ink-${id}`} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor={colorDef.light} />
-            <stop offset="100%" stopColor={colorDef.dark} />
-          </linearGradient>
-        </defs>
-        <g>
-          <path d={shapePath} fill={`url(#grok-ink-${id})`} />
-          <g fill={colorDef.eyeColor} className="grok-character-eyes" data-eye-pattern={eyePattern}>
-            <ellipse cx={SHIPPED_BOT_AVATAR_CENTER - 29} cy={SHIPPED_BOT_AVATAR_CENTER - 8} rx={10} ry={7} />
-            <ellipse cx={SHIPPED_BOT_AVATAR_CENTER + 29} cy={SHIPPED_BOT_AVATAR_CENTER - 8} rx={10} ry={7} />
+        <svg
+          viewBox={SHIPPED_BOT_AVATAR_VIEWBOX}
+          width={size}
+          height={size}
+          aria-hidden="true"
+          style={{
+            overflow: 'visible',
+            transition: 'transform 300ms ease',
+            filter: isWorking
+              ? `drop-shadow(0 0 8px ${colorDef.light}) drop-shadow(0 0 2px var(--foreground))`
+              : 'drop-shadow(0 2px 4px rgba(0,0,0,0.45))',
+            transform: isWorking ? 'scale(1.04)' : undefined,
+          }}
+        >
+          <defs>
+            <linearGradient id={`grok-ink-${id}`} x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor={colorDef.light} />
+              <stop offset="100%" stopColor={colorDef.dark} />
+            </linearGradient>
+          </defs>
+          <g>
+            <path d={shapePath} fill={`url(#grok-ink-${id})`} />
+            {renderMascotFace(effectiveState, isBlinking, colorDef, eyePattern)}
           </g>
-        </g>
-      </svg>
+        </svg>
+      </div>
+
+      {renderMascotGlyph(effectiveState, size)}
     </div>
   );
 });

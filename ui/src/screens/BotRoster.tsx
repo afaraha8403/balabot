@@ -17,6 +17,7 @@ import {IconConceal, IconGroupChat, IconPin} from '../icons';
 import type {Bot, Group, Session, SubAgent} from '../api';
 import {isShippedBot} from '../api';
 import {type BotSection, DEFAULT_BOT_SECTIONS} from '../sections';
+import type {MascotState} from '../orbState';
 
 export type RosterEntry = {
   bot: Bot;
@@ -67,6 +68,7 @@ function lastMessageFor(sessions: Session[], botId: string) {
 export function BotRoster({
   bots,
   activeBotId,
+  activeMascotState,
   sessions,
   isStreaming,
   subagents,
@@ -95,6 +97,7 @@ export function BotRoster({
 }: {
   bots: Bot[];
   activeBotId: string | null;
+  activeMascotState?: MascotState;
   sessions: Session[];
   isStreaming: boolean;
   subagents?: SubAgent[];
@@ -252,9 +255,16 @@ export function BotRoster({
         startContent={
           <BotAvatar
             identity={e.bot.id}
+            name={e.bot.name}
             color={e.bot.color}
             size={38}
-            status={e.isTyping ? 'working' : undefined}
+            state={
+              e.bot.id === activeBotId && activeMascotState
+                ? activeMascotState
+                : e.isTyping
+                ? 'working'
+                : 'idle'
+            }
           />
         }
         endContent={

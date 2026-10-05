@@ -13,6 +13,7 @@ import {
   activeTool,
   mergeToolProgress,
   orbStateForTool,
+  resolveMascotState,
   toToolCallStatus,
 } from './orbState';
 import {Avatar} from '@astryxdesign/core/Avatar';
@@ -238,6 +239,7 @@ export default function App() {
     return initial[0]?.id ?? null;
   });
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isFinished, setIsFinished] = useState(false);
   const [streamText, setStreamText] = useState('');
   const [healthOk, setHealthOk] = useState<boolean | null>(null);
   const [showPanel, setShowPanel] = useState(false);
@@ -769,6 +771,32 @@ export default function App() {
     );
   }, [sessions, activeBotId, activeSessionId]);
 
+  const activeMascotState = useMemo(() => {
+    return resolveMascotState({
+      activeIntervention,
+      interventions,
+      secretCards,
+      draftCards,
+      healthOk,
+      toolCalls,
+      streamThinking,
+      isStreaming,
+      isFinished,
+      hasSession: Boolean(activeSession),
+    });
+  }, [
+    activeIntervention,
+    interventions,
+    secretCards,
+    draftCards,
+    healthOk,
+    toolCalls,
+    streamThinking,
+    isStreaming,
+    isFinished,
+    activeSession,
+  ]);
+
   useEffect(() => {
     if (activeBotId) saveLastBot(activeBotId);
   }, [activeBotId]);
@@ -846,6 +874,7 @@ export default function App() {
     abortRef.current?.abort();
     abortRef.current = null;
     setIsStreaming(false);
+    setIsFinished(false);
   };
 
   const handleToggleReaction = (msgIndex: number, emoji: string) => {
@@ -867,6 +896,7 @@ export default function App() {
     replyTo?: {sender: string; text: string},
   ) => {
     if (!activeBot) return;
+    setIsFinished(false);
     const session = ensureSession(activeBot);
 
     if (isStreaming) {
@@ -994,6 +1024,8 @@ export default function App() {
       setInterventions([]);
       setDraftCards([]);
       setVoiceMemos([]);
+      setIsFinished(true);
+      setTimeout(() => setIsFinished(false), 2400);
     } catch (err) {
       const aborted = controller.signal.aborted;
       const partial = streamTextRef.current;
@@ -1184,6 +1216,7 @@ export default function App() {
             <BotRoster
               bots={filteredBots}
               activeBotId={activeGroupId ? null : activeBotId}
+              activeMascotState={activeMascotState}
               sessions={sessions}
               isStreaming={isStreaming}
               subagents={subagents}
@@ -1400,9 +1433,10 @@ export default function App() {
                 >
                   <BotAvatar
                     identity={activeBot.id}
+                    name={activeBot.name}
                     color={activeBot.color}
                     size={30}
-                    status={isStreaming ? 'working' : undefined}
+                    state={activeMascotState}
                   />
                   <div style={{display: 'flex', flexDirection: 'column', minWidth: 0}}>
                     <span style={{fontWeight: 600, fontSize: '14px', color: 'var(--foreground)'}}>
@@ -1653,8 +1687,10 @@ export default function App() {
                                   >
                                     <BotAvatar
                                       identity={activeBot.id}
+                                      name={activeBot.name}
                                       color={activeBot.color}
                                       size={22}
+                                      state="idle"
                                     />
                                     {activeBot.name}
                                   </div>
@@ -1889,8 +1925,9 @@ export default function App() {
                               >
                                 <BotAvatar
                                   identity={activeBot.id}
+                                  name={activeBot.name}
                                   color={activeBot.color}
-                                  status="working"
+                                  state={activeMascotState}
                                   size={22}
                                 />
                                 {activeBot.name}
@@ -2133,9 +2170,10 @@ export default function App() {
                     <HStack gap={2} vAlign="center">
                       <BotAvatar
                         identity={activeBot.id}
+                        name={activeBot.name}
                         color={activeBot.color}
                         size={28}
-                        status={isStreaming ? 'working' : undefined}
+                        state={activeMascotState}
                       />
                       <Text type="body" weight="semibold">
                         {activeBot.name}&apos;s screen
