@@ -11,28 +11,58 @@ status: active
 
 # BalaBot - overall plan (KB master)
 
-BalaBot is an MIT-licensed, open-source, single-container multi-agent product: one Docker image containing Hermes itself plus two pre-configured agents, the **principal** (runtime ops, system health, agent growth) and the **governor** (the shared OKF decision ledger), with **Jev (J-E-V, by TypeSafe AI)** as a hard, fail-loud dependency. It is based on Grok Bot (xAI's product model) and is built by Ali Farahat's Balacode team, whose earlier KB entries also cover **Kalam**, the Windows-first voice dictation product that shares the same team and vault. The KB decides the whole stack end to end: product facts and pricing (Kalam), team roles and Bot Mode infrastructure, the Agent Computer (one Linux container, per-agent X displays), orgs/secrets/skills with the "interface in chat, value never is" model, session continuity and Jev compaction, the UI/API contracts, launch doctrine, SEO, and strategy. The KB's own usage rules (README.md) say to start at index.md, read frontmatter first, and treat only ratified notes as knowledge; within the bundle, `plans/balabot-remaining-build-plan.md` calls itself the **MASTER SPEC** ("where the code disagrees, the CODE is changed to match the plan"), and the reference docs under `reference/` are the as-built architecture record. Several launch-era and strategy docs (2026-08) are explicitly `draft` and historical relative to the current BalaBot build, and `plans/grokbot-era-validity-review.md` adjudicates which GrokBot-era claims survive. Where any doc's status conflicts with reality, repo `docs/STATUS.md` is the single source of honest status.
+> [!IMPORTANT]
+> **RATIFIED ARCHITECTURE & MASTER SPEC (2026-10-23):**
+> On 2026-10-23, Ali Farahat approved and ratified the complete transition of BalaBot from Hermes/Docker to **Pi Durable (`@earendil-works/pi-durable`)**, **Cloudflare Agents SDK (`PiHarness`)**, and a **Native Rust Desktop App (Tauri v2)**.
+> **Docker is permanently retired.**
+> The authoritative master PRD is **`docs/PRD-PI-DURABLE.md`**, the active implementation roadmap is **`docs/kb/plans/pi-durable-migration.md`** (8 sequential waves), and the technical reference is **`docs/kb/reference/pi-durable-architecture.md`**.
+> Legacy Docker/Hermes build plans (`balabot-remaining-build-plan.md`, `grokbot-feature-build-plan.md`, `agent-computer-linux-vm.md`) are historical and superseded.
+
+BalaBot is an MIT-licensed, open-source multi-agent product featuring two pre-configured agents, the **principal** (runtime ops, system health, agent growth) and the **governor** (the shared OKF decision ledger), with **Jev (J-E-V, by TypeSafe AI)** as a hard, fail-loud dependency. Under the ratified 2026-10-23 architecture, BalaBot operates with zero Docker dependencies, shipping as a native Rust desktop client/server app with optional Cloudflare edge deployment via Agent Pi (`PiHarness`). The KB decides the stack: team roles, quarantined sandboxed automation ("NEVER THE HOST"), orgs/secrets/skills with the "interface in chat, value never is" model, session continuity, OKF decision ledger, and UI/API contracts. The KB's own usage rules (README.md) say to start at index.md, read frontmatter first, and treat ratified notes as knowledge. **`docs/PRD-PI-DURABLE.md`** is the **MASTER SPEC**, and **`docs/STATUS.md`** is the single source of honest status.
 
 ## How this document relates to the bundle
 
-- `docs/kb/` is a **verbatim mirror** of the Obsidian KB that lives at `GrokBot/kb/` in the AI vault. Its internal links still use bundle-relative paths like `/product/kalam.md` and point at `../scratchpad/`, which does not exist inside this mirror.
-- The bundle's own root `index.md` is **STALE**: it still titles the bundle "**Kalam knowledge bundle**" and opens with August-2026 Kalam launch pointers, while the content it indexes has grown into the GrokBot/BalaBot product knowledge base. Its title is wrong; its directory listings are still useful for the Kalam-era areas.
-- Repo `docs/STATUS.md` is the **single source of honest status** where the KB conflicts. The KB itself establishes this: `plans/balabot-remaining-build-plan.md` carries an AUDIT CORRECTION (2026-09-27, parent-verified) stating that several "SHIPPED" marks were false (four auditors re-verified every wave at `ce20599` requiring reachability from a real entry point), and orders: "Single source of honest status going forward: **`docs/STATUS.md`**. Do not re-assert a wave is shipped without a call-site check."
-- `kb/log.md` (the directory update log) is the chronological record and contains its own corrections (e.g. the skill-library "12 learned skills" figure was wrong and is corrected in place).
+- `docs/kb/` is the core product knowledge bundle. Its internal links use bundle-relative paths like `/product/kalam.md`.
+- Active modernization documents: `docs/PRD-PI-DURABLE.md` (PRD), `docs/kb/plans/pi-durable-migration.md` (Build Plan), and `docs/kb/reference/pi-durable-architecture.md` (Architecture Reference).
+- Repo `docs/STATUS.md` is the **single source of honest status** where any legacy document conflicts.
+- `kb/log.md` is the chronological record documenting the 2026-10-23 architecture ratification and dissect audit hardening.
 
 ## The bundle at a glance
 
 | Path | Type | What it decides | Status |
 |---|---|---|---|
-| index.md | index (stale title: "Kalam knowledge bundle") | Bundle entry point; Kalam-era "open first" and "do not plan from these" pointers | stale (own wording: dated 2026-08-30 framing) |
-| log.md | log | Chronological BalaBot build/verification log, newest-first (2026-08-18 to 2026-09-27) | active record |
+| index.md | index | Bundle entry point | active (OKF v0.2) |
+| log.md | log | Chronological BalaBot build/verification log, newest-first (2026-08-18 to 2026-10-23) | active record |
 | README.md | playbook | How every agent reads and writes the KB (OKF v0.2 rules, actor convention, placement) | stable |
 | launch/gate-0.md | playbook | Launch blockers: nothing public until a stranger can download, install, dictate | draft |
 | launch/index.md | index | Launch area directory (positioning, Gate 0, sourced launch method) | no status |
 | launch/positioning.md | playbook | The one-sentence position and allowed claims vs Wispr Flow / Superwhisper | draft |
 | launch/sourced-launch-method.md | playbook | Notebook-first, web-backed launch method: PH, HN, email, first-run; extends Gate 0 | draft |
-| plans/agent-computer-linux-vm.md | playbook | Agent Computer design: one Linux VM, per-agent X displays and workspaces | active |
+| plans/pi-durable-migration.md | build-plan | **Active Master Build Plan:** 8-wave migration to Pi Durable, Cloudflare Agents, and Rust desktop app | **active master plan** (2026-10-23) |
+| plans/agent-computer-linux-vm.md | playbook | Legacy Agent Computer container design | superseded by PRD-PI-DURABLE |
 | plans/agent-intervention-flow.md | playbook | Bot-needs-human flow: request_intervention, take-over, resume; bot pauses and waits | approved-for-build |
+| plans/balabot-acceptance-scenarios.md | test-plan | S1-S10 user-usage acceptance scenarios proving the product, not unit tests | no status |
+| plans/balabot-gap-ledger.md | audit | 203 vault claims checked against the repo: 90 implemented, 103 gaps | audit (2026-09-27) |
+| plans/balabot-remaining-build-plan.md | build-plan | Historical Hermes/Docker build plan | superseded by pi-durable-migration.md |
+| plans/deferred-decisions.md | plan | Decisions Ali explicitly parked; item 1 (skills) resolved 2026-09-27 | open |
+| plans/grokbot-era-validity-review.md | decision-sheet | 34 GrokBot-era claims with keep/cap/defer/cut; Ali ruled everything IN SCOPE | ruled in scope (2026-09-27) |
+| plans/grokbot-feature-build-plan.md | playbook | Historical GrokBot parity build | historical |
+| plans/index.md | index | Plans area directory | active |
+| plans/jev-continuity-build-plan.md | build-plan | Jev continuity: saliency checkpoint, purpose records, session routing, fail-closed gate | active |
+| plans/model-selection-ui.md | plan | Model & provider selection UI: main model + overrides | active plan |
+| plans/org-registry-schema.md | design | The one registry shape behind orgs, cross-org grants, secret delivery, org skills | active design |
+| plans/org-secrets-and-skills.md | playbook | Multi-tenant org model: context, skills, secrets, spaces; W4 zero-plaintext perimeter | active |
+| plans/session-continuity.md | plan | Session continuity & compaction: saliency pass, re-anchoring, purpose records | active plan |
+| product/homepage-social-proof.md | research | Audit of homepage claims 4.9 / 17+ / 200+ wpm / 3-4x - all unsourced | draft |
+| product/index.md | index | Product area directory | no status |
+| product/kalam.md | product | Kalam product facts: pricing, support, do-not-say list | draft |
+| reference/pi-durable-architecture.md | reference | **Active Master Architecture:** Zero-Docker client/server with Pi Durable and Cloudflare Edge | **active master reference** (2026-10-23) |
+| reference/agent-computer-architecture.md | reference | Legacy Agent Computer architecture as built in container | historical |
+| reference/agent-team-architecture.md | reference | Hermes vs Grok Bot parity: spawning, containment, messaging, groups, hierarchy, secrets | active |
+| reference/balabot-architecture.md | reference | BalaBot product architecture: hierarchy, governor ledger, memory, Jev layer | historical reference (Hermes era) |
+| reference/grok-bot-interface.md | reference | xAI Grok Bot product reference: interface, collaboration, computer use, mobile | stable |
+| references/index.md | index | References area directory (OKF v0.2) | no status |
+| references/okf-spec.md | reference | Open Knowledge Format v0.2 summary and what the bundle implements | stable |
 | plans/balabot-acceptance-scenarios.md | test-plan | S1-S10 user-usage acceptance scenarios proving the product, not unit tests | no status |
 | plans/balabot-gap-ledger.md | audit | 203 vault claims checked against the repo: 90 implemented, 103 gaps (57 real, 36 superseded, 10 doc hygiene) | audit (2026-09-27) |
 | plans/balabot-remaining-build-plan.md | build-plan | MASTER SPEC: waves 1-8 for every gap, with audit correction of false SHIPPED marks | master spec (scope approved by Ali 2026-09-27) |
@@ -197,7 +227,20 @@ Reference recording the two shipped BalaBot personas provisioned 2026-09-26 on t
 
 ## Build order and dependencies
 
-The sequence below is what the KB itself defines; nothing here is a new ordering.
+> [!IMPORTANT]
+> **ACTIVE MODERN BUILD ORDER (2026-10-23):**
+> The active, authoritative build sequence for BalaBot is the **Eight Migration Waves** ratified in **`docs/kb/plans/pi-durable-migration.md`** and **`docs/PRD-PI-DURABLE.md`**:
+> - **Wave 0:** ETL Migration (`migrate_legacy_data.ts`) & 527-Scenario Test Suite Translation
+> - **Wave 1:** Rust Desktop Shell Setup (Tauri v2 + WebView + SPA embedding)
+> - **Wave 2:** Pi Durable Core Engine & SQLite Persistence Engine
+> - **Wave 3:** Jev System 1 Pipeline Port (Fail-Loud / Offline Heuristic)
+> - **Wave 4:** Cloudflare Workers & Multi-Tenant PiHarness (Durable Objects)
+> - **Wave 5:** Hardened Reverse RPC Local Tool Bridge (Ed25519 Signed & Jailed)
+> - **Wave 6:** UI Re-wiring, Carrier Frame Fix & Acceptance Verification
+> - **Wave 7:** Docker Deprecation, Cleanup & Final KB Synchronization
+
+### Historical Build Order (Docker/Hermes Era)
+The historical sequence below reflects the 2026-09-27 Hermes container development; it is preserved for provenance:
 
 1. **Platform baseline (feature plan P0-P2, done 2026-09-26).** Fleet separation -> Agent Computer pane -> visible handoffs, verified by 16/16 E2E over the public URL (`grokbot-feature-build-plan.md`).
 2. **Agent Computer substrate (`agent-computer-linux-vm.md`).** One Linux container with per-agent displays is the prerequisite for the pane, per-org computer spaces, and the intervention take-over; the architecture reference documents it as built and verified 22/22.

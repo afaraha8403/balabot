@@ -65,7 +65,7 @@ sources:
     resource: /launch/positioning.md
     title: Kalam positioning (draft)
 ---
-Working copy: [[GrokBot/scratchpad/homepage-social-proof-audit]]
+Working copy: Homepage social-proof audit (scratchpad).
 
 
 # Verdict

@@ -17,7 +17,7 @@ Verified 2026-09-27 against the repo (call-site greps excluding `tests/` and the
 | Agent delete / purge / reap | SHIPPED | `lifecycle.delete_registered_bot`, `purge_orphan`, `reap_subagent_artifacts` (`lifecycle.py:359/323/346`); routes `DELETE /api/bots/{id}` (`:1617`), `/api/orphans/{name}` (`:1590`), `/api/orphans/reap` (`:1603`) |
 | Orphan adopt | SHIPPED | `lifecycle.adopt_orphan` (`lifecycle.py:244`), route `POST /api/orphans/{name}/adopt` (`ui/server.py:1577`) |
 | Sub-agent visibility (UI) | SHIPPED | `ui/subagents.py` reads `/opt/data/spawn-ledger.json` + `/proc` liveness; route `GET /api/subagents` (`ui/server.py:470`); UI poll `ui/src/App.tsx:249-256`. Caveat: ledger currently only records long-lived spawns, not ephemeral `delegate_task` children |
-| Agent Computer (screen view + action) | SHIPPED | `balabot/computer.py`; routes `GET /api/computer/{bot_id}/frame` + `POST /api/computer/{bot_id}/action` (`ui/server.py:504/524`); s6 service `docker/s6-rc.d/agent-computer` |
+| Agent Computer (screen view + action) | SHIPPED (LEGACY) | `balabot/computer.py`; routes `GET /api/computer/{bot_id}/frame` + `POST /api/computer/{bot_id}/action` (`ui/server.py:504/524`); s6 service `docker/s6-rc.d/agent-computer` (legacy container stack to be retired in favor of sandboxed virtual display / CDP in PRD-PI-DURABLE) |
 | Org + grants registry | SHIPPED | `balabot/orgs.py`; routes `/api/orgs`, `/api/org/secrets`, `/api/org/grants{,/revoke}` (`ui/server.py:793-905`); auto-registered at first boot (`bootstrap.init_org`) |
 | Secret delivery (`secrets.sources` helper) | SHIPPED | `balabot/secret_helper.py` filters org registry by bot's live grants; wired into persona config at `bootstrap.py:176` (`python3 -m balabot.secret_helper --profile <name>`) |
 | In-chat secret/access request flow | SHIPPED | `balabot/bot_tools.py` (`request_secret`, `request_secret_access` CLI, argv is a no-secret zone); queue + SSE drain in `ui/server.py:753-800`; UI approval routes `/api/org/requests` (`:907-937`). Caveat: `bot_tools` is invoked via CLI; no Hermes tool-schema wrapper |
@@ -54,6 +54,10 @@ Verified 2026-09-27 against the repo (call-site greps excluding `tests/` and the
 | Teach a task demonstration affordance | SHIPPED | `ui/src/AgentComputerDialog.tsx` Teach a Task affordance with honest daemon recording gap disclosure |
 | Mobile share sheet intake | SHIPPED | `ui/public/manifest.webmanifest` `share_target` registration with query param ingestion (`title`, `text`, `url`) into `ui/src/App.tsx` and composer |
 | OpenUI Generative UI (interactive cards) | SHIPPED | Bounded component registry (`HireAgentCard`, `Card`, `CardHeader`, `FormField`, `ConfirmButtons`) in `ui/src/openui/library.tsx`; runtime `@openuidev/react-lang@0.3.0` + Zod 4; in-chat renderer `OpenUIRenderer.tsx` wired into `ui/src/App.tsx:1335/1416`; consent confirmation flow for bot hiring |
+| Pi Durable Harness Engine (Zero Docker) | APPROVED SPEC | Master spec in `docs/PRD-PI-DURABLE.md`; replaces Hermes gateway with `@earendil-works/pi-durable` and transactional SQLite persistence |
+| Cloudflare Agent Pi (`PiHarness`) Edge Host | APPROVED SPEC | Research in `docs/research/pi-durable-cloudflare-agents.md`; Durable Objects + co-located SQLite actor hosting |
+| Rust Native Desktop App (Client / Local Server) | APPROVED SPEC | Tauri v2 desktop app (~120MB package with embedded runtime) supporting Local PC Autonomous Mode and Cloudflare Edge Mode |
+| Reverse RPC Local Tool Bridge | APPROVED SPEC | Secure WebSocket JSON-RPC channel bridging Cloudflare agents to local PC file/shell execution with consent |
 
 ## Known false claims this table corrects
 

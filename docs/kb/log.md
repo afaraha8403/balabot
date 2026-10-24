@@ -8,6 +8,28 @@ timestamp: 2026-09-27T06:25:00Z
 
 # Directory Update Log
 
+## 2026-10-23 (dissect audit & hardened architecture)
+* **APPROVED AND RATIFIED — BalaBot Modernization with Pi Durable (`@earendil-works/pi-durable`), Cloudflare Agents SDK (`PiHarness`), and Native Rust Desktop App.** Completed comprehensive `/dissect` audit across schema, security perimeters, migration risks, and code boundaries. Hardened specifications ratified with Branch B ("Edge-First Unified Architecture with Sandboxed Local PC Replica").
+* **Core Transition Decisions & Dissect Hardening:**
+  1. **Zero Docker:** Retires `Dockerfile`, `docker-compose.yml`, s6-overlay, and container-bound virtual displays. Users install a single native Rust desktop application (Tauri v2 + embedded V8/Node runner, ~120 MB package, ~150 MB RAM active footprint).
+  2. **The "NEVER THE HOST" Desktop Law:** Prohibits host desktop synthetic input injection (`SendInput`/`CGEvent`/`uinput`). Computer automation executes exclusively inside isolated headless Chromium via Chrome DevTools Protocol (CDP) or off-screen virtual framebuffers within strict workspace directory boundaries.
+  3. **Multi-Tenant Durable Object Partitioning:** Durable Objects on Cloudflare are partitioned by composite key `${tenant_id}:${org_id}:${bot_id}`, eliminating cross-tenant leakage.
+  4. **Signed & Hardened Reverse RPC:** Local PC workstation calls are cryptographically signed (Ed25519) and dispatch parameter-validated whitelist actions. Arbitrary unsanitized shell string injection is denied.
+  5. **Schema Reconciliation:**
+     - `pi_sessions`: Added `bot_id`, `purpose`, and context compaction tracking.
+     - `pi_messages`: Persists `thinking` and `tool_calls` to prevent transcript data loss on reload.
+     - `pi_inbox`: Absorbs `queue.db` and `handoffs.db` (`session_id`, `seq`, `claimed_at`, `delivered_at`).
+     - Renamed `decisions` -> `session_decisions` to eliminate collision with `approvals.db`.
+     - Added `pi_orgs`, `pi_groups`, and `group_messages` to replace flat `/opt/data/` JSON files.
+  6. **W4 Secret Perimeter:** Reinstated zero-plaintext invariant across all chat, transcript, and model context channels.
+  7. **Jev Dual-Mode:** Enforces fail-loud contract in cloud mode; supports deterministic heuristic mode (`JEV_MODE=heuristic` via FTS5) when operating offline locally.
+  8. **Wave 0 Test & ETL Harness:** Added Wave 0 to translate the 527 legacy pytest test suite into native integration tests and verify automated data migration (`migrate_legacy_data.ts`) before decommissioning Python code.
+* **Documentation & Specs Landed & Hardened:**
+  - Full dense PRD: `docs/PRD-PI-DURABLE.md`
+  - In-depth Research: `docs/research/pi-durable-cloudflare-agents.md`
+  - KB Migration Plan: `docs/kb/plans/pi-durable-migration.md`
+  - KB Architecture Reference: `docs/kb/reference/pi-durable-architecture.md`
+
 ## 2026-09-26 (shipped)
 * **DONE and verified — the org/secrets/skills build is live at `https://bot.balacode.xyz`.** Final state: **22/22** surface E2E · **17/17** org/secrets/skills harness (`workspace/susan/scripts/verify_orgs_build.py`) · **7/7** secret-request seam (`verify_secret_request_seam.py`). Both org containers up (`grokbot-computer`, `agent-computer-sandbox`).
 * **The full secret loop works end to end:** a bot files a request through its own CLI → it shows pending on the API → the operator saves the value → the response carries only a fingerprint and `granted_to: ["steve"]` → the request auto-resolves → the value arrives via the secret source at the bot's next session start. The value never appears in the request payload, the response, the logs, or the store's plaintext.

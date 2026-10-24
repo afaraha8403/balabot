@@ -1,14 +1,19 @@
 ---
 type: reference
 title: BalaBot — product architecture (principal, governor, persistent agents, sub-agents)
-description: BalaBot is an MIT-licensed, open-source multi-agent system based on Grok Bot, shipped as a single Docker image containing Hermes plus two pre-configured agents (principal and governor). Defines the hierarchy (user, principal, governor, persistent agents, sub-agents), each tier's responsibilities, the memory choice, the Jev signal layer, and how each maps onto Hermes primitives.
+description: BalaBot is an MIT-licensed, open-source multi-agent system based on Grok Bot, originally shipped as a single Docker image containing Hermes plus two pre-configured agents (principal and governor). Defines the hierarchy (user, principal, governor, persistent agents, sub-agents), each tier's responsibilities, the memory choice, the Jev signal layer, and how each maps onto Hermes primitives.
 tags: [balabot, grokbot, architecture, hierarchy, principal, governor, persistent-agents, subagents, holographic, jev, mit]
 timestamp: 2026-09-26T19:10:00Z
-status: building
+status: historical-reference
 repo: https://github.com/afaraha8403/balabot
 ---
 
 # BalaBot
+
+> [!NOTE]
+> **HISTORICAL ARCHITECTURE SPECIFICATION (Hermes/Docker Era):**
+> This document records the foundational product design (four-tier hierarchy, Jev System 1 intelligence, holographic memory, and OKF decision ledger).
+> The containerized Hermes gateway runtime described herein is permanently superseded by the zero-Docker architecture in **`docs/PRD-PI-DURABLE.md`** and **`docs/kb/reference/pi-durable-architecture.md`**.
 
 **BalaBot** (B-A-L-A-Bot) — MIT-licensed, open source, based on Grok Bot.
 **Repo: https://github.com/afaraha8403/balabot** (public).

@@ -1,6 +1,11 @@
 # Agent Computer — /api/computer/{bot}/frame + /action
 
-## Status: REAL (verified live)
+> [!WARNING]
+> **LEGACY CONTAINER SPECIFICATION (SUPERSEDED 2026-10-23):**
+> The containerized Xvfb / cua-driver stack described below is permanently superseded by **`docs/PRD-PI-DURABLE.md`** ("NEVER THE HOST" Desktop Law).
+> Do NOT add cua-driver or Xvfb packages to Dockerfiles; container virtualization is being retired in favor of native Rust quarantined automation (headless Chromium via CDP or off-screen virtual framebuffers).
+
+## Status: LEGACY DOCKER STACK (To be retired)
 
 The endpoints are wired to a real driver: `cua-driver` 0.29.1 talking to one
 Xvfb display per bot inside `balabot-balabot-1`. There is no placeholder image

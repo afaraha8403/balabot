@@ -1,15 +1,20 @@
 ---
 type: reference
 title: BalaBot — product architecture (principal, governor, persistent agents, sub-agents)
-description: BalaBot is an MIT-licensed, open-source multi-agent system based on Grok Bot, shipped as a single Docker image containing Hermes plus two pre-configured agents (principal and governor). Defines the hierarchy (user, principal, governor, persistent agents, sub-agents), each tier's responsibilities, the memory choice, the Jev signal layer, and how each maps onto Hermes primitives.
+description: BalaBot is an MIT-licensed, open-source multi-agent system based on Grok Bot, originally shipped as a single Docker image containing Hermes plus two pre-configured agents (principal and governor). Defines the hierarchy (user, principal, governor, persistent agents, sub-agents), each tier's responsibilities, the memory choice, the Jev signal layer, and how each maps onto Hermes primitives.
 tags: [balabot, grokbot, architecture, hierarchy, principal, governor, persistent-agents, subagents, holographic, jev, mit]
 timestamp: 2026-09-27T06:25:00Z
-status: partial  # code complete and CI-green; live Jev integration unproven
+status: historical-reference
 repo: https://github.com/afaraha8403/balabot
 verified: 2026-09-26 — image builds and provisions both agents; 66 tests pass with PYTHONPATH unset (CI parity); 7 invariant sims + 21 user-usage scenarios green standalone; 8/8 mutations detected; Docker E2E 5/5 incl. a live model round-trip; CI green on 99cae5e4. Live TypeSafe contract tests pass 3/3 with the key in balabot/.env (untracked); a full end-to-end Jev growth-loop run against the live API is still outstanding. Telegram gateway still unexercised (no tokens).
 ---
 
 # BalaBot
+
+> [!NOTE]
+> **HISTORICAL REFERENCE (Docker/Hermes Era):**
+> Retained for reference on hierarchy, OKF decision ledger, and Jev System 1 models.
+> For the authoritative zero-Docker architecture powered by Pi Durable, Cloudflare Agent Pi (`PiHarness`), and a native Rust desktop client/server, see **`docs/kb/reference/pi-durable-architecture.md`** and **`docs/PRD-PI-DURABLE.md`**.
 
 **BalaBot** (B-A-L-A-Bot) — MIT-licensed, open source, based on Grok Bot.
 **Repo: https://github.com/afaraha8403/balabot** (public).

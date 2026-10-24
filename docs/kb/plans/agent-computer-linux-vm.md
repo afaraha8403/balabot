@@ -4,10 +4,16 @@ title: Agent Computer — one Linux VM, per-agent displays and workspaces
 description: Design for the GrokBot agent computer — one shared Linux environment where each agent gets its own X display, its own cursor and its own workspace, with a shared area so they can work on each other's output.
 tags: [grokbot, agent-computer, linux, docker, cua-driver, design]
 timestamp: 2026-09-26T16:05:00Z
-status: active
+status: superseded
 ---
 
 # Agent Computer — one Linux VM, per-agent displays and workspaces
+
+> [!WARNING]
+> **SUPERSEDED SPECIFICATION (2026-10-23):**
+> This Docker/WSL2 container design for Xvfb and cua-driver is permanently superseded by **`docs/PRD-PI-DURABLE.md`** Section 5 & 10 ("NEVER THE HOST" Desktop Law).
+> In the modern architecture, computer automation executes inside isolated headless Chromium via Chrome DevTools Protocol (CDP) or off-screen virtual framebuffers within strict workspace directory boundaries without Docker.
+> Do NOT build or deploy containerized virtual display environments.
 
 Ali's requirement: **one VM for everyone; each agent has its own workspace inside it; they must be
 able to control it together** — each interacting with his own part of the desktop. Linux-based,

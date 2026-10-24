@@ -9,10 +9,13 @@ timestamp: 2026-09-27T02:50:00Z
 
 # BalaBot — remaining-gaps build plan
 
-> **MASTER SPEC (owner ruling, 2026-09-27):** this plan plus its sibling notes in
-> `kb/plans/` are the **master files**. Where the code disagrees, the CODE is
-> changed to match the plan — not the reverse. The one exception is a hard
-> platform constraint (see "Audit correction" below).
+> [!WARNING]
+> **SUPERSEDED SPECIFICATION (2026-10-23):**
+> This build plan was the 2026-09-27 plan for the legacy Hermes/Docker container architecture.
+> On 2026-10-23, Ali Farahat ratified the complete transition to Pi Durable, Cloudflare Agents SDK, and a native Rust desktop app.
+> **Docker is permanently retired.**
+> The active **MASTER SPEC** is **`docs/PRD-PI-DURABLE.md`**, and the active implementation roadmap is **`docs/kb/plans/pi-durable-migration.md`**.
+> This document is preserved for historical audit provenance only; do not build from it.
 
 > **AUDIT CORRECTION (2026-09-27, parent-verified).** The `✅ SHIPPED` marks below
 > were not all true. Four independent auditors re-verified every wave against the

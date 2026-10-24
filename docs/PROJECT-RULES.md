@@ -10,26 +10,28 @@ status: active
 
 # BalaBot — project rules
 
+> [!IMPORTANT]
+> **ARCHITECTURE TRANSITION (2026-10-23):**
+> BalaBot is actively transitioning from the legacy single-container Docker/Hermes stack to **Pi Durable (`@earendil-works/pi-durable`)**, **Cloudflare Agents SDK (`PiHarness`)**, and a **Native Rust Desktop Application (`src-tauri`)**.
+> Docker, `docker-compose.yml`, s6-overlay, and container-bound virtual displays are **scheduled for complete retirement in Wave 7**.
+> The authoritative modern master spec is **`docs/PRD-PI-DURABLE.md`**, and the active sequenced roadmap is **`docs/kb/plans/pi-durable-migration.md`**.
+> Do not introduce new Docker dependencies, container process scripts, or host synthetic input injections.
+
 These extend the Balakit base rules (`AGENTS.md` managed block) with the things this repo has
 actually cost us. On conflict: secrets & safety > correctness > the rules below > Balakit base.
 
-## 1. Which Hermes you are touching
+## 1. Runtime environment (Legacy Hermes vs Modern Pi Durable)
 
-This repo drives the **BalaBot container** (`balabot-balabot-1`, `HERMES_HOME=/opt/data`).
-Your own agent's Hermes home (`~/AppData/Local/hermes` on this machine) is **a different instance** —
-never fix a BalaBot bug by editing your own profile tree. Run
-`bash workspace/susan/scripts/which-hermes.sh` before writing to any Hermes path.
+- **Target Architecture (Active):** Native Rust desktop shell (Tauri v2) hosting Pi Durable locally or connecting to Cloudflare Edge Workers (`PiHarness`). Storage lives in OS user data directories (`~/.balabot/data/`) or Durable Object SQLite (`this.sql`).
+- **Legacy Container (Migration Only):** If testing legacy Python code during the Wave 0 test translation phase, the container is `balabot-balabot-1` with `HERMES_HOME=/opt/data`. Never fix a BalaBot bug by editing your host profile tree.
+- **Zero Docker Law:** No new container virtualization, Dockerfile additions, or WSL2 dependencies are permitted.
 
-- `/opt/balabot/**` is **image-baked** (not a mount). To test a python change without an image
-  rebuild: `docker cp` the file in, then import it in-container.
-- `/opt/data` is the **only** volume: profiles, per-agent memory, ledger, workspace, rules.
+## 2. The KB & PRD is the spec
 
-## 2. The KB is the spec
-
-`docs/kb/` is a verbatim mirror of the product knowledge bundle and is the **master spec**: where the
-code disagrees with a plan, the **code** changes. The only override is a hard platform constraint.
-`docs/STATUS.md` is the **single source of honest status** — never re-assert a wave is shipped
-without a call-site check. `docs/overall_plan.md` indexes the whole bundle.
+`docs/PRD-PI-DURABLE.md` is the **authoritative master spec** for the modern architecture.
+`docs/kb/` is the product knowledge bundle. Where code disagrees with the spec, the **code** changes.
+The only override is a hard platform constraint. `docs/STATUS.md` is the **single source of honest status** —
+never re-assert a wave is shipped without a call-site check. `docs/overall_plan.md` indexes the whole bundle.
 
 ## 3. What "shipped" means
 
@@ -70,13 +72,10 @@ python -m pytest tests -q          # full suite; record the exact counts
 
 ## 7. Deploy reality
 
-- The product UI on `:9119` is served by a **HOST process** reading `ui/dist` from disk —
-  **`npm run build` IS the deploy**; no restart needed. A **container rebuild does NOT update the
-  site**.
-- Persona/plugin behaviour changes need the **gateway restarted** (plugin code loads at process
-  start): `kill <pid>; setsid hermes gateway run --replace` — ask the owner first; it drops every
-  bot briefly.
-- The Cloudflare tunnel is **shared**: add hostnames, never create a second tunnel.
+- The product UI is built via `npm run build` into `ui/dist` — **`npm run build` IS the UI deploy**; it updates the assets consumed by the Tauri v2 WebView and web servers alike.
+- In the legacy container setup, container rebuilds did not update the site. In the modern architecture, the native Rust binary bundles `ui/dist` directly, and Cloudflare Workers serve assets via Cloudflare Pages / Workers static assets.
+- In Cloudflare Remote Mode, the edge agent deploys via `wrangler deploy` to Cloudflare Workers and Durable Objects.
+- Local PC server mode executes natively via the Tauri application without background Docker daemons.
 
 ## 8. Personas are the product's voice
 
@@ -103,13 +102,10 @@ for docs: surface an untruth rather than writing around it.
 
 ## 11. Scope walls
 
-- **Agent Computer**: a take-over reaches exactly the bot that asked — never another agent's display,
-  never `/workspace/shared`, never the host desktop. No intervention screenshots in logs (captchas
-  are where credentials appear).
+- **Agent Computer ("NEVER THE HOST"):** Computer automation executes exclusively inside isolated headless Chromium via Chrome DevTools Protocol (CDP) or off-screen virtual framebuffers within explicit workspace directory boundaries. Synthetic mouse or keyboard injection (`SendInput`, `CGEvent`, `uinput`) into the host desktop is **strictly prohibited**. Intervention take-overs reach only the specific quarantined display; credentials entered during intervention are never logged.
 - **Orgs**: cross-org grants are explicit, named, revocable; nothing crosses orgs implicitly.
-- The **Hermes dashboard is never exposed**; the product surface is the only public app.
-- **Consent before creation**: nothing is created without explicit human approval, and a bot never
-  approves its own proposal.
+- **W4 Secret Intake:** Raw credentials never enter chat transcripts, model prompts, or thinking tokens. Ingestion occurs via direct client POST into local OS vaults or encrypted Cloudflare secrets.
+- **Consent before creation**: nothing is created without explicit human approval, and a bot never approves its own proposal.
 
 ## 12. Git
 

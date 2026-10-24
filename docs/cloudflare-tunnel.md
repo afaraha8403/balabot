@@ -1,6 +1,11 @@
 # Cloudflare tunnel
 
-BalaBot ships with a **Cloudflare tunnel baked into the image**. It is
+> [!NOTE]
+> **TRANSITION NOTE (2026-10-23):**
+> The containerized `cloudflared` daemon described below is being replaced under the **`docs/PRD-PI-DURABLE.md`** architecture.
+> In Cloudflare Remote Mode, agents run serverless on Cloudflare Workers & Durable Objects (`PiHarness`), connecting to the local PC client via native WebSocket Reverse RPC without requiring an image-baked cloudflared service.
+
+BalaBot previously shipped with a **Cloudflare tunnel baked into the image**. It is
 **pre-wired and dormant**: the service is declared, supervised, and ready on
 every install, and it does **nothing** until you supply a token. No port is
 published, nothing is exposed, and no process lingers.

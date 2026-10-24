@@ -32,6 +32,6 @@ Hold a hotkey, speak, it types in any Windows app. Offline, your keys, or Kalam 
 
 # See also
 
-Working drafts (not ratified): [[GrokBot/scratchpad/kalam-launch-copy-drafts]] and [[GrokBot/scratchpad/kalam-launch-phases]].
+Working drafts (not ratified): Kalam launch copy drafts and launch phases (in scratchpad).
 
 [^site]: kalamvoice.com
