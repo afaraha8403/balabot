@@ -7,6 +7,7 @@ export type ContextMenuPosition = { x: number; y: number };
 export type ChatMenuTarget = Pick<Bot, 'id' | 'name'> & {
   pinned?: boolean;
   unread?: boolean;
+  isHidden?: boolean;
   sectionId?: string | null;
   color?: string;
   title?: string;
@@ -329,7 +330,7 @@ export function BotContextMenu({
             <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
             <path d="M10 12h4" />
           </svg>
-          <span>Archive</span>
+          <span>{bot.isHidden ? 'Unhide' : 'Archive'}</span>
         </button>
       ) : null}
 

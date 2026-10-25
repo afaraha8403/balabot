@@ -33,7 +33,7 @@ import {BotPanelDialog} from './BotPanelDialog';
 import {AgentComputerDialog} from './AgentComputerDialog';
 import {ComputerMaintenanceActions} from './ComputerMaintenanceActions';
 import {SecretRequestCard} from './SecretRequestCard';
-import {OpenUIRenderer, extractOpenUI} from './openui/OpenUIRenderer';
+import {OpenUIRenderer, extractOpenUI, findSupersededOpenUIMessageIndices} from './openui/OpenUIRenderer';
 import {SkillLibraryDialog} from './SkillLibraryDialog';
 import {PluginsOverlay} from './PluginsOverlay';
 import {McpServersOverlay} from './McpServersOverlay';
@@ -82,6 +82,7 @@ import {MessageHoverMetadata, MessageHoverActions} from './MessageHoverMetadata'
 import {WindowChrome} from './WindowChrome';
 import {ShellSkeleton} from './ShellSkeleton';
 import {useRoute, navigateTo, parseRoute} from './router';
+import {Popover} from '@astryxdesign/core/Popover';
 import {
   api,
   streamChat,
@@ -91,6 +92,8 @@ import {
   getSubAgents,
   createServerSession,
   deleteServerSession,
+  clearSessionMessages,
+  patchServerSession,
   getGroups,
   getSkillLibrary,
   getComputerFrame,
@@ -99,6 +102,7 @@ import {
   approveBotProposal,
   createApprovedBot,
   getActiveIntervention,
+  pauseIntervention,
   getServerMessages,
   subscribeSessionEvents,
   type Bot,
@@ -129,6 +133,7 @@ import {
   IconExpandPanel,
   IconConversations,
   IconCreateBot,
+  IconGroupChat,
   IconSkills,
   IconWarning,
   IconGear,
@@ -162,6 +167,33 @@ const PROMPTS = [
   'Summarize where things stand',
   'What needs my decision?',
 ];
+
+const REACTIONS_STORAGE_KEY = 'balabot:message-reactions:v1';
+function loadPersistedReactions(): Record<string, Record<string, number>> {
+  try {
+    const raw = localStorage.getItem(REACTIONS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, Record<string, number>>) : {};
+  } catch {
+    return {};
+  }
+}
+function savePersistedReactions(data: Record<string, Record<string, number>>) {
+  try {
+    localStorage.setItem(REACTIONS_STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // ignore
+  }
+}
+function hydrateMessageReactions(sessionId: string, messages: ChatMessage[]): ChatMessage[] {
+  const map = loadPersistedReactions();
+  return messages.map((m, idx) => {
+    const key = m.id ? `${sessionId}:${m.id}` : `${sessionId}:${idx}`;
+    if (map[key]) {
+      return {...m, reactions: map[key]};
+    }
+    return m;
+  });
+}
 
 /**
  * The agent's reasoning ("thinking") stream. Never renders as an ordinary
@@ -292,11 +324,29 @@ export default function App() {
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillEntry[]>([]);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showNewMenu, setShowNewMenu] = useState(false);
+  const [isEditingSessionName, setIsEditingSessionName] = useState(false);
+  const [sessionNameDraft, setSessionNameDraft] = useState('');
   const [interventions, setInterventions] = useState<InterventionPayload[]>([]);
   const [activeIntervention, setActiveIntervention] = useState<InterventionPayload | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<{sender: string; text: string} | null>(null);
   const [draftCards, setDraftCards] = useState<DraftCardData[]>([]);
   const [voiceMemos, setVoiceMemos] = useState<VoiceMemoData[]>([]);
+
+  // Fetch skill library on boot
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await getSkillLibrary();
+        if (res && res.available !== false) {
+          const list = res.skills ?? [...(res.brought ?? []), ...(res.learned ?? [])];
+          setSkills(list);
+        }
+      } catch {
+        // non-fatal
+      }
+    })();
+  }, []);
 
   // Theme mode: defaults to dark, persists in localStorage.
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
@@ -395,8 +445,6 @@ export default function App() {
       } else if (currentRoute.kind === 'app' && currentRoute.botId) {
         if (sorted.some(b => b.id === currentRoute.botId)) {
           setActiveBotId(currentRoute.botId);
-        } else if (sorted.length > 0) {
-          setActiveBotId(sorted[0].id);
         }
       } else if (currentRoute.kind === 'group' && currentRoute.groupId) {
         setActiveGroupId(currentRoute.groupId);
@@ -433,7 +481,10 @@ export default function App() {
         });
         if (propRes.proposal?.id) {
           await approveBotProposal(propRes.proposal.id).catch(() => null);
-          await createApprovedBot(propRes.proposal.id).catch(() => null);
+          const created = await createApprovedBot(propRes.proposal.id).catch(() => null);
+          if (created?.bot?.id) {
+            setActiveBotId(created.bot.id);
+          }
         }
         await reloadBots();
         setBanner(`Hiring approved — "${role}" (${name}) registered in the roster.`);
@@ -444,34 +495,6 @@ export default function App() {
     } else if (actionType === 'dismiss_hire') {
       setBanner('Hiring proposal dismissed.');
     }
-  }, [reloadBots]);
-
-  useEffect(() => {
-    const onHire = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { name?: string; role?: string; description?: string } | undefined;
-      if (detail) {
-        void (async () => {
-          try {
-            const propRes = await createBotProposal({
-              name: detail.name || 'marketing-seo-expert',
-              role: detail.role || 'Marketing & SEO Expert',
-              proposed_by: 'user',
-            });
-            if (propRes.proposal?.id) {
-              await approveBotProposal(propRes.proposal.id).catch(() => null);
-              await createApprovedBot(propRes.proposal.id).catch(() => null);
-            }
-            await reloadBots();
-            setBanner(`Agent "${detail.role}" registered in the roster.`);
-          } catch (err) {
-            await reloadBots().catch(() => {});
-            setBanner(`Agent proposal saved: ${(err as Error).message}`);
-          }
-        })();
-      }
-    };
-    window.addEventListener('balabot:openui-hire-agent', onHire);
-    return () => window.removeEventListener('balabot:openui-hire-agent', onHire);
   }, [reloadBots]);
 
   // Synchronize route changes from History navigation (popstate/forward/back)
@@ -499,6 +522,10 @@ export default function App() {
       }
     }
   }, [route, bots, activeBotId, activeGroupId, screen]);
+
+  const isBotNotFound = useMemo(() => {
+    return route.kind === 'app' && Boolean(route.botId) && bots.length > 0 && !bots.some(b => b.id === route.botId);
+  }, [route, bots]);
 
   // After an edit, refresh the roster
   const onBotEdited = useCallback(
@@ -667,13 +694,15 @@ export default function App() {
         e.preventDefault();
         setShowSkills(true);
       }
-      // Cmd/Ctrl+1..9: Jump to sidebar bot
+      // Cmd/Ctrl+1..9: Jump to sidebar bot (pinned bots first, fall back to roster order)
       else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9') {
         const idx = parseInt(e.key, 10) - 1;
         const visibleBots = bots.filter(b => !hiddenBotIds.includes(b.id));
-        if (visibleBots[idx]) {
+        const pinnedBots = visibleBots.filter(b => pinnedBotIds.includes(b.id));
+        const targetList = pinnedBots.length > 0 ? pinnedBots : visibleBots;
+        if (targetList[idx]) {
           e.preventDefault();
-          const targetId = visibleBots[idx].id;
+          const targetId = targetList[idx].id;
           setActiveBotId(targetId);
           setActiveGroupId(null);
           setActiveSessionId(null);
@@ -771,6 +800,10 @@ export default function App() {
     );
   }, [sessions, activeBotId, activeSessionId]);
 
+  const supersededOpenUIIndices = useMemo(() => {
+    return findSupersededOpenUIMessageIndices(activeSession?.messages ?? []);
+  }, [activeSession?.messages]);
+
   const activeMascotState = useMemo(() => {
     return resolveMascotState({
       activeIntervention,
@@ -833,7 +866,7 @@ export default function App() {
         setSessions(prev =>
           prev.map(s => {
             if (s.id !== sessId) return s;
-            const merged = mergeServerMessages(s.messages, res.messages);
+            const merged = hydrateMessageReactions(sessId, mergeServerMessages(s.messages, res.messages));
             return {...s, messages: merged};
           }),
         );
@@ -846,7 +879,7 @@ export default function App() {
       setSessions(prev =>
         prev.map(s => {
           if (s.id !== sessId) return s;
-          const merged = mergeServerMessages(s.messages, [serverMsg]);
+          const merged = hydrateMessageReactions(sessId, mergeServerMessages(s.messages, [serverMsg]));
           return {...s, messages: merged};
         }),
       );
@@ -877,15 +910,32 @@ export default function App() {
     setIsFinished(false);
   };
 
+  const handleRenameActiveSession = async (newTitle: string) => {
+    if (!activeSession || !newTitle.trim()) {
+      setIsEditingSessionName(false);
+      return;
+    }
+    const trimmed = newTitle.trim();
+    setIsEditingSessionName(false);
+    patchSession(activeSession.id, s => ({...s, title: trimmed}));
+    await patchServerSession(activeSession.id, trimmed).catch(() => {});
+  };
+
   const handleToggleReaction = (msgIndex: number, emoji: string) => {
     if (!activeSession) return;
+    const target = activeSession.messages[msgIndex];
+    if (!target) return;
+    const msgKey = target.id ? `${activeSession.id}:${target.id}` : `${activeSession.id}:${msgIndex}`;
+    const allReactions = loadPersistedReactions();
+    const current = {...(allReactions[msgKey] || target.reactions || {})};
+    current[emoji] = (current[emoji] || 0) + 1;
+    allReactions[msgKey] = current;
+    savePersistedReactions(allReactions);
+
     patchSession(activeSession.id, s => {
       const msgs = [...s.messages];
-      const target = msgs[msgIndex];
-      if (!target) return s;
-      const current = {...(target.reactions || {})};
-      current[emoji] = (current[emoji] || 0) + 1;
-      msgs[msgIndex] = {...target, reactions: current};
+      if (!msgs[msgIndex]) return s;
+      msgs[msgIndex] = {...msgs[msgIndex], reactions: current};
       return {...s, messages: msgs};
     });
   };
@@ -1007,6 +1057,7 @@ export default function App() {
           setInterventions(prev => [...prev, i]);
           setActiveIntervention(i);
         },
+        activeBot.model,
       );
       const parsedDrafts = parseDraftsFromContent(finalText);
       const finalMsg: ChatMessage = {
@@ -1123,16 +1174,48 @@ export default function App() {
           >
             <WindowChrome />
             <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-              <IconButton
-                label="New bot or group"
-                size="sm"
-                variant="ghost"
-                icon={<IconCreateBot />}
-                onClick={() => {
-                  setRightPanelMode('create');
-                  setHideRightPanel(false);
-                }}
-              />
+              <Popover
+                isOpen={showNewMenu}
+                onOpenChange={setShowNewMenu}
+                placement="below"
+                alignment="end"
+                content={
+                  <div style={{display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px', minWidth: '160px'}}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowNewMenu(false);
+                        setRightPanelMode('create');
+                        setHideRightPanel(false);
+                      }}
+                      style={{display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', width: '100%', textAlign: 'left', background: 'none', border: 'none', borderRadius: '4px', cursor: 'pointer', color: 'var(--foreground)', fontSize: '13px'}}
+                    >
+                      <IconCreateBot size="sm" />
+                      New Bot
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowNewMenu(false);
+                        setActiveGroupId(null);
+                        setShowGroups(true);
+                      }}
+                      style={{display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', width: '100%', textAlign: 'left', background: 'none', border: 'none', borderRadius: '4px', cursor: 'pointer', color: 'var(--foreground)', fontSize: '13px'}}
+                    >
+                      <IconGroupChat size="sm" />
+                      New Group Chat
+                    </button>
+                  </div>
+                }
+              >
+                <IconButton
+                  label="New bot or group"
+                  size="sm"
+                  variant="ghost"
+                  icon={<IconCreateBot />}
+                  onClick={() => setShowNewMenu(prev => !prev)}
+                />
+              </Popover>
               <IconButton
                 label="Minimize bots"
                 size="sm"
@@ -1157,7 +1240,9 @@ export default function App() {
                 void (async () => {
                   let created: Session | null = null;
                   try {
-                    const s = newSession(activeBotId, 'New chat');
+                    const botSessionCount = sessions.filter(s => s.botId === activeBotId).length;
+                    const sessionTitle = `Chat ${botSessionCount + 1}`;
+                    const s = newSession(activeBotId, sessionTitle);
                     const row = await createServerSession(
                       activeBotId,
                       s.title,
@@ -1410,60 +1495,130 @@ export default function App() {
               </button>
 
               {/* Bot Identity & Context Panel Trigger */}
-              {screen === 'chat' && activeBot ? (
-                <button
-                  type="button"
-                  data-testid="bot-settings-trigger"
-                  className="app-no-drag"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    border: 'none',
-                    background: 'transparent',
-                    cursor: 'pointer',
-                    padding: '2px 6px',
-                    borderRadius: 'var(--radius-md)',
-                    textAlign: 'left',
-                  }}
-                  onClick={() => {
-                    setRightPanelMode('settings');
-                    setHideRightPanel(false);
-                  }}
-                >
-                  <BotAvatar
-                    identity={activeBot.id}
-                    name={activeBot.name}
-                    color={activeBot.color}
-                    size={30}
-                    state={activeMascotState}
+              {isBotNotFound ? (
+                <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+                  <span style={{fontWeight: 600, fontSize: '15px'}}>Bot not found</span>
+                  <Button
+                    label="Back to Fleet"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      const principal = bots.find(b => b.id === 'principal') ?? bots[0];
+                      if (principal) {
+                        setActiveBotId(principal.id);
+                        navigateTo(`/app/${encodeURIComponent(principal.id)}`);
+                      } else {
+                        navigateTo('/app');
+                      }
+                    }}
                   />
-                  <div style={{display: 'flex', flexDirection: 'column', minWidth: 0}}>
-                    <span style={{fontWeight: 600, fontSize: '14px', color: 'var(--foreground)'}}>
-                      {activeBot.name}
-                    </span>
-                    <span style={{fontSize: '11px', color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
-                      {activeBot.title || activeBot.description?.slice(0, 45) || 'Active'}
-                    </span>
-                  </div>
-                  <StatusDot
-                    variant={
-                      activeIntervention?.state === 'pending'
-                        ? 'warning'
-                        : isStreaming
+                </div>
+              ) : screen === 'chat' && activeBot ? (
+                <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+                  <button
+                    type="button"
+                    data-testid="bot-settings-trigger"
+                    className="app-no-drag"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      padding: '2px 6px',
+                      borderRadius: 'var(--radius-md)',
+                      textAlign: 'left',
+                    }}
+                    onClick={() => {
+                      setRightPanelMode('settings');
+                      setHideRightPanel(false);
+                    }}
+                  >
+                    <BotAvatar
+                      identity={activeBot.id}
+                      name={activeBot.name}
+                      color={activeBot.color}
+                      size={30}
+                      state={activeMascotState}
+                    />
+                    <div style={{display: 'flex', flexDirection: 'column', minWidth: 0}}>
+                      <span style={{fontWeight: 600, fontSize: '14px', color: 'var(--foreground)'}}>
+                        {activeBot.name}
+                      </span>
+                      <span style={{fontSize: '11px', color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                        {activeBot.title || activeBot.description?.slice(0, 45) || 'Active'}
+                      </span>
+                    </div>
+                    <StatusDot
+                      variant={
+                        activeIntervention?.state === 'pending'
                           ? 'warning'
-                          : 'success'
-                    }
-                    label={
-                      activeIntervention?.state === 'pending'
-                        ? 'Paused'
-                        : isStreaming
-                          ? 'Working'
-                          : 'Idle'
-                    }
-                    isPulsing={isStreaming || activeIntervention?.state === 'pending'}
-                  />
-                </button>
+                          : isStreaming
+                            ? 'warning'
+                            : 'success'
+                      }
+                      label={
+                        activeIntervention?.state === 'pending'
+                          ? 'Paused'
+                          : isStreaming
+                            ? 'Working'
+                            : 'Idle'
+                      }
+                      isPulsing={isStreaming || activeIntervention?.state === 'pending'}
+                    />
+                  </button>
+
+                  {activeSession ? (
+                    <div className="app-no-drag" style={{display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '4px', borderLeft: '1px solid var(--border)', paddingLeft: '8px'}}>
+                      {isEditingSessionName ? (
+                        <input
+                          type="text"
+                          value={sessionNameDraft}
+                          onChange={e => setSessionNameDraft(e.target.value)}
+                          onBlur={() => void handleRenameActiveSession(sessionNameDraft)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') void handleRenameActiveSession(sessionNameDraft);
+                            else if (e.key === 'Escape') setIsEditingSessionName(false);
+                          }}
+                          autoFocus
+                          style={{
+                            fontSize: '12px',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border)',
+                            backgroundColor: 'var(--background)',
+                            color: 'var(--foreground)',
+                          }}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSessionNameDraft(activeSession.title);
+                            setIsEditingSessionName(true);
+                          }}
+                          title="Click to rename conversation"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            color: 'var(--muted-foreground)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '2px 4px',
+                            borderRadius: '4px',
+                          }}
+                        >
+                          <span>{activeSession.title}</span>
+                          <span style={{fontSize: '10px', opacity: 0.7}}>✎</span>
+                        </button>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               ) : (
                 <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
                   <span style={{fontWeight: 600, fontSize: '15px'}}>
@@ -1486,12 +1641,17 @@ export default function App() {
 
             {/* Right Header Controls */}
             <div className="app-no-drag" style={{display: 'flex', alignItems: 'center', gap: '6px'}}>
-              {screen === 'chat' && activeBot ? (
+              {screen === 'chat' && activeBot && (isStreaming || activeIntervention) ? (
                 <HoldEverythingControl
                   botId={activeBot.id}
                   botName={activeBot.name}
                   isStreaming={isStreaming}
-                  onStopStreaming={stop}
+                  onStopStreaming={async () => {
+                    if (activeBotId) {
+                      await pauseIntervention(activeBotId).catch(() => {});
+                    }
+                    stop();
+                  }}
                   activeIntervention={activeIntervention}
                   onInterventionChange={setActiveIntervention}
                   onNotify={setBanner}
@@ -1577,7 +1737,29 @@ export default function App() {
 
           {/* Center Transcript / Secondary Screen Content */}
           <div style={{flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
-            {screen === 'chat' ? (
+            {isBotNotFound ? (
+              <div style={{flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '32px', textAlign: 'center'}}>
+                <div style={{fontSize: '32px'}}>🤖</div>
+                <h2 style={{margin: 0, fontSize: '18px', fontWeight: 600, color: 'var(--foreground)'}}>Bot not found</h2>
+                <p style={{margin: 0, fontSize: '14px', color: 'var(--muted-foreground)', maxWidth: '360px'}}>
+                  The bot &ldquo;{route.kind === 'app' ? route.botId : ''}&rdquo; does not exist or has been removed.
+                </p>
+                <Button
+                  label="Return to Principal"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    const principal = bots.find(b => b.id === 'principal') ?? bots[0];
+                    if (principal) {
+                      setActiveBotId(principal.id);
+                      navigateTo(`/app/${encodeURIComponent(principal.id)}`);
+                    } else {
+                      navigateTo('/app');
+                    }
+                  }}
+                />
+              </div>
+            ) : screen === 'chat' ? (
               activeBot ? (
                 <div style={{flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
                   <Transcript
@@ -1798,7 +1980,11 @@ export default function App() {
                                     ) : null}
                                     <div data-quote-message-id={messageId}>
                                       {extractOpenUI(m.content).hasOpenUI ? (
-                                        <OpenUIRenderer content={m.content} onAction={handleOpenUIAction} />
+                                        <OpenUIRenderer
+                                          content={m.content}
+                                          onAction={handleOpenUIAction}
+                                          superseded={supersededOpenUIIndices.has(i)}
+                                        />
                                       ) : (
                                         <ChatMarkdown>{m.content}</ChatMarkdown>
                                       )}
@@ -2076,6 +2262,7 @@ export default function App() {
                   onInterventionChange={setActiveIntervention}
                   onNotify={setBanner}
                   onOpenComputer={() => setShowComputer(true)}
+                  onOpenSkills={() => setShowSkills(true)}
                   onStartVoiceChat={() => {
                     setShowCallView(true);
                   }}
@@ -2322,6 +2509,10 @@ export default function App() {
               if (activeBotId === clearTarget.id) {
                 stop();
               }
+              const targetSession = sessions.find(s => s.botId === clearTarget.id);
+              if (targetSession) {
+                await clearSessionMessages(targetSession.id).catch(() => {});
+              }
               setSessions(prev =>
                 prev.map(s => (s.botId === clearTarget.id ? {...s, messages: []} : s))
               );
@@ -2407,8 +2598,8 @@ export default function App() {
             } else if (action === 'new-group') {
               setActiveGroupId(null);
               setShowGroups(true);
-            } else if (action === 'open-skills') setShowSkills(true);
-            else if (action === 'open-computer') setShowComputer(true);
+            } else if (action === 'open-skills' || action === 'skills') setShowSkills(true);
+            else if (action === 'open-computer' || action === 'computer') setShowComputer(true);
             else if (action === 'nav-agents' || action === 'nav-fleet' || action === 'agents' || action === 'fleet') {
               setScreen('agents');
               navigateTo('/app/fleet');

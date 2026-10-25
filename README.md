@@ -1,9 +1,8 @@
 # BalaBot
 
-**A multi-agent system in a single container.** MIT, open source, based on [Grok Bot](https://github.com/xai-org/grok).
+**Autonomous multi-agent system powered by Pi Durable, Cloudflare Agents, and Native Rust.** MIT, open source. Zero Docker dependencies.
 
-BalaBot ships with Hermes inside the image and two agents ready on first boot — a **principal** that runs
-the system, and a **governor** that keeps the shared decision ledger. You talk to it; it grows.
+BalaBot operates with two agents ready on first boot — a **principal** that runs the system, and a **governor** that keeps the shared decision ledger. You talk to it; it grows.
 
 ```
 USER              — most privilege. Owns the machine.
@@ -13,51 +12,50 @@ USER              — most privilege. Owns the machine.
                     └── SUB-AGENTS    — temporary, one job, supervised by their parent
 ```
 
+## Architecture: Zero Docker Law
+
+BalaBot operates natively without Docker, containers, or WSL2 virtualization:
+1. **Local Autonomous Mode (PC as Server & Client):** Native Rust desktop app (Tauri v2) hosting `@earendil-works/pi-durable` locally with zero-latency SQLite persistence in standard OS application directories (`~/.balabot/data/`).
+2. **Cloudflare Remote Mode (Cloudflare Edge Server):** Multi-tenant agent compute running on Cloudflare Workers and Durable Objects (`PiHarness`) with co-located SQLite (`this.sql`). Local PC tasks are bridged via a cryptographically signed Reverse RPC tool bridge.
+3. **The "NEVER THE HOST" Desktop Law:** Computer automation operates exclusively inside isolated headless Chromium via Chrome DevTools Protocol (CDP) or off-screen virtual framebuffers. Direct OS input injection into the user's host desktop session is strictly prohibited.
+
 ## ⚠️ Read this first: Jev is a hard dependency
 
-BalaBot requires **Jev**, the System One model from **TypeSafe AI** — *not* Typeface AI. Jev returns typed
-decisions with calibrated probabilities, and BalaBot uses it as infrastructure: signal classification,
-memory relevance, the decision gate into the ledger.
+BalaBot requires **Jev**, the System One model from **TypeSafe AI** — *not* Typeface AI. Jev returns typed decisions with calibrated probabilities, and BalaBot uses it as infrastructure: signal classification, memory relevance, and the decision gate into the ledger.
 
-**This is a hard dependency, by design. There is no fallback provider.** An MIT repo with a mandatory
-third-party hosted API is a real dependency, not a footnote — so it is stated on line one rather than
-discovered at first run.
+- **Cloud Mode (`JEV_MODE=cloud`):** Requires `TYPESAFE_API_KEY`. Fails loudly if key is missing or invalid.
+- **Offline Mode (`JEV_MODE=heuristic`):** Offline deterministic heuristic fallback for airgapped local execution.
 
+## Running It
+
+### 1. Native Desktop Shell (Tauri v2)
 ```bash
-git clone https://github.com/afaraha8403/balabot
-cd balabot
-cp .env.example .env      # add TYPESAFE_API_KEY and OPENROUTER_API_KEY
-docker compose up --build
+npm run build     # compiles React UI assets into ui/dist
+npm run tauri dev # launches native desktop application
 ```
 
-The container **validates the Jev key at startup and fails loudly** if it is missing or rejected. It will
-not degrade quietly into different behaviour — no masking an error with a guess.
-
-## Running it
-
+### 2. Local Headless Server
 ```bash
-docker compose up --build        # attaches a TTY -> you land in the principal agent
-docker compose run --rm balabot  # one-shot interactive session
+npm run server    # starts Pi Durable server on 127.0.0.1:9119
 ```
 
-The inherited default command is Hermes' **interactive CLI**, so it needs a terminal — that is why the
-Compose service sets `tty`/`stdin_open`. Run it detached with no TTY and it will provision correctly and
-then exit cleanly (that is Hermes' own behaviour, not a failure).
-
-**For unattended operation**, configure a messaging platform and run the gateway instead:
-
+### 3. Cloudflare Edge Worker
 ```bash
-# 1. issue a bot token per persona (never share one — two pollers race)
-# 2. set telegram.bot_token in the persona's config, then:
-docker compose run --rm balabot gateway run
+cd worker
+npx wrangler deploy
 ```
 
-## Verified
+### 4. Legacy Data Migration
+```bash
+npm run migrate   # extracts /opt/data legacy stores into unified SQLite schema
+```
 
-Built, provisioned and driven end to end on Docker 29.2.1 (Linux containers):
+## Verification
 
-- ✅ image builds — `FROM nousresearch/hermes-agent:v2026.9.24`
-- ✅ **no Jev key → exits 1** with a loud message, no silent degradation
+Run the full automated test suite:
+```bash
+npm test          # runs UI vitest suite + core Pi Durable integration suite
+```
 - ✅ first boot provisions `principal` + `governor`: profile config, `SOUL.md`, per-persona workspace
   with its rules file, and skills installed under `skills/balabot/`
 - ✅ the principal answers a real prompt through the provisioned profile

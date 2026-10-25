@@ -30,6 +30,7 @@ type Props = {
 export function BotRowMenu({
   bot,
   isPinned,
+  isHidden,
   isUnread,
   sections = [],
   onTogglePin,
@@ -88,6 +89,7 @@ export function BotRowMenu({
             ...bot,
             pinned: isPinned,
             unread: isUnread,
+            isHidden,
           }}
           position={pos}
           sections={sections}

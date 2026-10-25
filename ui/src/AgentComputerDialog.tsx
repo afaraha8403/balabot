@@ -76,7 +76,8 @@ export function AgentComputerDialog({bot, onClose}: Props) {
 
   const noDriver = frame?.state === 'no-driver';
   const isError = frame?.state === 'error';
-  const inputsEnabled = frame?.state === 'ready' && !busy && !isResetting;
+  const hasLiveScreen = Boolean(frame?.b64);
+  const inputsEnabled = frame?.state === 'ready' && hasLiveScreen && !busy && !isResetting;
 
   // Poll the frame endpoint only while open and on screen tab
   useEffect(() => {
@@ -172,6 +173,11 @@ export function AgentComputerDialog({bot, onClose}: Props) {
 
   const handleStartTeaching = () => {
     if (!teachGoal.trim()) return;
+    if (!hasLiveScreen) {
+      setError('Demonstration recording is unavailable: headless browser sandbox has no active capture stream.');
+      setIsTeachingOpen(false);
+      return;
+    }
     setIsTeachingOpen(false);
     setIsRecording(true);
     setRecordingSecondsRemaining(600);
@@ -296,7 +302,20 @@ export function AgentComputerDialog({bot, onClose}: Props) {
               >
                 You have control
               </span>
-            ) : null}
+            ) : (
+              <span
+                style={{
+                  borderRadius: '9999px',
+                  backgroundColor: 'var(--muted)',
+                  padding: '3px 11px',
+                  fontSize: '12px',
+                  color: 'var(--muted-foreground)',
+                  fontWeight: 500,
+                }}
+              >
+                Headless Browser Sandbox / Off-screen Framebuffer
+              </span>
+            )}
           </div>
 
           <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
@@ -343,6 +362,10 @@ export function AgentComputerDialog({bot, onClose}: Props) {
                 botId={bot.id}
                 busy={busy}
                 onStartRecording={goal => {
+                  if (!hasLiveScreen) {
+                    setError('Demonstration recording is unavailable: headless browser sandbox has no active capture stream.');
+                    return;
+                  }
                   setTeachGoal(goal);
                   setIsRecording(true);
                   setRecordingSecondsRemaining(600);

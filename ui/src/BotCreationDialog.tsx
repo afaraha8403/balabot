@@ -29,8 +29,9 @@ type Props = {
   onFleetChanged?: () => void;
 };
 
-const STATUS_VARIANT: Record<BotProposal['status'], 'neutral' | 'warning' | 'error' | 'success'> = {
+const STATUS_VARIANT: Record<string, 'neutral' | 'warning' | 'error' | 'success'> = {
   proposed: 'warning',
+  pending: 'warning',
   approved: 'success',
   rejected: 'error',
   registered: 'success',
@@ -104,8 +105,8 @@ export function BotCreationDialog({bots, onClose, onFleetChanged}: Props) {
     }
   };
 
-  const pending = proposals.filter(p => p.status === 'proposed');
-  const decided = proposals.filter(p => p.status !== 'proposed');
+  const pending = proposals.filter(p => p.status === 'proposed' || (p.status as string) === 'pending');
+  const decided = proposals.filter(p => p.status !== 'proposed' && (p.status as string) !== 'pending');
 
   return (
     <Dialog

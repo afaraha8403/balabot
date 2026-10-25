@@ -92,6 +92,10 @@ export function MessagingSettingsOverlay({embedded = true}: Props) {
         <p style={{margin: 0, fontSize: '13px', color: 'var(--muted-foreground)'}}>
           Control when and how quickly your bots send messages. Quiet hours apply to non-urgent notifications.
         </p>
+        <div style={{marginTop: '8px', fontSize: '12px', color: 'var(--muted-foreground)', display: 'flex', alignItems: 'center', gap: '6px'}}>
+          <span style={{display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', backgroundColor: 'var(--success, #22c55e)'}} />
+          <span>Local Engine: Delivery preferences stored locally. Background dispatch uses local queue schedule.</span>
+        </div>
       </div>
 
       {statusNotice ? (

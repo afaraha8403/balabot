@@ -12,7 +12,7 @@ export const MEMORY_PROVIDERS: MemoryProviderOption[] = [
   {
     id: 'local',
     name: 'Local Holographic Memory',
-    description: 'Embedded SQLite vector and graph index under /opt/data/memory.',
+    description: 'Embedded SQLite vector and graph index under ~/.balabot/data/memory.',
     icon: HardDrive,
   },
   {
@@ -116,6 +116,10 @@ export function MemorySettingsOverlay({embedded = true}: Props) {
         <p style={{margin: 0, fontSize: '13px', color: 'var(--muted-foreground)'}}>
           Configure vector embeddings, document chunking, and memory sharing scopes across the fleet.
         </p>
+        <div style={{marginTop: '8px', fontSize: '12px', color: 'var(--muted-foreground)', display: 'flex', alignItems: 'center', gap: '6px'}}>
+          <span style={{display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', backgroundColor: 'var(--success, #22c55e)'}} />
+          <span>Local Engine: Native embedded SQLite vector store active (~/.balabot/data/memory/)</span>
+        </div>
       </div>
 
       {statusNotice ? (

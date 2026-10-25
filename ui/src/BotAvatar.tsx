@@ -145,6 +145,10 @@ export const MASCOT_STATE_LABELS: Record<MascotState, string> = {
   error: 'error',
   finished: 'finished',
   sleeping: 'sleeping',
+  listening: 'listening',
+  weaving: 'weaving',
+  breathing: 'breathing',
+  shaping: 'shaping',
 };
 
 function renderMascotGlyph(state: MascotState, size: number) {

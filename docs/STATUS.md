@@ -54,10 +54,11 @@ Verified 2026-09-27 against the repo (call-site greps excluding `tests/` and the
 | Teach a task demonstration affordance | SHIPPED | `ui/src/AgentComputerDialog.tsx` Teach a Task affordance with honest daemon recording gap disclosure |
 | Mobile share sheet intake | SHIPPED | `ui/public/manifest.webmanifest` `share_target` registration with query param ingestion (`title`, `text`, `url`) into `ui/src/App.tsx` and composer |
 | OpenUI Generative UI (interactive cards) | SHIPPED | Bounded component registry (`HireAgentCard`, `Card`, `CardHeader`, `FormField`, `ConfirmButtons`) in `ui/src/openui/library.tsx`; runtime `@openuidev/react-lang@0.3.0` + Zod 4; in-chat renderer `OpenUIRenderer.tsx` wired into `ui/src/App.tsx:1335/1416`; consent confirmation flow for bot hiring |
-| Pi Durable Harness Engine (Zero Docker) | APPROVED SPEC | Master spec in `docs/PRD-PI-DURABLE.md`; replaces Hermes gateway with `@earendil-works/pi-durable` and transactional SQLite persistence |
-| Cloudflare Agent Pi (`PiHarness`) Edge Host | APPROVED SPEC | Research in `docs/research/pi-durable-cloudflare-agents.md`; Durable Objects + co-located SQLite actor hosting |
-| Rust Native Desktop App (Client / Local Server) | APPROVED SPEC | Tauri v2 desktop app (~120MB package with embedded runtime) supporting Local PC Autonomous Mode and Cloudflare Edge Mode |
-| Reverse RPC Local Tool Bridge | APPROVED SPEC | Secure WebSocket JSON-RPC channel bridging Cloudflare agents to local PC file/shell execution with consent |
+| Pi Durable Harness Engine (Zero Docker) | SHIPPED | `server/harness.ts`, `server/db.ts` implementing `@earendil-works/pi-durable` transactional SQLite persistence and crash recovery; verified in `tests/ts/pi_durable_integration.test.ts` |
+| Cloudflare Agent Pi (`PiHarness`) Edge Host | SHIPPED | `worker/src/index.ts` `BalaBotAgent` Durable Object + co-located SQLite (`this.sql`) partitioned by `${tenant_id}:${org_id}:${bot_id}`; verified via `wrangler deploy --dry-run` |
+| Rust Native Desktop App (Client / Local Server) | SHIPPED | Tauri v2 desktop application in `src-tauri/` compiling native executable (`src-tauri/target/debug/balabot-desktop`, 24MB); embeds built UI and manages local Pi server |
+| Reverse RPC Local Tool Bridge | SHIPPED | `server/bridge.ts` (`LocalToolBridge`) with NEVER THE HOST Desktop Law guard, directory jailing, and parameter-validated actions; verified in `tests/ts/pi_durable_integration.test.ts` |
+| Docker & Container Virtualization | DECOMMISSIONED | Permanently retired `Dockerfile`, `docker-compose.yml`, `entrypoint.sh`, and `docker/s6-rc.d` in Wave 7 |
 
 ## Known false claims this table corrects
 

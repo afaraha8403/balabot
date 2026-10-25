@@ -1,4 +1,4 @@
-import {useState, useMemo} from 'react';
+import {useState, useMemo, useEffect} from 'react';
 import {Popover} from '@astryxdesign/core/Popover';
 import {Button} from '@astryxdesign/core/Button';
 import {IconButton} from '@astryxdesign/core/IconButton';
@@ -67,6 +67,10 @@ export function SpaceSwitcher({
   const [selectedId, setSelectedId] = useState(activeSpaceId);
   const [pendingDeleteSession, setPendingDeleteSession] = useState<Session | null>(null);
 
+  useEffect(() => {
+    setSelectedId(activeSpaceId);
+  }, [activeSpaceId]);
+
   const activeSpace = DEFAULT_SPACES.find(s => s.id === selectedId) ?? DEFAULT_SPACES[0];
 
   const botSessions = useMemo(() => {
@@ -91,18 +95,24 @@ export function SpaceSwitcher({
 
             {DEFAULT_SPACES.map(space => {
               const isSelected = space.id === selectedId;
+              const isTeam = space.id === 'team';
               return (
                 <Button
                   key={space.id}
-                  label={space.name}
+                  label={isTeam ? `${space.name} (Single-user)` : space.name}
                   variant={isSelected ? 'secondary' : 'ghost'}
                   size="sm"
                   width="100%"
-                  tooltip={space.description}
+                  tooltip={isTeam ? 'Local single-user mode — team sync offline' : space.description}
                   endContent={
-                    isSelected ? (
-                      <Icon icon={CheckIcon} size="sm" color="primary" />
-                    ) : undefined
+                    <HStack gap={1} vAlign="center">
+                      {isTeam ? (
+                        <Token label="Local" size="sm" color="yellow" />
+                      ) : null}
+                      {isSelected ? (
+                        <Icon icon={CheckIcon} size="sm" color="primary" />
+                      ) : null}
+                    </HStack>
                   }
                   onClick={() => {
                     setSelectedId(space.id);

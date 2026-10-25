@@ -159,7 +159,18 @@ type Props = {
   onInterventionChange?: (iv: InterventionPayload | null) => void;
   onNotify?: (msg: string) => void;
   onOpenComputer?: () => void;
+  onOpenSkills?: () => void;
 };
+
+export function formatReplyPreview(text: string): string {
+  if (!text) return '';
+  // Strip triple-backtick fences (including openui-lang and code blocks)
+  const withoutFences = text.replace(/```[\s\S]*?```/g, '');
+  // Strip inline backticks
+  const withoutInlineCode = withoutFences.replace(/`([^`]+)`/g, '$1');
+  // Collapse whitespace
+  return withoutInlineCode.replace(/\s+/g, ' ').trim();
+}
 
 export function Composer({
   isStreaming,
@@ -178,6 +189,7 @@ export function Composer({
   onInterventionChange,
   onNotify,
   onOpenComputer,
+  onOpenSkills,
 }: Props) {
   const inputRef = useRef<ChatComposerInputHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -304,6 +316,7 @@ export function Composer({
     setValue('');
     setSlashQuery(null);
     if (actionId === 'skill-library') {
+      onOpenSkills?.();
       onNotify?.('Opening Skill Library');
     } else {
       onNotify?.(`Action: ${actionId}`);
@@ -511,29 +524,24 @@ export function Composer({
     }
     if (validFiles.length === 0) return;
 
-    const uploaded = await Promise.all(
-      validFiles.map(async f => {
-        const previewUrl = f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined;
-        try {
-          const res = await uploadAttachment(f);
-          return {
-            ...res,
-            previewUrl,
-            isQueued: isStreaming,
-          };
-        } catch {
-          return {
-            id: `a_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            name: f.name,
-            size: f.size,
-            mime_type: f.type,
-            previewUrl,
-            isQueued: isStreaming,
-          };
-        }
-      }),
-    );
-    setAttachments(prev => [...prev, ...uploaded]);
+    const uploaded: ComposerAttachment[] = [];
+    for (const f of validFiles) {
+      const previewUrl = f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined;
+      try {
+        const res = await uploadAttachment(f);
+        uploaded.push({
+          ...res,
+          previewUrl,
+          isQueued: isStreaming,
+        });
+      } catch (err) {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        setAttachmentError(`Upload failed: ${(err as Error).message}`);
+      }
+    }
+    if (uploaded.length > 0) {
+      setAttachments(prev => [...prev, ...uploaded]);
+    }
   };
 
   const removeAttachment = (attachment: ComposerAttachment) => {
@@ -625,7 +633,7 @@ export function Composer({
             className="min-w-0 flex-1 truncate text-muted-foreground"
             style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
           >
-            Replying to {replyingTo.sender}: &ldquo;{replyingTo.text}&rdquo;
+            Replying to {replyingTo.sender}: &ldquo;{formatReplyPreview(replyingTo.text)}&rdquo;
           </span>
           <button
             type="button"
@@ -1007,7 +1015,7 @@ export function Composer({
           />
         </div>
 
-        {botId && onInterventionChange && onNotify ? (
+        {botId && onInterventionChange && onNotify && (isStreaming || activeIntervention) ? (
           <HoldEverythingControl
             botId={botId}
             botName={botName || 'Bot'}

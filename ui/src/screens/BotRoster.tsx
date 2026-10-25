@@ -389,9 +389,18 @@ export function BotRoster({
         ) : pinnedEntries.length === 0 ? (
           <HStack gap={2} padding={2}>
             <Text type="supporting">
-              {hiddenEntries.length > 0
-                ? 'All bots are currently hidden.'
-                : 'No bots in the roster yet.'}
+              {(() => {
+                const searchEl = typeof document !== 'undefined'
+                  ? (document.querySelector('input[placeholder*="Search bots"]') as HTMLInputElement) || (document.querySelector('input[type="search"]') as HTMLInputElement)
+                  : null;
+                const currentQuery = searchEl?.value?.trim();
+                if (currentQuery) {
+                  return `No bots match "${currentQuery}".`;
+                }
+                return hiddenEntries.length > 0
+                  ? 'All bots are currently hidden.'
+                  : 'No bots in the roster yet.';
+              })()}
             </Text>
           </HStack>
         ) : null}
@@ -423,7 +432,7 @@ export function BotRoster({
                     }
                     startContent={
                       <GroupAvatar
-                        members={g.members.map(m => {
+                        members={(g.members || []).map(m => {
                           const b = bots.find(bot => bot.id === m || bot.name === m);
                           return {
                             botId: b?.id ?? m,
@@ -439,7 +448,7 @@ export function BotRoster({
                         <Text type="supporting" size="xsm">
                           {when}
                         </Text>
-                        <Badge label={`${g.members.length} bots`} variant="neutral" />
+                        <Badge label={`${g.members?.length || 0} bots`} variant="neutral" />
                       </VStack>
                     }
                   />
@@ -495,6 +504,7 @@ export function BotRoster({
             ...contextBot.bot,
             pinned: pinnedSet.has(contextBot.bot.id),
             unread: unreadSet.has(contextBot.bot.id),
+            isHidden: hiddenSet.has(contextBot.bot.id),
           }}
           position={contextBot.pos}
           sections={sections}

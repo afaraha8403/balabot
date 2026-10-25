@@ -1,0 +1,33 @@
+{
+  "name": "balabot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:ui": "cd ui && npm run build",
+    "build": "npm run build:ui",
+    "test:ui": "cd ui && npm test",
+    "test:core": "vitest run tests/ts",
+    "test:e2e": "vitest run tests/e2e/modern_e2e.test.ts",
+    "test:visual": "tsx scripts/visual_test.ts",
+    "test": "npm run test:ui && npm run test:core && npm run test:e2e",
+    "migrate": "tsx scripts/migrate_legacy_data.ts",
+    "server": "tsx server/index.ts",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "^1.4.0",
+    "@earendil-works/pi-durable": "^1.4.0",
+    "agents": "^0.30.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "puppeteer-core": "^25.16.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

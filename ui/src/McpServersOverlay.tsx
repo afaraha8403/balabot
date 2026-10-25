@@ -27,34 +27,14 @@ export type McpServerItem = {
 
 export const STORAGE_MCP_KEY = 'balabot:mcp-servers';
 
-export const DEFAULT_MCP_SERVERS: McpServerItem[] = [
-  {
-    id: 'mcp-fs',
-    name: 'Container Filesystem',
-    slug: 'filesystem',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-filesystem', '/workspace'],
-    enabled: true,
-    botIds: ['principal', 'governor'],
-  },
-  {
-    id: 'mcp-brave',
-    name: 'Brave Web Search',
-    slug: 'brave-search',
-    transport: 'streamable_http',
-    endpoint: 'https://api.search.brave.com/res/v1/mcp',
-    enabled: true,
-    botIds: ['principal'],
-  },
-];
+export const DEFAULT_MCP_SERVERS: McpServerItem[] = [];
 
 export function readMcpServers(): McpServerItem[] {
   try {
     const raw = localStorage.getItem(STORAGE_MCP_KEY);
-    return raw ? JSON.parse(raw) : DEFAULT_MCP_SERVERS;
+    return raw ? JSON.parse(raw) : [];
   } catch {
-    return DEFAULT_MCP_SERVERS;
+    return [];
   }
 }
 
@@ -245,7 +225,27 @@ export function McpServersOverlay({onClose, bots = []}: Props) {
             </div>
 
             <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
-              {servers.map(server => {
+              {servers.length === 0 ? (
+                <div
+                  data-testid="no-mcp-servers"
+                  style={{
+                    padding: '24px',
+                    borderRadius: 'var(--radius-lg, 12px)',
+                    border: '1px solid var(--border)',
+                    backgroundColor: 'var(--card)',
+                    textAlign: 'center',
+                    color: 'var(--muted-foreground)',
+                  }}
+                >
+                  <div style={{fontWeight: 600, fontSize: '14px', color: 'var(--foreground)'}}>
+                    No MCP servers configured
+                  </div>
+                  <div style={{fontSize: '12.5px', marginTop: '6px', lineHeight: 1.5}}>
+                    Register a local stdio command or remote Streamable HTTP server to connect external tool capabilities to your bots.
+                  </div>
+                </div>
+              ) : (
+                servers.map(server => {
                 const isConfirming = confirmDeleteId === server.id;
                 return (
                   <div
@@ -323,7 +323,7 @@ export function McpServersOverlay({onClose, bots = []}: Props) {
                     </div>
                   </div>
                 );
-              })}
+              }))}
             </div>
           </div>
 

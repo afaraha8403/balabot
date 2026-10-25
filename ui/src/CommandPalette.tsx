@@ -166,7 +166,7 @@ export function CommandPalette({
         subtitle: 'Cmd/Ctrl+Shift+M',
         icon: <IconSkills size="sm" color="accent" />,
         onExecute: () => {
-          onAction('skills');
+          onAction('open-skills');
           onClose();
         },
       },
@@ -177,7 +177,7 @@ export function CommandPalette({
         subtitle: 'Watch and control persistent desktop',
         icon: <IconAgentComputer size="sm" color="accent" />,
         onExecute: () => {
-          onAction('computer');
+          onAction('open-computer');
           onClose();
         },
       },

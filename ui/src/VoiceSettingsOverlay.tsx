@@ -90,9 +90,21 @@ export function VoiceSettingsOverlay({embedded = true}: Props) {
   const [apiKeyInput, setApiKeyInput] = useState(config.apiKey || '');
   const [testing, setTesting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [serverHasKey, setServerHasKey] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/org/secrets')
+      .then(r => r.json())
+      .then(d => {
+        if (d?.secrets?.some((s: any) => s.name?.toLowerCase().includes('voice') || s.name?.toLowerCase().includes(config.provider))) {
+          setServerHasKey(true);
+        }
+      })
+      .catch(() => {});
+  }, [config.provider]);
 
   const selectedProvider = VOICE_PROVIDERS.find(p => p.id === config.provider) ?? VOICE_PROVIDERS[0];
-  const isKeySaved = Boolean(config.apiKey?.trim());
+  const isKeySaved = Boolean(config.apiKey?.trim()) || serverHasKey;
 
   const handleProviderSelect = (id: string) => {
     const nextProvider = VOICE_PROVIDERS.find(p => p.id === id) ?? VOICE_PROVIDERS[0];
@@ -127,13 +139,12 @@ export function VoiceSettingsOverlay({embedded = true}: Props) {
   };
 
   const handleTestVoice = () => {
-    setTesting(true);
-    setStatusMessage(`Testing ${selectedProvider.name} voice playback…`);
-    setTimeout(() => {
-      setTesting(false);
-      setStatusMessage('Voice test completed.');
-      setTimeout(() => setStatusMessage(null), 2500);
-    }, 1800);
+    if (!isKeySaved) {
+      setStatusMessage(`Voice test unavailable: no API key configured for ${selectedProvider.name}.`);
+      return;
+    }
+    setStatusMessage(`Voice provider "${selectedProvider.name}" configured. Real-time audio playback uses host OS output device.`);
+    setTimeout(() => setStatusMessage(null), 4000);
   };
 
   return (
@@ -155,6 +166,10 @@ export function VoiceSettingsOverlay({embedded = true}: Props) {
           <p style={{margin: 0, fontSize: '13px', color: 'var(--muted-foreground)'}}>
             Configure conversational voice engines, select realistic speaker voices, and enable live speech transcription.
           </p>
+          <div style={{marginTop: '8px', fontSize: '12px', color: 'var(--muted-foreground)', display: 'flex', alignItems: 'center', gap: '6px'}}>
+            <span style={{display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', backgroundColor: 'var(--success, #22c55e)'}} />
+            <span>Local Voice Engine: Audio input/output is governed by host OS permissions and provider credentials.</span>
+          </div>
         </div>
         {isKeySaved ? (
           <span

@@ -156,7 +156,7 @@
     --color-overlay-pressed: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
     --color-background-muted: light-dark(#f0f0ed, #141518);
     --color-text-primary: light-dark(#1a1a1a, #ececee);
-    --color-text-secondary: light-dark(#6c6c70, #85858a);
+    --color-text-secondary: light-dark(#4e4e54, #85858a);
     --color-text-disabled: light-dark(#8F909B, #5C5E68);
     --color-text-accent: var(--color-accent);
     --color-icon-accent: var(--color-accent);
@@ -786,6 +786,49 @@
 .rakazo-bot-avatar[data-reduced-motion="true"] .rakazo-mascot-glyph {
   transform: translateX(-50%) !important;
 }
+
+/* ── BB-029: Message hover reaction picker & popover bounds ── */
+.message-hover-popover,
+[data-testid="message-bubble"] div[style*="z-index: 30"],
+[data-testid="message-bubble"] div[style*="zIndex: 30"] {
+  max-width: calc(100vw - 32px);
+  margin-right: 8px;
+}
+
+/* ── BB-030: Narrow layout responsive rules (< 768px) ── */
+@media (max-width: 767px) {
+  /* Side panel closed by default at narrow widths */
+  .polaris-side-panel:not([data-panel="open"]) {
+    display: none !important;
+    width: 0px !important;
+    min-width: 0px !important;
+    max-width: 0px !important;
+    border-left: 0 !important;
+    pointer-events: none !important;
+  }
+
+  /* Prevent header title and pause bot controls from overlapping */
+  .app-drag {
+    padding: 8px 12px !important;
+    gap: 8px !important;
+  }
+
+  .app-drag > div:first-child {
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    overflow: hidden !important;
+  }
+
+  .app-drag > div:last-child {
+    flex-shrink: 0 !important;
+  }
+
+  /* Hide jump keyboard shortcut on mobile to preserve header spacing */
+  .app-drag button[aria-label*="Jump"] {
+    display: none !important;
+  }
+}
+
 
 
 

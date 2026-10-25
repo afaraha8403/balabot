@@ -10,6 +10,8 @@ export type Bot = {
   handle?: string;
   botId?: string;
   category?: string;
+  model?: string;
+  config?: Record<string, any>;
 };
 
 /**
@@ -222,6 +224,7 @@ export type SkillLibrary = {
  * what is missing and the view must render that, not an empty list.
  */
 export type SkillLibraryResponse = {available: boolean; reason?: string} & {
+  skills?: SkillEntry[];
   learned?: SkillEntry[];
   brought?: SkillEntry[];
   note?: string;
@@ -358,6 +361,14 @@ export async function patchServerSession(
   await api(`/api/sessions/${encodeURIComponent(sessionId)}`, {
     method: 'PATCH',
     body: JSON.stringify({purpose}),
+  });
+}
+
+export async function clearSessionMessages(
+  sessionId: string,
+): Promise<{cleared: boolean}> {
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    method: 'DELETE',
   });
 }
 
@@ -547,6 +558,8 @@ export async function streamChat(
   attachments?: Attachment[],
   /** Human take-over intervention raised by the bot. */
   onIntervention?: (i: InterventionPayload) => void,
+  /** Active agent model override */
+  model?: string,
 ): Promise<string> {
   // W2-2 delta protocol: with a server-side session, the durable store owns
   // the transcript. Only turns the server has not confirmed yet (no durable
@@ -574,6 +587,7 @@ export async function streamChat(
     payload.delta = true;
   }
   if (attachments && attachments.length > 0) payload.attachments = attachments;
+  if (model) payload.model = model;
 
   const res = await fetch('/api/chat', {
     method: 'POST',
@@ -677,6 +691,10 @@ export async function streamChat(
           requestId: r.request_id ?? `${r.name}-${Date.now()}`,
         });
       }
+    } else if (eventName === 'jev_carrier' || eventName === 'jev') {
+      // System carrier and Jev decision evaluation frames: consumed silently
+      // by protocol layer, never leaked into visible message transcript.
+      return;
     } else if (eventName === 'hermes.tool.progress') {
       // Real agent activity: which tool, on what target, and whether it is
       // still running. This is what makes the working indicator truthful
@@ -779,6 +797,13 @@ export async function pauseBot(
     method: 'POST',
     body: JSON.stringify({bot_id: botId, reason}),
   });
+}
+
+export async function pauseIntervention(
+  botId: string,
+  reason = 'Owner requested hold',
+): Promise<{ok: boolean; record: InterventionPayload}> {
+  return pauseBot(botId, reason);
 }
 
 /** GET /api/intervention/active/{bot_id} — check if an intervention is pending for this bot. */
@@ -900,7 +925,11 @@ export async function getOrgs(): Promise<OrgSummary[]> {
  */
 export async function getSkillLibrary(botId?: string): Promise<SkillLibraryResponse> {
   const q = botId ? `?bot=${encodeURIComponent(botId)}` : '';
-  return api<SkillLibraryResponse>(`/api/skills/library${q}`);
+  const res = await api<SkillLibraryResponse>(`/api/skills/library${q}`);
+  if (res && res.available !== false && res.skills && !res.brought) {
+    res.brought = res.skills;
+  }
+  return res;
 }
 
 export async function postSkillPin(body: {
@@ -1121,7 +1150,7 @@ export type BotProposal = {
   name: string;
   role: string;
   proposed_by: string;
-  status: 'proposed' | 'approved' | 'rejected' | 'registered';
+  status: 'proposed' | 'pending' | 'approved' | 'rejected' | 'registered';
   created_at: string;
   approved_by: string | null;
   created_result?: {bot_id: string; actions: string[]} | null;
@@ -1197,6 +1226,7 @@ export type BotEditableMeta = {
   description: string;
   icon: string;
   color: string;
+  model?: string;
 };
 
 export type BotMetaRow = {
@@ -1319,4 +1349,27 @@ export type ReapArtifactsResult = {
 export async function reapSubagentArtifacts(): Promise<ReapArtifactsResult> {
   return apiWithDetail<ReapArtifactsResult>('POST', '/api/orphans/reap');
 }
+
+export type ModelInfo = {
+  id: string;
+  name: string;
+  provider: string;
+  context_length?: number;
+  description?: string;
+  pricing?: {
+    prompt?: string;
+    completion?: string;
+  };
+};
+
+/** GET /api/models — auto-discovered models list with caching */
+export async function getAvailableModels(): Promise<{ ok: boolean; count: number; models: ModelInfo[] }> {
+  return api<{ ok: boolean; count: number; models: ModelInfo[] }>('/api/models');
+}
+
+/** PATCH /api/bots/:botId — persists configured model for the specific agent */
+export async function updateBotModel(botId: string, model: string): Promise<{ ok: boolean; model: string }> {
+  return apiWithDetail<{ ok: boolean; model: string }>('PATCH', `/api/bots/${encodeURIComponent(botId)}`, { model });
+}
+
 

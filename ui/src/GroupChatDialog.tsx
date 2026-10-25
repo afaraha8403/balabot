@@ -18,6 +18,7 @@ import type {SearchableItem, SearchSource} from '@astryxdesign/core/Typeahead';
 import {ThinkingOrb} from 'thinking-orbs';
 import {
   createGroup,
+  deleteGroup,
   getGroup,
   getGroups,
   postGroupTurn,
@@ -44,8 +45,8 @@ const botSource = (bots: Bot[]): SearchSource =>
     search: (q: string) =>
       bots
         .filter(b => b.name.toLowerCase().includes(q.toLowerCase()))
-        .map(b => ({id: b.id, label: `${b.icon} ${b.name}`})),
-    bootstrap: () => bots.map(b => ({id: b.id, label: `${b.icon} ${b.name}`})),
+        .map(b => ({id: b.id, label: b.name})),
+    bootstrap: () => bots.map(b => ({id: b.id, label: b.name})),
   }) as unknown as SearchSource;
 
 /**
@@ -115,10 +116,25 @@ export function GroupChatDialog({bots, initialGroupId, onClose, onFleetsChanged}
       setMembers([]);
       setBanner('');
       void loadGroups();
+      onFleetsChanged?.();
     } catch (e) {
       setBanner((e as Error).message);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDeleteGroup = async (gid: string) => {
+    try {
+      await deleteGroup(gid);
+      if (active?.id === gid) {
+        setActive(null);
+        setMode('setup');
+      }
+      await loadGroups();
+      onFleetsChanged?.();
+    } catch (e) {
+      setBanner((e as Error).message);
     }
   };
 
@@ -159,8 +175,7 @@ export function GroupChatDialog({bots, initialGroupId, onClose, onFleetsChanged}
     <Dialog
       isOpen
       onOpenChange={open => !open && onClose()}
-      purpose="form"
-      variant="fullscreen">
+      purpose="form">
       <DialogHeader
         title="Group chat"
         subtitle={
@@ -170,7 +185,7 @@ export function GroupChatDialog({bots, initialGroupId, onClose, onFleetsChanged}
         }
         onOpenChange={onClose}
       />
-      <VStack gap={3} padding={4} height="fill">
+      <VStack gap={3} padding={4} height="fill" style={{maxWidth: '720px', margin: '0 auto', width: '100%'}}>
         {banner ? (
           <Banner status="error" title="Group chat" description={banner}
                   onDismiss={() => setBanner('')} />
@@ -185,71 +200,88 @@ export function GroupChatDialog({bots, initialGroupId, onClose, onFleetsChanged}
         </SegmentedControl>
 
         {mode === 'setup' ? (
-          <VStack gap={3} maxWidth={520}>
-            <TextInput
-              label="Group name"
-              value={groupName}
-              onChange={setGroupName}
-              placeholder="e.g. Ops war room"
-              description="A shared room where 2–6 bots take serial turns."
-            />
-            <Tokenizer
-              label={`Members (${MIN_MEMBERS}–${MAX_MEMBERS} bots)`}
-              searchSource={botSource(bots)}
-              value={members}
-              onChange={setMembers}
-              placeholder="Add bots…"
-              maxEntries={MAX_MEMBERS}
-              hasClear
-              description="The first member hosts the shared Agent Computer pane."
-            />
-            <HStack gap={2}>
-              <Button
-                label="Create group"
-                variant="primary"
-                isDisabled={!canCreate || creating}
-                isLoading={creating}
-                onClick={() => void create()}
+          <div style={{display: 'flex', gap: '24px', width: '100%', alignItems: 'flex-start'}}>
+            <VStack gap={3} style={{flex: 1, minWidth: 0}}>
+              <TextInput
+                label="Group name"
+                value={groupName}
+                onChange={setGroupName}
+                placeholder="e.g. Ops war room"
+                description="A shared room where 2–6 bots take serial turns."
               />
-            </HStack>
+              <Tokenizer
+                label={`Members (${MIN_MEMBERS}–${MAX_MEMBERS} bots)`}
+                searchSource={botSource(bots)}
+                value={members}
+                onChange={setMembers}
+                placeholder="Add bots…"
+                maxEntries={MAX_MEMBERS}
+                hasClear
+                description="The first member hosts the shared Agent Computer pane."
+              />
+              <HStack gap={2}>
+                <Button
+                  label="Create group"
+                  variant="primary"
+                  isDisabled={!canCreate || creating}
+                  isLoading={creating}
+                  onClick={() => void create()}
+                />
+              </HStack>
+            </VStack>
             {groups.length ? (
-              <VStack gap={2}>
-                <Text type="supporting">Existing groups</Text>
-                <HStack gap={1} vAlign="center" wrap="wrap">
+              <VStack gap={2} style={{width: '260px', borderLeft: '1px solid var(--border)', paddingLeft: '16px'}}>
+                <Text type="supporting" weight="semibold">Existing groups</Text>
+                <VStack gap={1}>
                   {groups.map(g => (
-                    <Button
-                      key={g.id}
-                      label={`Open ${g.name}`}
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => void openGroup(g.id)}
-                    />
+                    <HStack key={g.id} gap={1} vAlign="center" justify="between">
+                      <Button
+                        label={g.name}
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void openGroup(g.id)}
+                      />
+                      <Button
+                        label="Delete"
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => void handleDeleteGroup(g.id)}
+                      />
+                    </HStack>
                   ))}
-                </HStack>
+                </VStack>
               </VStack>
             ) : null}
-          </VStack>
+          </div>
         ) : active ? (
           <VStack gap={2} height="fill">
-            <HStack gap={2} vAlign="center" wrap="wrap">
-              {active.members.map(m => (
-                <Token
-                  key={m}
-                  label={`${nameOf(m)}${m === active.computerAgent ? ' · shared screen' : ''}`}
-                  size="sm"
-                  color={m === active.computerAgent ? 'teal' : 'blue'}
+            <HStack gap={2} vAlign="center" justify="between" wrap="wrap">
+              <HStack gap={2} vAlign="center" wrap="wrap">
+                {active.members.map(m => (
+                  <Token
+                    key={m}
+                    label={`${nameOf(m)}${m === active.computerAgent ? ' · shared screen' : ''}`}
+                    size="sm"
+                    color={m === active.computerAgent ? 'teal' : 'blue'}
+                  />
+                ))}
+                <StatusDot
+                  variant={turnBusy ? 'warning' : 'success'}
+                  label={turnBusy ? 'Serial round running' : `Round ${active.round}`}
+                  isPulsing={turnBusy}
                 />
-              ))}
-              <StatusDot
-                variant={turnBusy ? 'warning' : 'success'}
-                label={turnBusy ? 'Serial round running' : `Round ${active.round}`}
-                isPulsing={turnBusy}
+                <Text type="supporting">
+                  {active.members
+                    .map(m => `${nameOf(m)}: ${active.sessionLens[m] ?? 0} msgs`)
+                    .join(' · ')}
+                </Text>
+              </HStack>
+              <Button
+                label="Delete group"
+                variant="destructive"
+                size="sm"
+                onClick={() => void handleDeleteGroup(active.id)}
               />
-              <Text type="supporting">
-                {active.members
-                  .map(m => `${nameOf(m)}: ${active.sessionLens[m] ?? 0} msgs`)
-                  .join(' · ')}
-              </Text>
             </HStack>
             <VStack
               className="rk-scroll"

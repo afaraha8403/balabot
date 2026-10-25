@@ -90,6 +90,15 @@ export function GovernanceScreen() {
             ))}
           </div>
         </div>
+      ) : state.phase === 'ready' ? (
+        <div style={{padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: 'var(--muted-foreground)'}}>
+          <h4 style={{margin: '0 0 6px 0', fontSize: '15px', fontWeight: 600, color: 'var(--foreground)'}}>
+            No governance decisions recorded yet
+          </h4>
+          <p style={{margin: 0, fontSize: '13px', maxWidth: '380px', lineHeight: 1.5}}>
+            Governance audits and decisions logged under the OKF protocol will appear here.
+          </p>
+        </div>
       ) : (
         <ApiNotice state={state} />
       )}

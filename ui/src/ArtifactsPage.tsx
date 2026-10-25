@@ -57,131 +57,15 @@ function writeViewMode(mode: ViewMode): void {
   } catch {}
 }
 
-const SEED_ARTIFACTS: ArtifactItem[] = [
-  {
-    id: 'art-sys-arch-01',
-    botId: 'core-architect',
-    name: 'architecture-diagram.html',
-    description: 'Interactive HTML architecture and component layout for BalaBot core subsystem.',
-    mimeType: 'text/html',
-    createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-    version: 1,
-    versionCount: 1,
-    content: `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <style>
-    body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; padding: 24px; margin: 0; }
-    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
-    h1 { font-size: 20px; margin-top: 0; color: #38bdf8; }
-    p { color: #94a3b8; font-size: 14px; line-height: 1.5; }
-    .badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; background: #0284c7; color: white; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px; }
-    .node { background: #0f172a; border: 1px solid #475569; border-radius: 8px; padding: 12px; }
-    .node-title { font-weight: 600; font-size: 13px; color: #e2e8f0; }
-    .node-desc { font-size: 12px; color: #64748b; margin-top: 4px; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <span class="badge">Polaris Architecture</span>
-    <h1>BalaBot Hybrid Agent Subsystem</h1>
-    <p>Real-time orchestrator connecting client event streams, local model runners, and tools.</p>
-    <div class="grid">
-      <div class="node">
-        <div class="node-title">Client Shell</div>
-        <div class="node-desc">React 18 SPA with Polaris navigation & dark token palette.</div>
-      </div>
-      <div class="node">
-        <div class="node-title">FastAPI Server</div>
-        <div class="node-desc">SSE streaming, session dispatch, and lifecycle hooks.</div>
-      </div>
-      <div class="node">
-        <div class="node-title">Jev Governance</div>
-        <div class="node-desc">Strict decision audit trail and intervention gating.</div>
-      </div>
-      <div class="node">
-        <div class="node-title">Artifact Store</div>
-        <div class="node-desc">Sandboxed HTML, PDF, Markdown & Attachment previews.</div>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`,
-  },
-  {
-    id: 'art-polaris-spec-02',
-    botId: 'ux-designer',
-    name: 'polaris-rebase-spec.md',
-    description: 'Detailed specification of the Polaris UI rebase design tokens, spacing rules, and parity goals.',
-    mimeType: 'text/markdown',
-    createdAt: new Date(Date.now() - 1000 * 60 * 180).toISOString(),
-    version: 2,
-    versionCount: 2,
-    content: `# Polaris UI Rebase Specification
-
-## Design Invariants
-1. **Sidebar Frame**: Exactly 316px fixed width on desktop (\`>= 1024px\`), -316px off-canvas drawer on mobile (\`< 1024px\`).
-2. **Settings Overlay**: 7 distinct tabs (General, Models, Memory, Voice, Usage, Computer, Updates).
-3. **Product Extras**: All BalaBot unique capabilities survive intact and remounted:
-   - Skill Library -> Installed Skills tab inside Plugins overlay
-   - Orphan Reconciliation -> Computer tab inside Settings overlay
-   - Space Switcher -> Integrated conversation & bot management
-4. **Color Tokens**: Zinc / Neutral dark palette with high-contrast text and accessible focus rings.
-
-## Verification Checklist
-- [x] Settings dialog with keyboard shortcuts (Esc)
-- [x] API key persistence surviving hard reloads
-- [x] Sandboxed iframe CSP with \`allow-scripts\` and script escape prevention
-- [x] Full parity with upstream Polaris desktop layout
-`,
-  },
-  {
-    id: 'art-config-template-03',
-    botId: 'infra-bot',
-    name: 'agent-manifest.json',
-    description: 'Declarative runtime manifest for autonomous agent execution and tool sandboxes.',
-    mimeType: 'application/json',
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 12).toISOString(),
-    version: 1,
-    versionCount: 1,
-    content: JSON.stringify(
-      {
-        name: "balabot-autonomous-cluster",
-        version: "2.4.0",
-        orchestrator: {
-          heartbeatIntervalMs: 5000,
-          maxConcurrentSubagents: 4,
-          timeoutSeconds: 300,
-          governanceMode: "strict"
-        },
-        providers: {
-          primary: "anthropic",
-          fallback: "openai",
-          temperature: 0.2
-        },
-        sandbox: {
-          networkIsolation: true,
-          readOnlyMounts: ["/etc/ssl/certs"],
-          storageLimitMb: 1024
-        }
-      },
-      null,
-      2
-    ),
-  },
-];
-
 export function loadSavedArtifacts(): ArtifactItem[] {
   try {
     const raw = window.localStorage.getItem(ARTIFACTS_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch {}
-  return SEED_ARTIFACTS;
+  return [];
 }
 
 export function saveArtifacts(items: ArtifactItem[]): void {
@@ -316,56 +200,138 @@ export function ArtifactsPage({
   }, [items, artifactId]);
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-background text-foreground/90 select-none">
+    <div
+      style={{
+        display: 'flex',
+        height: '100%',
+        minWidth: 0,
+        flexDirection: 'column',
+        backgroundColor: 'var(--background)',
+        color: 'var(--foreground)',
+        userSelect: 'none',
+      }}
+    >
       {/* Top Header */}
-      <header className="border-b border-border px-4 py-3 md:px-6 bg-card/60 backdrop-blur-sm">
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-          <div className="flex items-center gap-3">
+      <header
+        style={{
+          borderBottom: '1px solid var(--border)',
+          padding: '12px 20px',
+          backgroundColor: 'var(--card)',
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
               type="button"
               onClick={() => navigateTo('/app')}
-              className="flex shrink-0 items-center gap-1 rounded-lg py-1 px-2 text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                borderRadius: 'var(--radius-md, 8px)',
+                padding: '4px 8px',
+                fontSize: '13px',
+                fontWeight: 500,
+                color: 'var(--muted-foreground)',
+                backgroundColor: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'background-color 120ms ease, color 120ms ease',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = 'var(--accent)';
+                e.currentTarget.style.color = 'var(--foreground)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = 'var(--muted-foreground)';
+              }}
             >
               <ChevronLeft size={16} strokeWidth={2} aria-hidden="true" />
               <span>Bots</span>
             </button>
-            <div className="h-4 w-px bg-border" />
-            <h1 className="text-lg font-semibold tracking-tight text-foreground">
+            <div style={{ height: '16px', width: '1px', backgroundColor: 'var(--border)' }} />
+            <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: 'var(--foreground)' }}>
               Artifacts
             </h1>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-accent text-accent-foreground font-mono">
+            <span
+              style={{
+                fontSize: '12px',
+                padding: '2px 8px',
+                borderRadius: '9999px',
+                backgroundColor: 'var(--accent)',
+                color: 'var(--foreground)',
+                fontFamily: 'monospace',
+                fontWeight: 500,
+              }}
+            >
               {filteredItems.length}
             </span>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button
               type="button"
               aria-pressed={filtersOpen}
               onClick={() => setFiltersOpen(open => !open)}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px] font-medium transition-colors ${
-                filtersOpen
-                  ? 'border-transparent bg-primary text-primary-foreground shadow-sm'
-                  : 'border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-              }`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderRadius: 'var(--radius-md, 8px)',
+                border: filtersOpen ? '1px solid var(--primary)' : '1px solid var(--border)',
+                backgroundColor: filtersOpen ? 'var(--primary)' : 'transparent',
+                color: filtersOpen ? 'var(--primary-foreground)' : 'var(--foreground)',
+                padding: '6px 12px',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 120ms ease',
+              }}
             >
               <Filter size={14} strokeWidth={2} />
               <span>Filters</span>
             </button>
 
             {!artifactId && (
-              <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 bg-background">
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '2px',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--border)',
+                  padding: '2px',
+                  backgroundColor: 'var(--background)',
+                }}
+              >
                 <button
                   type="button"
                   aria-label="Card view"
                   aria-pressed={viewMode === 'grid'}
                   title="Card view"
                   onClick={() => handleSetViewMode('grid')}
-                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-                    viewMode === 'grid'
-                      ? 'bg-accent text-accent-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                  style={{
+                    display: 'flex',
+                    height: '28px',
+                    width: '28px',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 'var(--radius-sm, 6px)',
+                    border: 'none',
+                    backgroundColor: viewMode === 'grid' ? 'var(--accent)' : 'transparent',
+                    color: viewMode === 'grid' ? 'var(--foreground)' : 'var(--muted-foreground)',
+                    cursor: 'pointer',
+                  }}
                 >
                   <LayoutGrid size={15} strokeWidth={2} />
                 </button>
@@ -375,11 +341,18 @@ export function ArtifactsPage({
                   aria-pressed={viewMode === 'list'}
                   title="List view"
                   onClick={() => handleSetViewMode('list')}
-                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-                    viewMode === 'list'
-                      ? 'bg-accent text-accent-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                  style={{
+                    display: 'flex',
+                    height: '28px',
+                    width: '28px',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 'var(--radius-sm, 6px)',
+                    border: 'none',
+                    backgroundColor: viewMode === 'list' ? 'var(--accent)' : 'transparent',
+                    color: viewMode === 'list' ? 'var(--foreground)' : 'var(--muted-foreground)',
+                    cursor: 'pointer',
+                  }}
                 >
                   <List size={15} strokeWidth={2} />
                 </button>
@@ -388,29 +361,65 @@ export function ArtifactsPage({
           </div>
         </div>
 
-        {/* Filter bar */}
+        {/* Filter Bar */}
         {filtersOpen && (
-          <div className="mt-3 flex flex-wrap items-center gap-2.5 pt-2 border-t border-border/50">
-            <div className="relative w-full max-w-[260px]">
+          <div
+            style={{
+              marginTop: '12px',
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: '10px',
+              paddingTop: '10px',
+              borderTop: '1px solid var(--border)',
+            }}
+          >
+            <div style={{ position: 'relative', width: '100%', maxWidth: '260px' }}>
               <Search
                 size={14}
                 strokeWidth={2}
-                className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                style={{
+                  position: 'absolute',
+                  left: '10px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--muted-foreground)',
+                  pointerEvents: 'none',
+                }}
               />
               <input
                 type="search"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Search artifacts…"
-                className="w-full rounded-lg border border-border bg-background py-1.5 ps-8 pe-3 text-[13px] outline-none focus:border-ring focus:ring-1 focus:ring-ring text-foreground"
+                style={{
+                  width: '100%',
+                  borderRadius: 'var(--radius-md, 8px)',
+                  border: '1px solid var(--border)',
+                  backgroundColor: 'var(--background)',
+                  padding: '6px 12px 6px 30px',
+                  fontSize: '13px',
+                  color: 'var(--foreground)',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
               />
             </div>
 
             <select
               aria-label="Filter by date"
-              className="rounded-lg border border-border bg-background py-1.5 px-3 text-[13px] text-foreground outline-none focus:border-ring"
               value={dateFilter}
               onChange={e => setDateFilter(e.target.value as DateFilter)}
+              style={{
+                borderRadius: 'var(--radius-md, 8px)',
+                border: '1px solid var(--border)',
+                backgroundColor: 'var(--background)',
+                padding: '6px 12px',
+                fontSize: '13px',
+                color: 'var(--foreground)',
+                outline: 'none',
+                cursor: 'pointer',
+              }}
             >
               <option value="all">All time</option>
               <option value="today">Today</option>
@@ -421,121 +430,216 @@ export function ArtifactsPage({
             <button
               type="button"
               onClick={() => setActiveBotId(null)}
-              className={`rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${
-                activeBotId === null
-                  ? 'bg-primary text-primary-foreground'
-                  : 'border border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-              }`}
+              style={{
+                borderRadius: '9999px',
+                padding: '4px 12px',
+                fontSize: '12px',
+                fontWeight: 500,
+                border: activeBotId === null ? '1px solid var(--primary)' : '1px solid var(--border)',
+                backgroundColor: activeBotId === null ? 'var(--primary)' : 'transparent',
+                color: activeBotId === null ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
+                cursor: 'pointer',
+                transition: 'all 120ms ease',
+              }}
             >
               All bots
             </button>
 
-            {bots.slice(0, 8).map(bot => (
-              <button
-                key={bot.id}
-                type="button"
-                onClick={() => setActiveBotId(bot.id === activeBotId ? null : bot.id)}
-                className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors ${
-                  activeBotId === bot.id
-                    ? 'bg-accent border-primary text-foreground'
-                    : 'border-border text-muted-foreground hover:bg-accent/40 hover:text-accent-foreground'
-                }`}
-              >
-                <BotAvatar identity={bot.id} color={bot.color} size={14} />
-                <span className="max-w-[100px] truncate">{bot.name}</span>
-              </button>
-            ))}
+            {bots.slice(0, 8).map(bot => {
+              const isSelected = activeBotId === bot.id;
+              return (
+                <button
+                  key={bot.id}
+                  type="button"
+                  onClick={() => setActiveBotId(isSelected ? null : bot.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    borderRadius: '9999px',
+                    border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border)',
+                    backgroundColor: isSelected ? 'var(--accent)' : 'transparent',
+                    color: isSelected ? 'var(--foreground)' : 'var(--muted-foreground)',
+                    padding: '4px 10px',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    transition: 'all 120ms ease',
+                  }}
+                >
+                  <BotAvatar identity={bot.id} color={bot.color} size={14} />
+                  <span style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {bot.name}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         )}
       </header>
 
       {/* Main Content Area */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div style={{ display: 'flex', minHeight: 0, flex: 1, overflow: 'hidden' }}>
         {artifactId ? (
           <>
             {!maximized && (
-              <aside className="w-[320px] shrink-0 flex flex-col border-e border-border overflow-y-auto bg-card/20">
-                <div className="p-3 border-b border-border/60 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              <aside
+                className="rk-scroll"
+                style={{
+                  width: '320px',
+                  flexShrink: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  borderRight: '1px solid var(--border)',
+                  overflowY: 'auto',
+                  backgroundColor: 'var(--card)',
+                }}
+              >
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    borderBottom: '1px solid var(--border)',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    color: 'var(--muted-foreground)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                  }}
+                >
                   Artifacts ({filteredItems.length})
                 </div>
                 {filteredItems.length === 0 ? (
-                  <div className="p-6 text-center text-sm text-muted-foreground">
+                  <div style={{ padding: '24px', textAlign: 'center', fontSize: '13px', color: 'var(--muted-foreground)' }}>
                     No artifacts found matching filters.
                   </div>
                 ) : (
-                  <div className="divide-y divide-border/60">
-                    {filteredItems.map(item => (
-                      <div
-                        key={item.id}
-                        onClick={() => navigateTo(`/app/artifacts/${item.id}`)}
-                        className={`group relative p-3 cursor-pointer transition-colors ${
-                          item.id === artifactId
-                            ? 'bg-accent/70 text-accent-foreground'
-                            : 'hover:bg-accent/30 text-foreground'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="grid h-6 w-6 shrink-0 place-items-center rounded bg-accent/80 text-accent-foreground">
-                            <ArtifactIcon mimeType={item.mimeType} small />
-                          </span>
-                          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-                            {item.name}
-                          </span>
-                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                            {mimeLabel(item.mimeType)}
-                          </span>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {filteredItems.map(item => {
+                      const isSelected = item.id === artifactId;
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => navigateTo(`/app/artifacts/${item.id}`)}
+                          style={{
+                            padding: '12px 16px',
+                            cursor: 'pointer',
+                            borderBottom: '1px solid var(--border)',
+                            backgroundColor: isSelected ? 'var(--accent)' : 'transparent',
+                            transition: 'background-color 100ms ease',
+                          }}
+                          onMouseEnter={e => {
+                            if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--muted)';
+                          }}
+                          onMouseLeave={e => {
+                            if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                width: '24px',
+                                height: '24px',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                borderRadius: 'var(--radius-sm, 6px)',
+                                backgroundColor: 'var(--accent)',
+                                color: 'var(--foreground)',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <ArtifactIcon mimeType={item.mimeType} small />
+                            </span>
+                            <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px', fontWeight: 500 }}>
+                              {item.name}
+                            </span>
+                            <span style={{ fontSize: '10px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', backgroundColor: 'var(--muted)', color: 'var(--muted-foreground)' }}>
+                              {mimeLabel(item.mimeType)}
+                            </span>
+                          </div>
+                          {item.description && (
+                            <p style={{ margin: '4px 0 0 32px', fontSize: '11.5px', color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {item.description}
+                            </p>
+                          )}
+                          <div style={{ marginTop: '6px', paddingLeft: '32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted-foreground)' }}>
+                            <span>{formatRelativeTime(item.createdAt)}</span>
+                            <button
+                              type="button"
+                              title="Delete artifact"
+                              onClick={e => {
+                                e.stopPropagation();
+                                setPendingDelete(item);
+                              }}
+                              style={{
+                                border: 'none',
+                                background: 'transparent',
+                                color: 'var(--muted-foreground)',
+                                cursor: 'pointer',
+                                padding: '2px',
+                                borderRadius: '4px',
+                              }}
+                              onMouseEnter={e => (e.currentTarget.style.color = 'var(--destructive)')}
+                              onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted-foreground)')}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
                         </div>
-                        {item.description && (
-                          <p className="mt-1 ps-8 text-[11.5px] line-clamp-1 text-muted-foreground">
-                            {item.description}
-                          </p>
-                        )}
-                        <div className="mt-1.5 flex items-center justify-between ps-8 text-[11px] text-muted-foreground">
-                          <span>{formatRelativeTime(item.createdAt)}</span>
-                          <button
-                            type="button"
-                            title="Delete artifact"
-                            onClick={e => {
-                              e.stopPropagation();
-                              setPendingDelete(item);
-                            }}
-                            className="opacity-0 group-hover:opacity-100 hover:text-destructive p-1 rounded transition-opacity"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </aside>
             )}
 
-            <main className="flex min-w-0 flex-1 flex-col bg-background">
+            <main style={{ display: 'flex', minWidth: 0, flex: 1, flexDirection: 'column', backgroundColor: 'var(--background)' }}>
               {selectedArtifact ? (
                 <>
-                  <header className="flex items-center justify-between gap-3 border-b border-border px-6 py-3 bg-card/40">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <h2 className="truncate text-base font-semibold text-foreground">
+                  <header
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                      borderBottom: '1px solid var(--border)',
+                      padding: '12px 24px',
+                      backgroundColor: 'var(--card)',
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {selectedArtifact.name}
                         </h2>
-                        <span className="rounded bg-muted px-2 py-0.5 text-[11px] font-mono text-muted-foreground">
+                        <span style={{ fontSize: '11px', fontFamily: 'monospace', padding: '2px 6px', borderRadius: '4px', backgroundColor: 'var(--muted)', color: 'var(--muted-foreground)' }}>
                           v{selectedArtifact.version}
                         </span>
                       </div>
                       {selectedArtifact.description && (
-                        <p className="truncate text-xs text-muted-foreground mt-0.5">
+                        <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {selectedArtifact.description}
                         </p>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <button
                         type="button"
                         onClick={() => downloadArtifact(selectedArtifact)}
-                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          borderRadius: 'var(--radius-md, 8px)',
+                          border: '1px solid var(--border)',
+                          backgroundColor: 'transparent',
+                          color: 'var(--foreground)',
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          cursor: 'pointer',
+                        }}
                       >
                         <Download size={14} />
                         <span>Download</span>
@@ -544,85 +648,162 @@ export function ArtifactsPage({
                         type="button"
                         onClick={() => setMaximized(v => !v)}
                         title={maximized ? 'Show list' : 'Maximize'}
-                        className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                        style={{
+                          display: 'flex',
+                          width: '32px',
+                          height: '32px',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: 'var(--radius-md, 8px)',
+                          border: '1px solid var(--border)',
+                          backgroundColor: 'transparent',
+                          color: 'var(--muted-foreground)',
+                          cursor: 'pointer',
+                        }}
                       >
                         {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                       </button>
                     </div>
                   </header>
 
-                  <div className="relative min-h-0 flex-1 p-4 overflow-hidden">
-                    <div className="relative h-full w-full overflow-hidden rounded-xl border border-border bg-card">
+                  <div style={{ position: 'relative', minHeight: 0, flex: 1, padding: '16px', overflow: 'hidden', boxSizing: 'border-box' }}>
+                    <div
+                      style={{
+                        position: 'relative',
+                        height: '100%',
+                        width: '100%',
+                        overflow: 'hidden',
+                        borderRadius: 'var(--radius-lg, 12px)',
+                        border: '1px solid var(--border)',
+                        backgroundColor: 'var(--card)',
+                        boxSizing: 'border-box',
+                      }}
+                    >
                       <ArtifactPreviewRenderer artifact={selectedArtifact} />
                       {selectedArtifact.mimeType === 'text/html' && (
-                        <div className="absolute bottom-3 end-3 flex items-center gap-1.5 rounded-full bg-black/75 px-3 py-1 text-[11px] text-zinc-200 border border-zinc-700/60 shadow-lg pointer-events-none">
-                          <Lock size={12} className="text-amber-400" />
-                          <span>Isolated preview — no access to account</span>
+                        <div
+                          style={{
+                            position: 'absolute',
+                            bottom: '12px',
+                            right: '12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            borderRadius: '9999px',
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            padding: '4px 12px',
+                            fontSize: '11px',
+                            color: '#e4e4e7',
+                            border: '1px solid rgba(255, 255, 255, 0.15)',
+                            pointerEvents: 'none',
+                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+                          }}
+                        >
+                          <Lock size={12} style={{ color: 'var(--warning, #eab308)' }} />
+                          <span>Isolated sandbox preview</span>
                         </div>
                       )}
                     </div>
                   </div>
                 </>
               ) : (
-                <div className="grid h-full place-items-center text-muted-foreground text-sm">
+                <div style={{ display: 'grid', height: '100%', placeItems: 'center', color: 'var(--muted-foreground)', fontSize: '14px' }}>
                   Artifact not found or deleted.
                 </div>
               )}
             </main>
           </>
         ) : (
-          <main className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+          <main className="rk-scroll" style={{ minHeight: 0, flex: 1, overflowY: 'auto', padding: '24px' }}>
             {filteredItems.length === 0 ? (
-              <div className="grid min-h-[300px] place-items-center text-center">
-                <div className="flex flex-col items-center gap-2 max-w-sm">
-                  <AlertCircle size={32} className="text-muted-foreground/60" />
-                  <p className="text-base font-medium text-foreground">No artifacts found</p>
-                  <p className="text-xs text-muted-foreground">
-                    Artifacts generated by agents or uploaded as attachments will appear here.
+              <div style={{ display: 'grid', minHeight: '320px', placeItems: 'center', textAlign: 'center' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', maxWidth: '380px' }}>
+                  <AlertCircle size={32} style={{ color: 'var(--muted-foreground)', opacity: 0.7 }} />
+                  <p style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: 'var(--foreground)' }}>
+                    No artifacts generated yet
+                  </p>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted-foreground)', lineHeight: 1.5 }}>
+                    Files, diagrams, and exports generated during agent runs will be organized here.
                   </p>
                 </div>
               </div>
             ) : viewMode === 'grid' ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                  gap: '16px',
+                }}
+              >
                 {filteredItems.map(item => (
                   <div
                     key={item.id}
-                    className="group relative flex flex-col justify-between rounded-xl border border-border bg-card p-4 hover:border-ring/50 hover:shadow-md transition-all cursor-pointer"
+                    style={{
+                      position: 'relative',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      borderRadius: 'var(--radius-lg, 12px)',
+                      border: '1px solid var(--border)',
+                      backgroundColor: 'var(--card)',
+                      padding: '16px',
+                      cursor: 'pointer',
+                      transition: 'border-color 120ms ease, box-shadow 120ms ease',
+                    }}
                     onClick={() => navigateTo(`/app/artifacts/${item.id}`)}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.borderColor = 'var(--ring)';
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = 'var(--border)';
+                      e.currentTarget.style.boxShadow = 'none';
+                    }}
                   >
                     <div>
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="grid h-9 w-9 place-items-center rounded-lg bg-accent text-accent-foreground">
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            width: '36px',
+                            height: '36px',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: 'var(--radius-md, 8px)',
+                            backgroundColor: 'var(--accent)',
+                            color: 'var(--foreground)',
+                          }}
+                        >
                           <ArtifactIcon mimeType={item.mimeType} />
                         </span>
-                        <div className="flex items-center gap-1.5">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           {item.versionCount > 1 && (
-                            <span className="rounded bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                            <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', backgroundColor: 'var(--muted)', color: 'var(--muted-foreground)' }}>
                               v{item.version}
                             </span>
                           )}
-                          <span className="rounded bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                          <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', backgroundColor: 'var(--muted)', color: 'var(--muted-foreground)' }}>
                             {mimeLabel(item.mimeType)}
                           </span>
                         </div>
                       </div>
 
-                      <h3 className="mt-3 truncate text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
+                      <h3 style={{ margin: '12px 0 0 0', fontSize: '14px', fontWeight: 600, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {item.name}
                       </h3>
                       {item.description && (
-                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground leading-relaxed">
+                        <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: 'var(--muted-foreground)', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                           {item.description}
                         </p>
                       )}
                     </div>
 
-                    <div className="mt-4 pt-3 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground">
-                      <div className="flex items-center gap-1.5 min-w-0">
+                    <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: 'var(--muted-foreground)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
                         {item.botId && (
                           <>
                             <BotAvatar identity={item.botId} size={16} />
-                            <span className="truncate max-w-[120px] font-medium text-foreground/80">
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '120px', fontWeight: 500, color: 'var(--foreground)' }}>
                               {botsById.get(item.botId)?.name ?? item.botId}
                             </span>
                             <span>·</span>
@@ -639,7 +820,16 @@ export function ArtifactsPage({
                           e.stopPropagation();
                           setPendingDelete(item);
                         }}
-                        className="opacity-0 group-hover:opacity-100 hover:text-destructive p-1 rounded transition-opacity"
+                        style={{
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--muted-foreground)',
+                          cursor: 'pointer',
+                          padding: '4px',
+                          borderRadius: '4px',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--destructive)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted-foreground)')}
                       >
                         <Trash2 size={14} />
                       </button>
@@ -648,39 +838,61 @@ export function ArtifactsPage({
                 ))}
               </div>
             ) : (
-              <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-                {filteredItems.map(item => (
+              <div style={{ borderRadius: 'var(--radius-lg, 12px)', border: '1px solid var(--border)', backgroundColor: 'var(--card)', overflow: 'hidden' }}>
+                {filteredItems.map((item, idx) => (
                   <div
                     key={item.id}
-                    className="group relative flex items-center justify-between px-4 py-3 hover:bg-accent/40 transition-colors cursor-pointer"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '12px 16px',
+                      borderBottom: idx < filteredItems.length - 1 ? '1px solid var(--border)' : 'none',
+                      cursor: 'pointer',
+                      transition: 'background-color 100ms ease',
+                    }}
                     onClick={() => navigateTo(`/app/artifacts/${item.id}`)}
+                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--accent)')}
+                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
                   >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          width: '32px',
+                          height: '32px',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: 'var(--radius-md, 8px)',
+                          backgroundColor: 'var(--accent)',
+                          color: 'var(--foreground)',
+                          flexShrink: 0,
+                        }}
+                      >
                         <ArtifactIcon mimeType={item.mimeType} />
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-sm font-medium text-foreground">
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '13.5px', fontWeight: 500, color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {item.name}
                           </span>
-                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                          <span style={{ fontSize: '10px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', backgroundColor: 'var(--muted)', color: 'var(--muted-foreground)' }}>
                             {mimeLabel(item.mimeType)}
                           </span>
                         </div>
                         {item.description && (
-                          <p className="truncate text-xs text-muted-foreground mt-0.5">
+                          <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: 'var(--muted-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {item.description}
                           </p>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0 ms-4">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '12px', color: 'var(--muted-foreground)', flexShrink: 0, marginLeft: '16px' }}>
                       {item.botId && (
-                        <div className="hidden sm:flex items-center gap-1.5">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <BotAvatar identity={item.botId} size={14} />
-                          <span className="truncate max-w-[100px]">
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100px' }}>
                             {botsById.get(item.botId)?.name ?? item.botId}
                           </span>
                         </div>
@@ -695,7 +907,16 @@ export function ArtifactsPage({
                           e.stopPropagation();
                           setPendingDelete(item);
                         }}
-                        className="opacity-0 group-hover:opacity-100 hover:text-destructive p-1.5 rounded transition-opacity"
+                        style={{
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--muted-foreground)',
+                          cursor: 'pointer',
+                          padding: '4px',
+                          borderRadius: '4px',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.color = 'var(--destructive)')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted-foreground)')}
                       >
                         <Trash2 size={14} />
                       </button>
@@ -710,20 +931,46 @@ export function ArtifactsPage({
 
       {/* Delete Confirmation Dialog */}
       {pendingDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl space-y-4">
-            <h3 className="text-lg font-semibold text-foreground">
+        <div
+          className="polaris-dialog-backdrop"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'var(--overlay)',
+            padding: '16px',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '420px',
+              borderRadius: 'var(--radius-xl, 16px)',
+              border: '1px solid var(--border)',
+              backgroundColor: 'var(--card)',
+              padding: '24px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 600, color: 'var(--foreground)' }}>
               Delete "{pendingDelete.name}"?
             </h3>
-            <p className="text-sm text-muted-foreground leading-relaxed">
+            <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted-foreground)', lineHeight: 1.5 }}>
               This will permanently delete this artifact and its versions. This action cannot be undone.
             </p>
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', paddingTop: '8px' }}>
               <button
                 type="button"
                 disabled={deleteBusy}
                 onClick={() => setPendingDelete(null)}
-                className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+                className="polaris-btn polaris-btn-outline"
+                style={{ height: '34px', fontSize: '13px' }}
               >
                 Cancel
               </button>
@@ -731,7 +978,8 @@ export function ArtifactsPage({
                 type="button"
                 disabled={deleteBusy}
                 onClick={confirmDelete}
-                className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors shadow-sm"
+                className="polaris-btn polaris-btn-destructive"
+                style={{ height: '34px', fontSize: '13px' }}
               >
                 {deleteBusy ? 'Deleting…' : 'Delete'}
               </button>
@@ -752,8 +1000,8 @@ function ArtifactPreviewRenderer({ artifact }: { artifact: ArtifactItem }) {
   if (artifact.mimeType === 'text/markdown') {
     const text = artifact.content ?? (artifact.contentBase64 ? atob(artifact.contentBase64) : '');
     return (
-      <div className="h-full overflow-y-auto bg-background p-6">
-        <article className="mx-auto max-w-[760px] text-foreground leading-relaxed">
+      <div className="rk-scroll" style={{ height: '100%', overflowY: 'auto', backgroundColor: 'var(--background)', padding: '24px' }}>
+        <article style={{ margin: '0 auto', maxWidth: '760px', color: 'var(--foreground)', lineHeight: 1.6 }}>
           <ChatMarkdown>{text}</ChatMarkdown>
         </article>
       </div>
@@ -767,8 +1015,8 @@ function ArtifactPreviewRenderer({ artifact }: { artifact: ArtifactItem }) {
   if (artifact.mimeType.startsWith('image/')) {
     const src = artifact.url || (artifact.contentBase64 ? `data:${artifact.mimeType};base64,${artifact.contentBase64}` : '');
     return (
-      <div className="grid h-full place-items-center overflow-auto bg-muted/30 p-6">
-        <img src={src} alt={artifact.name} className="max-h-full max-w-full rounded-lg shadow-sm object-contain" />
+      <div style={{ display: 'grid', height: '100%', placeItems: 'center', overflow: 'auto', backgroundColor: 'var(--muted)', padding: '24px' }}>
+        <img src={src} alt={artifact.name} style={{ maxHeight: '100%', maxWidth: '100%', borderRadius: 'var(--radius-md, 8px)', objectFit: 'contain' }} />
       </div>
     );
   }
@@ -776,17 +1024,17 @@ function ArtifactPreviewRenderer({ artifact }: { artifact: ArtifactItem }) {
   // Fallback for code/JSON/text
   const text = artifact.content ?? (artifact.contentBase64 ? atob(artifact.contentBase64) : '');
   return (
-    <div className="h-full overflow-y-auto bg-zinc-950 p-6 font-mono text-xs text-zinc-200">
-      <pre className="whitespace-pre-wrap">{text}</pre>
+    <div className="rk-scroll" style={{ height: '100%', overflowY: 'auto', backgroundColor: 'var(--card)', padding: '24px', fontFamily: 'monospace', fontSize: '12px', color: 'var(--foreground)' }}>
+      <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{text}</pre>
     </div>
   );
 }
 
 function ArtifactIcon({ mimeType, small }: { mimeType: string; small?: boolean }) {
   const size = small ? 14 : 18;
-  if (mimeType === 'text/html') return <FileCode size={size} className="text-amber-400" />;
-  if (mimeType === 'text/markdown') return <FileText size={size} className="text-sky-400" />;
-  if (mimeType === 'application/pdf') return <FileText size={size} className="text-rose-400" />;
-  if (mimeType === 'application/json') return <FileCode size={size} className="text-emerald-400" />;
-  return <FileText size={size} className="text-muted-foreground" />;
+  if (mimeType === 'text/html') return <FileCode size={size} style={{ color: '#f59e0b' }} />;
+  if (mimeType === 'text/markdown') return <FileText size={size} style={{ color: '#0284c7' }} />;
+  if (mimeType === 'application/pdf') return <FileText size={size} style={{ color: '#ef4444' }} />;
+  if (mimeType === 'application/json') return <FileCode size={size} style={{ color: '#10b981' }} />;
+  return <FileText size={size} style={{ color: 'var(--muted-foreground)' }} />;
 }

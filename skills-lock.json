@@ -133,6 +133,18 @@
       "skillPath": "skills/opinion/SKILL.md",
       "computedHash": "feb7f6c0e528951481c49df08dffb1dea0adcee3746bb75453706a18d0b132b0"
     },
+    "pi-dev-rules": {
+      "source": "agents365-ai/365-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/pi-dev-rules/skills/pi-dev-rules/SKILL.md",
+      "computedHash": "3e0d821bdab2e57056df167f6afbf0dfb36c1e31eb1984db8cf167eeda4d8fae"
+    },
+    "pi-durable-dev-rules": {
+      "source": "agents365-ai/365-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/pi-durable-dev-rules/skills/pi-durable-dev-rules/SKILL.md",
+      "computedHash": "9d319315ad3a9b5f9386fd787e5e8374b499c8a1d30947da8be5554b92e137e3"
+    },
     "proving-change-safety": {
       "source": "afaraha8403/balakit",
       "sourceType": "github",

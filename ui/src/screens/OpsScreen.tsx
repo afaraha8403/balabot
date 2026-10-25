@@ -43,7 +43,7 @@ export function OpsScreen() {
         </h2>
         <p style={{margin: 0, fontSize: '13px', color: 'var(--muted-foreground)'}}>
           {state.phase === 'ready'
-            ? `Supervised services inside the container — ${running} of ${services.length} running.`
+            ? `Supervised native engine services — ${running} of ${services.length} running.`
             : 'Supervision, gateway and tunnel health.'}
         </p>
       </div>
@@ -160,6 +160,15 @@ export function OpsScreen() {
               </span>
             </div>
           </div>
+        </div>
+      ) : state.phase === 'ready' ? (
+        <div style={{padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: 'var(--muted-foreground)'}}>
+          <h4 style={{margin: '0 0 6px 0', fontSize: '15px', fontWeight: 600, color: 'var(--foreground)'}}>
+            No background services registered
+          </h4>
+          <p style={{margin: 0, fontSize: '13px', maxWidth: '380px', lineHeight: 1.5}}>
+            Supervised native engine processes will appear here when active.
+          </p>
         </div>
       ) : (
         <ApiNotice state={state} />

@@ -117,9 +117,9 @@ export function UserMenuPopover({
           data-testid="user-menu-popover"
           className="rk-scroll"
           style={{
-            position: 'absolute',
-            bottom: 'calc(100% + 6px)',
-            left: 0,
+            position: 'fixed',
+            bottom: '56px',
+            left: '12px',
             width: '224px',
             maxHeight: '380px',
             overflowY: 'auto',
@@ -129,7 +129,7 @@ export function UserMenuPopover({
             borderRadius: 'var(--radius-lg, 12px)',
             boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3)',
             padding: '4px',
-            zIndex: 100,
+            zIndex: 1000,
             boxSizing: 'border-box',
           }}
         >
@@ -231,7 +231,7 @@ export function UserMenuPopover({
               <line x1="6" y1="6" x2="6.01" y2="6" />
               <line x1="6" y1="18" x2="6.01" y2="18" />
             </svg>
-            <span>Container Ops</span>
+            <span>System Ops</span>
           </button>
 
           <div className="polaris-menu-separator" />

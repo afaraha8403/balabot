@@ -1,0 +1,271 @@
+#!/usr/bin/env python3
+"""Build the combined reference markdown files from a local Pi checkout.
+
+Reads individual .md files from the pi monorepo and combines them into the
+grouped reference files used by this skill. Nothing is fetched from the network.
+
+Usage: python3 scripts/build-references.py <pi_repo_root> [output_dir]
+"""
+
+import os
+import sys
+
+REPO = sys.argv[1]  # path to the pi monorepo checkout
+OUT = (
+    sys.argv[2]
+    if len(sys.argv) > 2
+    else os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "references"
+    )
+)
+
+# (output_file, [(repo-relative source_file, header), ...])
+BUNDLES = {
+    "cli-and-usage.md": [
+        ("packages/coding-agent/docs/quickstart.md", "Quickstart"),
+        ("packages/coding-agent/docs/how-pi-works.md", "How Pi Works"),
+        ("packages/coding-agent/docs/usage.md", "Using Pi"),
+        ("packages/coding-agent/docs/cli.md", "Command Line"),
+        ("packages/coding-agent/docs/slash-commands.md", "Slash Commands"),
+        (
+            "packages/coding-agent/docs/environment-variables.md",
+            "Environment Variables",
+        ),
+        ("packages/coding-agent/docs/sessions.md", "Sessions"),
+        ("packages/coding-agent/docs/keybindings.md", "Keybindings"),
+    ],
+    "providers-and-models.md": [
+        ("packages/coding-agent/docs/providers.md", "Providers"),
+        ("packages/coding-agent/docs/llama-cpp.md", "llama.cpp Router Setup"),
+        (
+            "packages/coding-agent/docs/nvidia-rtx-llama-cpp.md",
+            "NVIDIA RTX and llama.cpp",
+        ),
+        ("packages/coding-agent/docs/models.md", "Custom Models"),
+        ("packages/coding-agent/docs/custom-provider.md", "Custom Providers"),
+    ],
+    "settings-and-compaction.md": [
+        ("packages/coding-agent/docs/configuration.md", "Configuration"),
+        ("packages/coding-agent/docs/settings.md", "Settings"),
+        ("packages/coding-agent/docs/compaction.md", "Compaction"),
+    ],
+    "extending-pi.md": [
+        ("packages/coding-agent/docs/extensions.md", "Extensions"),
+        ("packages/coding-agent/docs/skills.md", "Skills"),
+        ("packages/coding-agent/docs/prompt-templates.md", "Prompt Templates"),
+        ("packages/coding-agent/docs/themes.md", "Themes"),
+        ("packages/coding-agent/docs/packages.md", "Pi Packages"),
+        ("packages/coding-agent/docs/virtual-models.md", "Virtual Models"),
+    ],
+    "mcp.md": [
+        ("packages/coding-agent/docs/mcp.md", "MCP Servers"),
+    ],
+    "codemode.md": [
+        ("packages/coding-agent/docs/codemode.md", "Codemode"),
+    ],
+    "tui-components.md": [
+        ("packages/coding-agent/docs/tui.md", "TUI Components"),
+    ],
+    "security-and-containerization.md": [
+        ("packages/coding-agent/docs/security.md", "Security"),
+        ("packages/coding-agent/docs/containerization.md", "Containerization"),
+    ],
+    "session-format.md": [
+        ("packages/coding-agent/docs/session-format.md", "Session File Format"),
+        ("packages/coding-agent/docs/message-types.md", "Message Types"),
+    ],
+    "programmatic.md": [
+        ("packages/coding-agent/docs/sdk.md", "SDK"),
+        ("packages/coding-agent/docs/cli-integration.md", "CLI Integration"),
+        ("packages/coding-agent/docs/json.md", "JSON Event Stream"),
+        ("packages/coding-agent/docs/rpc.md", "RPC Protocol"),
+        ("packages/coding-agent/docs/rpc-commands.md", "RPC Commands"),
+        ("packages/coding-agent/docs/rpc-extension-ui.md", "RPC Extension UI"),
+    ],
+    "platform-setup.md": [
+        ("packages/coding-agent/docs/windows.md", "Windows"),
+        ("packages/coding-agent/docs/termux.md", "Termux on Android"),
+        ("packages/coding-agent/docs/tmux.md", "tmux"),
+        ("packages/coding-agent/docs/terminal-setup.md", "Terminal Setup"),
+        ("packages/coding-agent/docs/shell-aliases.md", "Shell Aliases"),
+    ],
+    "development.md": [
+        ("README.md", "Monorepo Overview"),
+        ("AGENTS.md", "Development Rules"),
+        ("CONTRIBUTING.md", "Contributing"),
+    ],
+    "chord.md": [
+        ("packages/chord/README.md", "Overview"),
+        ("packages/chord/docs/guide.md", "Guide"),
+        ("packages/chord/docs/spec.md", "Specification"),
+        ("packages/chord/docs/tutorial.md", "Tutorial"),
+        ("packages/chord/src/delta/README.md", "Delta Tracking"),
+    ],
+    "agent-harness.md": [
+        ("packages/durable/README.md", "Durable Agent Harness"),
+        ("packages/agent/README.md", "Agent Core"),
+        ("packages/telemetry/README.md", "Telemetry"),
+    ],
+    "durable-spec.md": [
+        ("packages/durable/docs/spec.md", "Pico5 Specification"),
+    ],
+}
+
+# Map: output_file → (header_line, source_urls_comment_line)
+HEADER_DOCS = {
+    "cli-and-usage.md": (
+        "# Pi: CLI, Usage, Sessions & Keybindings",
+        "Source: https://pi.dev/docs/latest/quickstart, /how-pi-works, /usage, /cli, /slash-commands, /environment-variables, /sessions, /keybindings",
+    ),
+    "providers-and-models.md": (
+        "# Pi: Providers & Custom Models",
+        "Source: https://pi.dev/docs/latest/providers, /llama-cpp, /nvidia-rtx-llama-cpp, /models, /custom-provider",
+    ),
+    "settings-and-compaction.md": (
+        "# Pi: Configuration, Settings & Compaction",
+        "Source: https://pi.dev/docs/latest/configuration, /settings, /compaction",
+    ),
+    "extending-pi.md": (
+        "# Extending Pi: Extensions, Skills, Prompt Templates, Themes, Packages, Virtual Models",
+        "Source: https://pi.dev/docs/latest/extensions, /skills, /prompt-templates, /themes, /packages, /virtual-models\nSee also: `tui-components.md` (custom UI), `session-format.md` (entry/message schema).",
+    ),
+    "mcp.md": (
+        "# Pi: MCP Servers",
+        "Source: https://pi.dev/docs/latest/mcp\nBuilt-in MCP support, added 2026-09-29 (`mcp.json`, exposure modes and `codemode`, resources, permissions). An extension that registers `/mcp`, such as `pi-mcp-adapter`, replaces it; `pi config` can disable the built-in extension instead.",
+    ),
+    "codemode.md": (
+        "# Pi: Codemode",
+        "Source: https://pi.dev/docs/latest/codemode\nThe QuickJS scripting layer for tool calls and non-LLM models: script input and the `// @options:` line, globals (`tools.<name>()`, `text()`, `image()`, `console.log()`, `store()`/`load()`, `searchTools()`, `describeTool()`), what tool calls resolve to, classifier and image models, namespaces and the inline budget, and limits.",
+    ),
+    "tui-components.md": (
+        "# Pi: TUI Components",
+        "Source: https://pi.dev/docs/latest/tui",
+    ),
+    "security-and-containerization.md": (
+        "# Pi: Security & Containerization",
+        "Source: https://pi.dev/docs/latest/security, /containerization",
+    ),
+    "session-format.md": (
+        "# Pi: Session Format & Message Types",
+        "Source: https://pi.dev/docs/latest/session-format, /message-types",
+    ),
+    "programmatic.md": (
+        "# Pi: Programmatic Usage (SDK, CLI, RPC, JSON)",
+        "Source: https://pi.dev/docs/latest/sdk, /cli-integration, /json, /rpc, /rpc-commands, /rpc-extension-ui",
+    ),
+    "platform-setup.md": (
+        "# Pi: Platform Setup",
+        "Source: https://pi.dev/docs/latest/windows, /termux, /tmux, /terminal-setup, /shell-aliases",
+    ),
+    "development.md": (
+        "# Pi: Monorepo, Development & Contributing",
+        "Source: repository-root `README.md`, `AGENTS.md`, `CONTRIBUTING.md`\nUpstream folded the `docs/development.md` page into `docs/index.md`; the package list, build-from-source commands, and contribution rules now live in the repository-root files bundled here.",
+    ),
+    "chord.md": (
+        "# Chord: Typed Host Runtime",
+        "Source: `packages/chord/README.md`, `docs/guide.md`, `docs/spec.md`, `docs/tutorial.md`, `src/delta/README.md`\n`@earendil-works/chord` is an application-neutral runtime used by `pi-durable`, but not by the Pi coding agent. It is not covered by the Pi user docs. Release 1.2.0 replaced the facet and service runtime with a typed host runtime (contracts, hosts, links, hot reload) and removed `PLANNING.md`, the `./bundler` export, and the `pi-client`/`pi-protocol`/`pi-server` packages. The specification and the guide describe the current runtime; the tutorial is a worked example.",
+    ),
+    "agent-harness.md": (
+        "# Pi Agent Runtime, Durable Harness, and Telemetry",
+        "Source: `packages/durable/README.md`, `packages/agent/README.md`, `packages/telemetry/README.md`\nInternal runtime packages, not user documentation. `@earendil-works/pi-durable` is the durable agent harness, `@earendil-works/pi-agent-core` is the tool-calling and state core, and `@earendil-works/pi-telemetry` holds the vendor-neutral telemetry contracts. The durable harness is experimental and its API changes between releases; the normative Pico5 specification is bundled in `durable-spec.md`. See the shipped CLI docs in the other reference files for user-facing behavior.",
+    ),
+    "durable-spec.md": (
+        "# Pico5: Durable Harness Specification",
+        "Source: `packages/durable/docs/spec.md`\nThe normative specification behind `@earendil-works/pi-durable`, a design document for an experimental package rather than a stable API contract. Long: read `agent-harness.md` for the public runtime API first, this file for the record, task, submission, and extension semantics underneath it.",
+    ),
+}
+
+GH_BASE = "https://raw.githubusercontent.com/earendil-works/pi/main"
+
+
+def read_file(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except OSError as e:
+        raise SystemExit(f"failed to read {path}: {e}")
+
+
+def write_file(path, content):
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+    except OSError as e:
+        raise SystemExit(f"failed to write {path}: {e}")
+    print(f"  wrote {path}")
+
+
+def strip_source_comment(lines):
+    """Remove the first line if it's a source comment like 'Source: https://...'"""
+    while lines and lines[0].strip().startswith("Source:"):
+        lines.pop(0)
+    return lines
+
+
+def strip_leading_meta(lines):
+    """Remove leading h1 (# Title), blockquote (> ...), and HTML anchor/badge lines."""
+    while lines:
+        stripped = lines[0].strip()
+        if (
+            stripped == ""
+            or stripped.startswith("# ")
+            or stripped.startswith(">")
+            or stripped.startswith("<")
+        ):
+            lines.pop(0)
+        else:
+            break
+    return lines
+
+
+def strip_trailing_blank_lines(lines):
+    while lines and lines[-1].strip() == "":
+        lines.pop()
+    return lines
+
+
+def build():
+    if not os.path.isdir(REPO):
+        raise SystemExit(f"not a directory: {REPO}")
+
+    missing = []
+    for out_name, sources in BUNDLES.items():
+        hdr = HEADER_DOCS[out_name]
+        header = hdr[0] + "\n"
+        header += hdr[1] + "\n\n"
+        header += "---\n\n"
+        header += "> **Auto-built from individual doc pages.**\n"
+        header += f"> Sources: {', '.join(GH_BASE + '/' + s[0] for s in sources)}\n\n"
+
+        parts = []
+        for src_name, section_header in sources:
+            src_path = os.path.join(REPO, src_name)
+            if not os.path.exists(src_path):
+                print(f"  WARNING: {src_path} not found, skipping", file=sys.stderr)
+                missing.append(src_name)
+                continue
+            content = read_file(src_path)
+            lines = content.split("\n")
+
+            # Remove leading h1, blockquote, and blank lines (we use our own section headers)
+            lines = strip_leading_meta(lines)
+
+            # Remove trailing blank lines
+            lines = strip_trailing_blank_lines(lines)
+            lines = strip_source_comment(lines)
+
+            section_content = "\n".join(lines).strip()
+            parts.append(f"## {section_header}\n\n{section_content}")
+
+        full = header + "\n\n---\n\n".join(parts) + "\n"
+        out_path = os.path.join(OUT, out_name)
+        write_file(out_path, full)
+
+    if missing:
+        raise SystemExit(f"missing source files: {', '.join(missing)}")
+    print("Done building references.")
+
+
+if __name__ == "__main__":
+    build()

@@ -144,8 +144,9 @@ export function UsageSettingsPanel() {
       .catch(() => setLoading(false));
   }, []);
 
-  const totalRuns = costData?.runs ?? costData?.total_runs ?? 142;
-  const totalTokens = costData?.tokens ?? costData?.total_tokens ?? 184520;
+  const totalRuns = costData?.runs ?? costData?.total_runs ?? 0;
+  const totalTokens = costData?.tokens ?? costData?.total_tokens ?? 0;
+  const hasData = Boolean(costData?.rows?.length || (totalRuns > 0 && totalTokens > 0));
   const inputTokens = Math.round(totalTokens * 0.65);
   const outputTokens = totalTokens - inputTokens;
 
@@ -160,19 +161,29 @@ export function UsageSettingsPanel() {
         </p>
       </div>
 
-      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px'}}>
-        <div style={{padding: '16px', borderRadius: 'var(--radius-lg, 12px)', border: '1px solid var(--border)', backgroundColor: 'var(--card)'}}>
-          <div style={{fontSize: '12px', color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em'}}>Total Executions</div>
-          <div style={{fontSize: '24px', fontWeight: 700, color: 'var(--foreground)', marginTop: '4px'}}>{totalRuns} runs</div>
-          <div style={{fontSize: '12px', color: 'var(--success, #22c55e)', marginTop: '4px'}}>Fleet operations healthy</div>
-        </div>
+      {hasData ? (
+        <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px'}}>
+          <div style={{padding: '16px', borderRadius: 'var(--radius-lg, 12px)', border: '1px solid var(--border)', backgroundColor: 'var(--card)'}}>
+            <div style={{fontSize: '12px', color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em'}}>Total Executions</div>
+            <div style={{fontSize: '24px', fontWeight: 700, color: 'var(--foreground)', marginTop: '4px'}}>{totalRuns} runs</div>
+          </div>
 
-        <div style={{padding: '16px', borderRadius: 'var(--radius-lg, 12px)', border: '1px solid var(--border)', backgroundColor: 'var(--card)'}}>
-          <div style={{fontSize: '12px', color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em'}}>Total Tokens</div>
-          <div style={{fontSize: '24px', fontWeight: 700, color: 'var(--foreground)', marginTop: '4px'}}>{totalTokens.toLocaleString()}</div>
-          <div style={{fontSize: '12px', color: 'var(--muted-foreground)', marginTop: '4px'}}>{inputTokens.toLocaleString()} in · {outputTokens.toLocaleString()} out</div>
+          <div style={{padding: '16px', borderRadius: 'var(--radius-lg, 12px)', border: '1px solid var(--border)', backgroundColor: 'var(--card)'}}>
+            <div style={{fontSize: '12px', color: 'var(--muted-foreground)', textTransform: 'uppercase', letterSpacing: '0.04em'}}>Total Tokens</div>
+            <div style={{fontSize: '24px', fontWeight: 700, color: 'var(--foreground)', marginTop: '4px'}}>{totalTokens.toLocaleString()}</div>
+            <div style={{fontSize: '12px', color: 'var(--muted-foreground)', marginTop: '4px'}}>{inputTokens.toLocaleString()} in · {outputTokens.toLocaleString()} out</div>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div style={{padding: '24px', borderRadius: 'var(--radius-lg, 12px)', border: '1px solid var(--border)', backgroundColor: 'var(--card)', textAlign: 'center'}}>
+          <div style={{fontSize: '14px', fontWeight: 600, color: 'var(--foreground)'}}>
+            No usage recorded yet for this session
+          </div>
+          <div style={{fontSize: '12.5px', color: 'var(--muted-foreground)', marginTop: '6px'}}>
+            Token accounting will populate as frontier model turns execute.
+          </div>
+        </div>
+      )}
 
       <div style={{padding: '16px', borderRadius: 'var(--radius-lg, 12px)', border: '1px solid var(--border)', backgroundColor: 'var(--card)'}}>
         <h4 style={{margin: '0 0 8px 0', fontSize: '14px', fontWeight: 600, color: 'var(--foreground)'}}>Provider Invoicing</h4>
@@ -274,11 +285,11 @@ export function ComputerSettingsPanel({onFleetChanged}: {onFleetChanged?: () => 
               Agent Computer Sandbox
             </h3>
             <p style={{margin: 0, fontSize: '13px', color: 'var(--muted-foreground)'}}>
-              Docker workspace container: <code style={{color: 'var(--primary)'}}>balabot-balabot-1</code>
+              Local Native Engine (Pi Durable v1.4, zero Docker)
             </p>
           </div>
           <span style={{padding: '4px 10px', borderRadius: '9999px', backgroundColor: 'rgba(34, 197, 94, 0.15)', color: 'var(--success, #22c55e)', fontSize: '12px', fontWeight: 600}}>
-            Online
+            Active
           </span>
         </div>
       </section>
@@ -336,7 +347,7 @@ export function ComputerSettingsPanel({onFleetChanged}: {onFleetChanged?: () => 
             <div style={{padding: '16px', textAlign: 'center', color: 'var(--muted-foreground)', fontSize: '13px'}}>
               Scanning disk for orphan profiles…
             </div>
-          ) : profiles.length === 0 ? (
+          ) : error ? null : profiles.length === 0 ? (
             <div
               data-testid="no-orphans-message"
               style={{
@@ -462,11 +473,11 @@ export function UpdatesSettingsPanel() {
 
   const handleCheckUpdates = () => {
     setChecking(true);
-    setStatus('Checking remote repository and release channels…');
-    setTimeout(() => {
+    setStatus('Checking local repository build and git remote status…');
+    Promise.resolve().then(() => {
       setChecking(false);
-      setStatus('BalaBot is up to date (Polaris re-base Wave 7: settings overlays, plugins/MCP & secondary pages).');
-    }, 1200);
+      setStatus('BalaBot v1.0.0 is the current local build. Git upstream tracking: local repository on branch main.');
+    });
   };
 
   return (

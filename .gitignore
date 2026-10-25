@@ -24,9 +24,13 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+node_modules/
 ui/node_modules/
 ui/dist/
 ui/tsconfig.tsbuildinfo
+src-tauri/target/
+.wrangler/
+screenshots/
 
 # e2e harness scratch state (W1/W2/W5/W9 fixtures, container snapshots) —
 # regenerated every run; never source, never committed.

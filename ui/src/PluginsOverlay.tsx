@@ -39,14 +39,14 @@ export const FEATURED_CONNECTORS: ConnectorTile[] = [
     name: 'GitHub',
     category: 'Developer Tools',
     description: 'Repository access, pull request reviews, commit workflows, and issue tracking.',
-    connected: true,
+    connected: false,
   },
   {
     id: 'slack',
     name: 'Slack',
     category: 'Communication',
     description: 'Post updates, listen to channel mentions, and coordinate team notifications.',
-    connected: true,
+    connected: false,
   },
   {
     id: 'postgres',
@@ -129,10 +129,19 @@ export function PluginsOverlay({
     }
   }, [activeTab, reloadSkills]);
 
+  const [connectorNotice, setConnectorNotice] = useState<string | null>(null);
+
   const toggleConnector = (id: string) => {
-    setConnectors(prev =>
-      prev.map(c => (c.id === id ? {...c, connected: !c.connected} : c))
-    );
+    const conn = connectors.find(c => c.id === id);
+    if (!conn) return;
+    if (!conn.connected) {
+      setConnectorNotice(`${conn.name} connector requires backend OAuth credentials. Local offline engine has no active token.`);
+      setTimeout(() => setConnectorNotice(null), 4000);
+    } else {
+      setConnectors(prev =>
+        prev.map(c => (c.id === id ? {...c, connected: false} : c))
+      );
+    }
   };
 
   const handlePin = async (entry: SkillEntry) => {
@@ -320,6 +329,13 @@ export function PluginsOverlay({
               boxSizing: 'border-box',
             }}
           >
+            {connectorNotice ? (
+              <div role="status" style={{padding: '10px 14px', borderRadius: '8px', backgroundColor: 'var(--accent)', color: 'var(--foreground)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px'}}>
+                <Info size={16} style={{color: 'var(--warning, #eab308)', flexShrink: 0}} />
+                <span>{connectorNotice}</span>
+              </div>
+            ) : null}
+
             {/* Search Box */}
             <div style={{position: 'relative'}}>
               <input

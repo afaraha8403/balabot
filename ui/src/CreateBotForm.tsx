@@ -13,8 +13,9 @@ type Props = {
   onFleetChanged?: () => void;
 };
 
-const STATUS_COLOR: Record<BotProposal['status'], string> = {
+const STATUS_COLOR: Record<string, string> = {
   proposed: 'var(--warning, #eab308)',
+  pending: 'var(--warning, #eab308)',
   approved: 'var(--success, #22c55e)',
   rejected: 'var(--destructive, #ef4444)',
   registered: 'var(--success, #22c55e)',
@@ -88,8 +89,8 @@ export function CreateBotForm({onCancel, onFleetChanged}: Props) {
     }
   };
 
-  const pending = proposals.filter(p => p.status === 'proposed');
-  const decided = proposals.filter(p => p.status !== 'proposed');
+  const pending = proposals.filter(p => p.status === 'proposed' || (p.status as string) === 'pending');
+  const decided = proposals.filter(p => p.status !== 'proposed' && (p.status as string) !== 'pending');
 
   return (
     <div data-testid="create-bot-form" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>

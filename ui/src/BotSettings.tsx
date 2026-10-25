@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react';
 import {Switch} from '@astryxdesign/core/Switch';
 import {isShippedBot, updateBot, type Bot, type BotEditableMeta} from './api';
 import {BotAvatar} from './BotAvatar';
+import {AgentModelPicker} from './AgentModelPicker';
 
 type Props = {
   bot: Bot;
@@ -165,12 +166,51 @@ export function BotSettings({bot, showThinking, onShowThinkingChange, onClose, o
         <span style={{fontSize: '13px', fontWeight: 600, color: 'var(--foreground)'}}>
           Display
         </span>
+        <label htmlFor="show-thinking" style={{position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0}}>
+          Show thinking
+        </label>
         <Switch
+          id="show-thinking"
           label="Show thinking"
+          aria-label="Show thinking"
           value={showThinking}
           onChange={onShowThinkingChange}
           description="Show the bot's reasoning as a collapsible note under each reply."
         />
+      </div>
+
+      {/* Frontier Model Configuration (Per-Agent) */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          padding: '10px 12px',
+          borderRadius: '8px',
+          border: '1px solid var(--border)',
+          backgroundColor: 'var(--muted)',
+        }}
+      >
+        <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
+          <span style={{fontSize: '13px', fontWeight: 600, color: 'var(--foreground)'}}>
+            Frontier Model
+          </span>
+          <span style={{fontSize: '11px', color: 'var(--muted-foreground)'}}>
+            Auto-discovered
+          </span>
+        </div>
+        <AgentModelPicker
+          bot={bot}
+          fullWidth
+          onModelChange={(newModel) => {
+            onUpdated(bot.id);
+            setSuccess(`Frontier model updated to ${newModel}`);
+            setTimeout(() => setSuccess(null), 3000);
+          }}
+        />
+        <span style={{fontSize: '11.5px', color: 'var(--muted-foreground)', lineHeight: 1.4}}>
+          Select from auto-discovered frontier models for {bot.name}.
+        </span>
       </div>
 
       {/* Field inputs */}

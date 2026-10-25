@@ -3,12 +3,18 @@ import { Renderer } from '@openuidev/react-lang';
 import type { ActionEvent } from '@openuidev/lang-core';
 import { ChatMarkdown } from '../ChatMarkdown';
 import { balabotLibrary } from './library';
+import { OpenUIContext } from './OpenUIContext';
 import './openui.css';
+
+export * from './descriptor';
+export * from './OpenUIContext';
 
 interface Props {
   content: string;
   isStreaming?: boolean;
   onAction?: (event: ActionEvent) => void;
+  disabled?: boolean;
+  superseded?: boolean;
 }
 
 interface ParsedMessageParts {
@@ -82,31 +88,47 @@ export function extractOpenUI(content: string): ParsedMessageParts {
  * Dual-mode renderer that renders standard chat Markdown via ChatMarkdown
  * and seamlessly embeds interactive OpenUI components inside chat messages.
  */
-export function OpenUIRenderer({ content, isStreaming = false, onAction }: Props) {
+export function OpenUIRenderer({
+  content,
+  isStreaming = false,
+  onAction,
+  disabled = false,
+  superseded = false,
+}: Props) {
   const parts = extractOpenUI(content);
 
   if (!parts.hasOpenUI) {
     return <ChatMarkdown streaming={isStreaming}>{content}</ChatMarkdown>;
   }
 
+  const containerClass = [
+    'openui-bubble-container',
+    disabled ? 'openui-disabled' : '',
+    superseded ? 'openui-superseded' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div className="openui-bubble-container">
-      {parts.before ? (
-        <ChatMarkdown streaming={false}>{parts.before}</ChatMarkdown>
-      ) : null}
+    <OpenUIContext.Provider value={{ disabled, superseded }}>
+      <div className={containerClass}>
+        {parts.before ? (
+          <ChatMarkdown streaming={false}>{parts.before}</ChatMarkdown>
+        ) : null}
 
-      <div style={{ margin: '8px 0' }}>
-        <Renderer
-          library={balabotLibrary}
-          response={parts.openuiCode}
-          isStreaming={isStreaming}
-          onAction={onAction}
-        />
+        <div style={{ margin: '8px 0' }}>
+          <Renderer
+            library={balabotLibrary}
+            response={parts.openuiCode}
+            isStreaming={isStreaming}
+            onAction={onAction}
+          />
+        </div>
+
+        {parts.after ? (
+          <ChatMarkdown streaming={isStreaming}>{parts.after}</ChatMarkdown>
+        ) : null}
       </div>
-
-      {parts.after ? (
-        <ChatMarkdown streaming={isStreaming}>{parts.after}</ChatMarkdown>
-      ) : null}
-    </div>
+    </OpenUIContext.Provider>
   );
 }

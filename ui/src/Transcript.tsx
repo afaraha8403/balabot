@@ -174,7 +174,7 @@ export const Transcript = memo(function Transcript({
   );
 
   return (
-    <div className="relative flex min-h-0 flex-1" style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+    <div style={{ position: 'relative', flex: 1, minHeight: 0, width: '100%' }}>
       <div
         ref={scrollRef}
         data-testid="transcript"
@@ -213,15 +213,19 @@ export const Transcript = memo(function Transcript({
             following.current = false;
           }
         }}
-        className="rk-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-5 md:px-7 md:py-6"
+        className="rk-scroll"
         style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
           display: 'flex',
-          flex: 1,
-          minHeight: 0,
           flexDirection: 'column',
           gap: 'var(--spacing-2, 0.5rem)',
           overflowY: 'auto',
           padding: '1.25rem 1rem',
+          boxSizing: 'border-box',
         }}
       >
         {children}

@@ -14,7 +14,7 @@
     "@astryxdesign/core": "^0.6.3",
     "@astryxdesign/theme-neutral": "^0.6.3",
     "@heroicons/react": "^2.2.0",
-    "@openuidev/react-lang": "^0.3.0",
+    "@openuidev/react-lang": "^1.0.1",
     "@stylexjs/stylex": "^0.19.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -173,6 +173,26 @@ export function ModelSettingsOverlay({embedded = true}: Props) {
   const [apiKeyInput, setApiKeyInput] = useState<string>('');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSavedRecently, setIsSavedRecently] = useState(false);
+  const [serverProviders, setServerProviders] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    // Check auto-discovered models / keys status from backend
+    fetch('/api/models')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.models && Array.isArray(data.models) && data.models.length > 0) {
+          const provs: Record<string, boolean> = {};
+          for (const m of data.models) {
+            if (m.provider) provs[m.provider] = true;
+          }
+          if (data.models.some((m: any) => m.provider === 'openrouter' || m.id?.includes('/'))) {
+            provs['openrouter'] = true;
+          }
+          setServerProviders(provs);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Sync state on provider switch or mount
   useEffect(() => {
@@ -182,7 +202,9 @@ export function ModelSettingsOverlay({embedded = true}: Props) {
   }, [providerId]);
 
   const currentProvider = MODEL_PROVIDERS.find(p => p.id === providerId) ?? MODEL_PROVIDERS[0];
-  const isKeySaved = Boolean(savedKeys[providerId]?.trim());
+  const isServerConfigured = Boolean(serverProviders[providerId]);
+  const isLocalConfigured = Boolean(savedKeys[providerId]?.trim());
+  const isKeySaved = isServerConfigured || isLocalConfigured;
   const isDefaultProvider = settings.defaultProvider === providerId;
 
   const handleSaveKey = () => {
@@ -246,7 +268,7 @@ export function ModelSettingsOverlay({embedded = true}: Props) {
             Connect LLM provider credentials and select primary reasoning models for the agent fleet.
           </p>
         </div>
-        {isKeySaved ? (
+        {isServerConfigured ? (
           <span
             data-testid="provider-connected-badge"
             style={{
@@ -261,7 +283,24 @@ export function ModelSettingsOverlay({embedded = true}: Props) {
               fontWeight: 600,
             }}
           >
-            <Check size={13} strokeWidth={2.5} /> Connected
+            <Check size={13} strokeWidth={2.5} /> Configured on server (env/vault)
+          </span>
+        ) : isLocalConfigured ? (
+          <span
+            data-testid="provider-connected-badge"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 10px',
+              borderRadius: '9999px',
+              backgroundColor: 'rgba(34, 197, 94, 0.15)',
+              color: 'var(--success, #22c55e)',
+              fontSize: '12px',
+              fontWeight: 600,
+            }}
+          >
+            <Check size={13} strokeWidth={2.5} /> Connected (Local)
           </span>
         ) : (
           <span
@@ -316,7 +355,7 @@ export function ModelSettingsOverlay({embedded = true}: Props) {
         >
           {MODEL_PROVIDERS.map(p => {
             const isSelected = p.id === providerId;
-            const hasKey = Boolean(savedKeys[p.id]?.trim());
+            const hasKey = Boolean(savedKeys[p.id]?.trim()) || Boolean(serverProviders[p.id]);
             return (
               <button
                 key={p.id}

@@ -131,6 +131,10 @@ export function ApprovalRulesSettings({embedded = true}: Props) {
         <p style={{margin: 0, fontSize: '13px', color: 'var(--muted-foreground)'}}>
           Bots execute tools automatically by default. Add exceptions for tool classes that require your review first.
         </p>
+        <div style={{marginTop: '8px', fontSize: '12px', color: 'var(--muted-foreground)', display: 'flex', alignItems: 'center', gap: '6px'}}>
+          <span style={{display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', backgroundColor: 'var(--success, #22c55e)'}} />
+          <span>Local Governance Engine: Tool execution approval rules are staged locally and enforced per session.</span>
+        </div>
       </div>
 
       {statusNotice ? (

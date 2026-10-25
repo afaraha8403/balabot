@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { defineComponent, createLibrary, useTriggerAction } from '@openuidev/react-lang';
 import { z } from 'zod';
+import { useOpenUIContext } from './OpenUIContext';
 import './openui.css';
 
 /**
@@ -19,25 +20,23 @@ export const HireAgentCard = defineComponent({
   }),
   component: ({ props }) => {
     const triggerAction = useTriggerAction();
+    const { disabled, superseded } = useOpenUIContext();
     const [name, setName] = useState(props.name);
     const [role, setRole] = useState(props.role);
     const [desc, setDesc] = useState(props.description);
     const [status, setStatus] = useState<'pending' | 'approved' | 'dismissed'>('pending');
+    const [submitting, setSubmitting] = useState(false);
+
+    const isEffectivelyDisabled = Boolean(disabled || superseded || status !== 'pending' || submitting);
 
     const handleApprove = () => {
+      if (isEffectivelyDisabled) return;
+      setSubmitting(true);
       setStatus('approved');
       triggerAction(`Approve & Hire: ${role} (${name})`, 'HireAgentForm', {
         type: 'approve_hire',
         params: { name, role, description: desc },
       });
-      // Fire custom DOM event for parent App listeners
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent('balabot:openui-hire-agent', {
-            detail: { name, role, description: desc },
-          })
-        );
-      }
     };
 
     const handleDismiss = () => {
@@ -65,7 +64,7 @@ export const HireAgentCard = defineComponent({
               type="text"
               className="openui-form-input"
               value={name}
-              disabled={status !== 'pending'}
+              disabled={isEffectivelyDisabled}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. marketing-seo-expert"
             />
@@ -77,7 +76,7 @@ export const HireAgentCard = defineComponent({
               type="text"
               className="openui-form-input"
               value={role}
-              disabled={status !== 'pending'}
+              disabled={isEffectivelyDisabled}
               onChange={(e) => setRole(e.target.value)}
               placeholder="e.g. Marketing & SEO Expert"
             />
@@ -88,7 +87,7 @@ export const HireAgentCard = defineComponent({
             <textarea
               className="openui-form-textarea"
               value={desc}
-              disabled={status !== 'pending'}
+              disabled={isEffectivelyDisabled}
               onChange={(e) => setDesc(e.target.value)}
               rows={2}
             />
@@ -115,6 +114,7 @@ export const HireAgentCard = defineComponent({
                 type="button"
                 className="openui-btn openui-btn-primary"
                 onClick={handleApprove}
+                disabled={isEffectivelyDisabled}
               >
                 Approve & Hire Agent
               </button>
@@ -122,9 +122,15 @@ export const HireAgentCard = defineComponent({
                 type="button"
                 className="openui-btn openui-btn-secondary"
                 onClick={handleDismiss}
+                disabled={isEffectivelyDisabled}
               >
                 Dismiss
               </button>
+              {superseded && (
+                <span className="openui-superseded-banner" data-testid="openui-superseded-banner">
+                  (Superseded by updated request)
+                </span>
+              )}
             </>
           )}
 
@@ -205,12 +211,16 @@ export const ConfirmButtons = defineComponent({
   }),
   component: ({ props }) => {
     const triggerAction = useTriggerAction();
+    const { disabled, superseded } = useOpenUIContext();
+    const isEffectivelyDisabled = Boolean(disabled || superseded);
+
     return (
       <div className="openui-actions">
         <button
           type="button"
           className="openui-btn openui-btn-primary"
           onClick={() => triggerAction(props.confirmLabel)}
+          disabled={isEffectivelyDisabled}
         >
           {props.confirmLabel}
         </button>
@@ -218,9 +228,15 @@ export const ConfirmButtons = defineComponent({
           type="button"
           className="openui-btn openui-btn-secondary"
           onClick={() => triggerAction(props.cancelLabel)}
+          disabled={isEffectivelyDisabled}
         >
           {props.cancelLabel}
         </button>
+        {superseded && (
+          <span className="openui-superseded-banner" data-testid="openui-superseded-banner">
+            (Superseded by updated request)
+          </span>
+        )}
       </div>
     );
   },
